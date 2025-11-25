@@ -29,7 +29,7 @@
 	}
 
 	function getMarketStatus(): { status: string; color: string } {
-		if (market.resolved) {
+		if (market.resolvedBy) {
 			return { status: 'Resolved', color: '#A0A0A0' };
 		} else if (market.active) {
 			return { status: 'Active', color: '#00D084' };

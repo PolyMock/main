@@ -1,7 +1,8 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
-const POLYMARKET_API_BASE = 'https://gamma-api.polymarket.com';
+const GAMMA_API_BASE = 'https://gamma-api.polymarket.com';
+const CLOB_API_BASE = 'https://clob.polymarket.com';
 
 export const GET: RequestHandler = async ({ params }) => {
 	try {
@@ -11,29 +12,48 @@ export const GET: RequestHandler = async ({ params }) => {
 			return json({ error: 'Market ID is required' }, { status: 400 });
 		}
 
-		// Fetch single market data by ID
-		const response = await fetch(`${POLYMARKET_API_BASE}/markets?id=${id}`, {
+		// Fetch market data from Gamma API
+		const marketResponse = await fetch(`${GAMMA_API_BASE}/markets/${id}`, {
 			headers: {
 				'Accept': 'application/json',
 				'User-Agent': 'PolyPaper/1.0'
 			}
 		});
 
-		if (!response.ok) {
-			throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-		}
+		if (!marketResponse.ok) {
+			// Fallback: try to find market in markets list
+			const marketsListResponse = await fetch(`${GAMMA_API_BASE}/markets?limit=100&active=true`, {
+				headers: {
+					'Accept': 'application/json',
+					'User-Agent': 'PolyPaper/1.0'
+				}
+			});
 
-		const data = await response.json();
-		
-		// Polymarket returns an array, we want the first (and should be only) market
-		const market = Array.isArray(data) ? data[0] : data;
-		
-		if (!market) {
+			if (marketsListResponse.ok) {
+				const marketsData = await marketsListResponse.json();
+				const markets = Array.isArray(marketsData) ? marketsData : [];
+				const market = markets.find((m: any) => m.id === id);
+				
+				if (market) {
+					// Get current prices from CLOB API
+					const processedMarket = await enrichMarketWithPrices(market);
+					return json(processedMarket, {
+						headers: {
+							'Access-Control-Allow-Origin': '*',
+							'Access-Control-Allow-Methods': 'GET',
+							'Access-Control-Allow-Headers': 'Content-Type'
+						}
+					});
+				}
+			}
+			
 			return json({ error: 'Market not found' }, { status: 404 });
 		}
 
-		// Process the market data to extract YES/NO prices
-		const processedMarket = processMarketTokens(market);
+		const market = await marketResponse.json();
+		
+		// Get current prices from CLOB API
+		const processedMarket = await enrichMarketWithPrices(market);
 
 		return json(processedMarket, {
 			headers: {
@@ -58,33 +78,58 @@ export const GET: RequestHandler = async ({ params }) => {
 	}
 };
 
-function processMarketTokens(market: any): any {
-	// Extract Yes/No prices from tokens or outcomePrices
-	if (market.tokens && market.tokens.length >= 2) {
-		// Look for Yes/No tokens
-		const yesToken = market.tokens.find((token: any) => 
-			token.outcome?.toLowerCase().includes('yes') || 
-			token.outcome?.toLowerCase() === 'true' ||
-			token.outcome === '1'
-		);
-		const noToken = market.tokens.find((token: any) => 
-			token.outcome?.toLowerCase().includes('no') || 
-			token.outcome?.toLowerCase() === 'false' ||
-			token.outcome === '0'
-		);
-
-		market.yesPrice = yesToken?.price || 0;
-		market.noPrice = noToken?.price || 0;
+async function enrichMarketWithPrices(market: any): Promise<any> {
+	console.log('Enriching market with prices:', market.id);
+	
+	// Get current prices from CLOB API if we have token IDs
+	if (market.clobTokenIds && market.clobTokenIds.length >= 2) {
+		try {
+			// Fetch current prices for both outcome tokens
+			const yesTokenId = market.clobTokenIds[0];
+			const noTokenId = market.clobTokenIds[1];
+			
+			const [yesPrice, noPrice] = await Promise.allSettled([
+				fetchTokenPrice(yesTokenId),
+				fetchTokenPrice(noTokenId)
+			]);
+			
+			market.yesPrice = yesPrice.status === 'fulfilled' ? yesPrice.value : 0.5;
+			market.noPrice = noPrice.status === 'fulfilled' ? noPrice.value : 0.5;
+			
+			console.log('Fetched prices from CLOB:', { yes: market.yesPrice, no: market.noPrice });
+		} catch (error) {
+			console.error('Error fetching prices from CLOB:', error);
+		}
 	} else if (market.outcomePrices && market.outcomePrices.length >= 2) {
-		// Parse from outcomePrices array
-		market.yesPrice = parseFloat(market.outcomePrices[0]) || 0;
-		market.noPrice = parseFloat(market.outcomePrices[1]) || 0;
+		console.log('Using outcomePrices:', market.outcomePrices);
+		market.yesPrice = parseFloat(market.outcomePrices[0]) || 0.5;
+		market.noPrice = parseFloat(market.outcomePrices[1]) || 0.5;
 	} else {
-		// Fallback - assume binary market with complementary prices
-		const price = market.last_trade_price || 0.5;
-		market.yesPrice = price;
-		market.noPrice = 1 - price;
+		console.log('No prices found');
 	}
 
+	console.log('Final enriched prices:', { yes: market.yesPrice, no: market.noPrice });
 	return market;
+}
+
+async function fetchTokenPrice(tokenId: string): Promise<number> {
+	try {
+		// Fetch current midpoint price from CLOB API
+		const response = await fetch(`${CLOB_API_BASE}/midpoint?token_id=${tokenId}`, {
+			headers: {
+				'Accept': 'application/json',
+				'User-Agent': 'PolyPaper/1.0'
+			}
+		});
+		
+		if (!response.ok) {
+			throw new Error(`HTTP ${response.status}`);
+		}
+		
+		const data = await response.json();
+		return parseFloat(data.mid) || 0.5;
+	} catch (error) {
+		console.error('Error fetching token price:', tokenId, error);
+		return 0.5; // Default fallback
+	}
 }

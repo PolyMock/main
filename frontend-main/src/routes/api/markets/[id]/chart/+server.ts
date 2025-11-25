@@ -1,24 +1,31 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
-const POLYMARKET_API_BASE = 'https://gamma-api.polymarket.com';
-const DATA_API_BASE = 'https://data-api.polymarket.com';
+const GAMMA_API_BASE = 'https://gamma-api.polymarket.com';
+const CLOB_API_BASE = 'https://clob.polymarket.com';
 
 export const GET: RequestHandler = async ({ params, url }) => {
 	try {
 		const { id } = params;
-		const interval = url.searchParams.get('interval') || '1h';
+		const interval = url.searchParams.get('interval') || '1d';
 		
 		if (!id) {
 			return json({ error: 'Market ID is required' }, { status: 400 });
 		}
 
-		// First, try to get historical data from gamma-api
-		let chartData = await fetchHistoricalData(id, interval);
+		// First, get the market to find token IDs
+		const market = await getMarketById(id);
+		if (!market) {
+			return json({ error: 'Market not found' }, { status: 404 });
+		}
+
+		// Try to get historical data from various sources
+		let chartData = await fetchHistoricalPriceData(market, interval);
 		
-		// If that fails or returns empty data, try to get trade data and aggregate
+		// If no real data available, return empty array
 		if (!chartData || chartData.length === 0) {
-			chartData = await fetchAndAggregateTradeData(id, interval);
+			console.log('No historical price data available for market:', id);
+			chartData = [];
 		}
 
 		return json({ history: chartData }, {
@@ -44,51 +51,169 @@ export const GET: RequestHandler = async ({ params, url }) => {
 	}
 };
 
-async function fetchHistoricalData(marketId: string, interval: string): Promise<any[]> {
+async function getMarketById(marketId: string): Promise<any | null> {
 	try {
-		const response = await fetch(`${POLYMARKET_API_BASE}/history?marketId=${marketId}&interval=${interval}`, {
+		// Try to get specific market
+		const response = await fetch(`${GAMMA_API_BASE}/markets/${marketId}`, {
 			headers: {
 				'Accept': 'application/json',
 				'User-Agent': 'PolyPaper/1.0'
 			}
 		});
 
-		if (!response.ok) {
-			throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+		if (response.ok) {
+			return await response.json();
 		}
 
-		const data = await response.json();
-		return data.history || [];
+		// Fallback: search in markets list
+		const listResponse = await fetch(`${GAMMA_API_BASE}/markets?limit=100&active=true`, {
+			headers: {
+				'Accept': 'application/json',
+				'User-Agent': 'PolyPaper/1.0'
+			}
+		});
+
+		if (listResponse.ok) {
+			const markets = await listResponse.json();
+			const marketArray = Array.isArray(markets) ? markets : [];
+			return marketArray.find((m: any) => m.id === marketId) || null;
+		}
+
+		return null;
 	} catch (error) {
-		console.error('Failed to fetch historical data:', error);
+		console.error('Error fetching market:', error);
+		return null;
+	}
+}
+
+async function fetchHistoricalPriceData(market: any, interval: string): Promise<any[]> {
+	try {
+		console.log('Fetching historical price data for market:', market.id);
+		
+		// Try to fetch historical price data from Polymarket APIs
+		const endpoints = [
+			// Try CLOB API for price data
+			`${CLOB_API_BASE}/prices-history?market=${market.id}&interval=${interval}`,
+			// Try Gamma API for market prices
+			`${GAMMA_API_BASE}/markets/${market.id}/prices?interval=${interval}`,
+			// Try direct market endpoint
+			`${GAMMA_API_BASE}/markets/${market.id}`
+		];
+		
+		for (const endpoint of endpoints) {
+			try {
+				console.log('Trying endpoint:', endpoint);
+				const response = await fetch(endpoint, {
+					headers: {
+						'Accept': 'application/json',
+						'User-Agent': 'PolyPaper/1.0'
+					}
+				});
+
+				if (response.ok) {
+					const data = await response.json();
+					console.log('Response data keys:', Object.keys(data));
+					
+					// Transform the data based on response structure
+					if (Array.isArray(data)) {
+						console.log('Got array data with', data.length, 'items');
+						return transformPriceData(data, interval);
+					} else if (data.prices && Array.isArray(data.prices)) {
+						console.log('Got prices array with', data.prices.length, 'items');
+						return transformPriceData(data.prices, interval);
+					} else if (data.history && Array.isArray(data.history)) {
+						console.log('Got history array with', data.history.length, 'items');
+						return transformPriceData(data.history, interval);
+					} else if (data.outcomePrices && Array.isArray(data.outcomePrices)) {
+						// Create a single data point from current prices
+						console.log('Using current outcome prices as single data point');
+						const timestamp = Math.floor(Date.now() / 1000);
+						const yesPrice = parseFloat(data.outcomePrices[0]) || 0.5;
+						return [{
+							timestamp: timestamp,
+							open: yesPrice,
+							high: yesPrice,
+							low: yesPrice,
+							close: yesPrice,
+							volume: data.volume || 0,
+							trades: 1,
+							outcome: 'Yes'
+						}];
+					}
+					console.log('No usable price data found in response');
+				} else {
+					console.log('Failed request:', response.status, response.statusText);
+				}
+			} catch (err: any) {
+				console.log('Failed endpoint:', endpoint, err.message || err);
+				continue;
+			}
+		}
+		
+		console.log('No historical price data found');
+		return [];
+	} catch (error) {
+		console.error('Error fetching historical price data:', error);
 		return [];
 	}
 }
 
+function transformPriceData(rawData: any[], interval: string): any[] {
+	if (!Array.isArray(rawData) || rawData.length === 0) return [];
+	
+	return rawData.map((item: any) => ({
+		timestamp: item.timestamp || item.time || Math.floor(Date.now() / 1000),
+		open: parseFloat(item.open || item.price || item.mid || 0.5),
+		high: parseFloat(item.high || item.price || item.mid || 0.5),
+		low: parseFloat(item.low || item.price || item.mid || 0.5),
+		close: parseFloat(item.close || item.price || item.mid || 0.5),
+		volume: parseFloat(item.volume || 0),
+		trades: item.trades || 1,
+		outcome: 'Yes'
+	})).slice(-50); // Limit to last 50 points
+}
+
 async function fetchAndAggregateTradeData(marketId: string, interval: string): Promise<any[]> {
 	try {
-		// Fetch recent trades from data-api
-		const response = await fetch(`${DATA_API_BASE}/trades?market_id=${marketId}&limit=1000`, {
-			headers: {
-				'Accept': 'application/json',
-				'User-Agent': 'PolyPaper/1.0'
+		console.log('Fetching trade data for aggregation:', marketId);
+		
+		// Try multiple endpoints for trade data
+		const endpoints = [
+			`${CLOB_API_BASE}/trades?market=${marketId}&limit=1000`,
+			`${GAMMA_API_BASE}/markets/${marketId}/trades?limit=1000`
+		];
+		
+		for (const endpoint of endpoints) {
+			try {
+				const response = await fetch(endpoint, {
+					headers: {
+						'Accept': 'application/json',
+						'User-Agent': 'PolyPaper/1.0'
+					}
+				});
+
+				if (response.ok) {
+					const data = await response.json();
+					const trades = data.trades || data || [];
+					
+					if (trades.length > 0) {
+						console.log('Got trade data, aggregating:', trades.length, 'trades');
+						return aggregateTradesToCandles(trades, interval);
+					}
+				}
+			} catch (err: any) {
+				console.log('Failed trade endpoint:', endpoint, err.message || err);
+				continue;
 			}
-		});
-
-		if (!response.ok) {
-			throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 		}
-
-		const data = await response.json();
-		const trades = data.trades || [];
-
-		// Aggregate trades into candles
-		return aggregateTradesToCandles(trades, interval);
+		
+		console.log('No trade data found');
+		return [];
 	} catch (error) {
 		console.error('Failed to fetch trade data:', error);
 		
-		// Return mock data as fallback
-		return generateMockChartData(interval);
+		// Return empty array as fallback
+		return [];
 	}
 }
 
@@ -143,36 +268,3 @@ function getIntervalMinutes(interval: string): number {
 	}
 }
 
-function generateMockChartData(interval: string): any[] {
-	const now = Date.now() / 1000;
-	const intervalMinutes = getIntervalMinutes(interval);
-	const intervalSeconds = intervalMinutes * 60;
-	
-	const data = [];
-	let price = 0.5; // Start at 50%
-	
-	// Generate last 50 data points
-	for (let i = 49; i >= 0; i--) {
-		const timestamp = now - (i * intervalSeconds);
-		
-		// Add some realistic price movement
-		const change = (Math.random() - 0.5) * 0.05; // ±2.5% change
-		price = Math.max(0.01, Math.min(0.99, price + change));
-		
-		const high = price + Math.random() * 0.02;
-		const low = price - Math.random() * 0.02;
-		
-		data.push({
-			timestamp: Math.floor(timestamp),
-			open: price - (Math.random() - 0.5) * 0.01,
-			high: Math.max(price, high),
-			low: Math.min(price, low),
-			close: price,
-			volume: Math.random() * 100000 + 10000,
-			trades: Math.floor(Math.random() * 50) + 10,
-			outcome: 'Yes'
-		});
-	}
-	
-	return data;
-}
