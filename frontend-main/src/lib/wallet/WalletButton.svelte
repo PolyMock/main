@@ -1,189 +1,291 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { walletStore, walletManager } from './stores';
-	import WalletModal from './WalletModal.svelte';
+	import { walletStore, setWalletAdapter, setWalletConnecting, setWalletDisconnecting, updateWalletConnection } from './stores';
+	import { 
+		PhantomWalletAdapter, 
+		SolflareWalletAdapter
+	} from '@solana/wallet-adapter-wallets';
+	import type { Adapter } from '@solana/wallet-adapter-base';
 
-	let showModal = false;
-	let wallets: any[] = [];
+	let walletState = $walletStore;
+	let showWalletModal = false;
+	let availableWallets: Adapter[] = [];
 
-	// Subscribe to wallet state
-	let walletState: any = {};
-	walletStore.subscribe(state => {
-		walletState = state;
+	walletStore.subscribe(value => {
+		walletState = value;
 	});
 
 	onMount(() => {
-		wallets = walletManager.getWallets();
-		// Auto-connect if previously connected
-		walletManager.autoConnect();
+		// Initialize available wallets
+		try {
+			availableWallets = [
+				new PhantomWalletAdapter(),
+				new SolflareWalletAdapter()
+			];
+		} catch (error) {
+			console.error('Error initializing wallets:', error);
+			availableWallets = [];
+		}
 	});
 
-	function openModal() {
-		showModal = true;
-	}
-
-	function closeModal() {
-		showModal = false;
-	}
-
-	async function handleWalletSelect(event: CustomEvent) {
-		const walletName = event.detail;
+	async function selectWallet(wallet: Adapter) {
 		try {
-			await walletManager.connect(walletName);
-			closeModal();
-		} catch (error: any) {
-			if (error?.message?.includes('not installed')) {
-				alert(error.message);
-			} else if (error?.message?.includes('User rejected') || error?.message?.includes('not been authorized')) {
-				alert('Connection cancelled. Please approve in your wallet.');
-			} else if (error?.message?.includes('Unexpected error')) {
-				alert('Connection failed. Make sure Phantom is unlocked and try again.');
-			} else {
-				alert(`Failed to connect: ${error?.message || 'Unknown error'}`);
-			}
-		}
-	}
+			setWalletConnecting(true);
+			setWalletAdapter(wallet);
+			showWalletModal = false;
 
-	async function handleDisconnect() {
-		try {
-			await walletManager.disconnect();
+			// Set up event listeners
+			wallet.on('connect', () => {
+				updateWalletConnection();
+			});
+
+			wallet.on('disconnect', () => {
+				updateWalletConnection();
+			});
+
+			wallet.on('error', (error) => {
+				console.error('Wallet error:', error);
+				setWalletConnecting(false);
+				setWalletDisconnecting(false);
+			});
+
+			// Connect to the wallet
+			await wallet.connect();
+			updateWalletConnection();
 		} catch (error) {
+			console.error('Failed to connect wallet:', error);
+			setWalletConnecting(false);
 		}
 	}
 
-	function formatAddress(address: string) {
-		if (!address) return '';
+	async function disconnect() {
+		if (!walletState.adapter) return;
+
+		try {
+			setWalletDisconnecting(true);
+			await walletState.adapter.disconnect();
+			setWalletAdapter(null);
+			updateWalletConnection();
+		} catch (error) {
+			console.error('Failed to disconnect wallet:', error);
+		} finally {
+			setWalletDisconnecting(false);
+		}
+	}
+
+	function openWalletModal() {
+		showWalletModal = true;
+	}
+
+	function closeWalletModal() {
+		showWalletModal = false;
+	}
+
+	function formatAddress(address: string): string {
 		return `${address.slice(0, 4)}...${address.slice(-4)}`;
 	}
 </script>
 
-{#if walletState.connected && walletState.publicKey}
-	<div class="wallet-connected">
+<div class="wallet-section">
+	{#if walletState.connected && walletState.publicKey}
 		<div class="wallet-info">
-			<div class="wallet-address">
-				{formatAddress(walletState.publicKey.toBase58())}
-			</div>
-			<div class="wallet-name">{walletState.adapter?.name || 'Connected'}</div>
+			<span class="wallet-address">{formatAddress(walletState.publicKey.toString())}</span>
+			<button class="disconnect-btn" on:click={disconnect} disabled={walletState.disconnecting}>
+				{walletState.disconnecting ? 'DISCONNECTING...' : 'DISCONNECT'}
+			</button>
 		</div>
-		<button class="disconnect-button" on:click={handleDisconnect}>
-			Disconnect
+	{:else}
+		<button class="connect-btn" on:click={openWalletModal} disabled={walletState.connecting}>
+			{walletState.connecting ? 'CONNECTING...' : 'CONNECT WALLET'}
 		</button>
+	{/if}
+</div>
+
+{#if showWalletModal}
+	<div class="wallet-modal-overlay" on:click={closeWalletModal} role="button" tabindex="0" on:keydown={(e) => e.key === 'Escape' && closeWalletModal()}>
+		<div class="wallet-modal" on:click|stopPropagation role="dialog" tabindex="-1">
+			<div class="wallet-modal-header">
+				<h3>Connect Wallet</h3>
+				<button class="close-btn" on:click={closeWalletModal}>✕</button>
+			</div>
+			<div class="wallet-list">
+				{#each availableWallets as wallet}
+					<button class="wallet-option" on:click={() => selectWallet(wallet)}>
+						<span class="wallet-name">{wallet.name}</span>
+						<span class="wallet-status">
+							{#if wallet.readyState === 'Installed'}
+								Ready
+							{:else if wallet.readyState === 'NotDetected'}
+								Not Detected
+							{:else}
+								{wallet.readyState}
+							{/if}
+						</span>
+					</button>
+				{/each}
+			</div>
+		</div>
 	</div>
-{:else}
-	<button 
-		class="connect-button" 
-		class:connecting={walletState.connecting}
-		on:click={openModal}
-		disabled={walletState.connecting}
-	>
-		{#if walletState.connecting}
-			<div class="spinner"></div>
-			Connecting...
-		{:else}
-			Connect Wallet
-		{/if}
-	</button>
 {/if}
 
-<WalletModal 
-	bind:show={showModal}
-	{wallets}
-	connecting={walletState.connecting}
-	on:select={handleWalletSelect}
-	on:close={closeModal}
-/>
-
 <style>
-	.connect-button {
-		background: #ff9500;
-		color: #000;
-		border: none;
-		padding: 8px 16px;
-		font-family: 'Courier New', monospace;
-		font-size: 12px;
-		font-weight: bold;
-		cursor: pointer;
-		border-radius: 4px;
-		transition: all 0.2s ease;
+	.wallet-section {
 		display: flex;
 		align-items: center;
-		gap: 8px;
-		min-width: 120px;
-		justify-content: center;
+		gap: 10px;
 	}
 
-	.connect-button:hover:not(:disabled) {
-		background: #ffb733;
-		transform: translateY(-1px);
+	.connect-btn {
+		background: #1E2139;
+		color: #E8E8E8;
+		border: 1px solid #2A2F45;
+		padding: 8px 16px;
+		font-family: Inter, sans-serif;
+		font-size: 12px;
+		font-weight: 600;
+		cursor: pointer;
+		border-radius: 6px;
+		transition: all 200ms ease-out;
 	}
 
-	.connect-button:disabled {
-		opacity: 0.7;
+	.connect-btn:hover:not(:disabled) {
+		background: rgba(255, 255, 255, 0.05);
+		border-color: #00D084;
+		transform: scale(1.02);
+	}
+
+	.connect-btn:disabled {
+		opacity: 0.6;
 		cursor: not-allowed;
 		transform: none;
 	}
 
-	.connect-button.connecting {
-		background: #ff9500;
-	}
-
-	.wallet-connected {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		background: #0a0a0a;
-		border: 1px solid #333;
-		border-radius: 4px;
-		padding: 8px 12px;
-	}
-
 	.wallet-info {
 		display: flex;
-		flex-direction: column;
-		gap: 2px;
+		align-items: center;
+		gap: 10px;
 	}
 
 	.wallet-address {
-		color: #ff9500;
-		font-family: 'Courier New', monospace;
+		color: #00D084;
+		font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
 		font-size: 12px;
+		padding: 6px 12px;
+		background: #1E2139;
+		border: 1px solid #2A2F45;
+		border-radius: 6px;
+	}
+
+	.disconnect-btn {
+		background: #1E2139;
+		color: #A0A0A0;
+		border: 1px solid #2A2F45;
+		padding: 6px 12px;
+		font-family: Inter, sans-serif;
+		font-size: 11px;
+		cursor: pointer;
+		border-radius: 6px;
+		transition: all 200ms ease-out;
+	}
+
+	.disconnect-btn:hover:not(:disabled) {
+		background: #FF4757;
+		color: #ffffff;
+		border-color: #FF4757;
+	}
+
+	.disconnect-btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.wallet-modal-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		width: 100%;
+		height: 100%;
+		background: rgba(0, 0, 0, 0.8);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 1000;
+	}
+
+	.wallet-modal {
+		background: #1a1a1a;
+		border: 2px solid #4785ff;
+		padding: 20px;
+		min-width: 300px;
+		max-width: 400px;
+	}
+
+	.wallet-modal-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 20px;
+		border-bottom: 1px solid #333;
+		padding-bottom: 10px;
+	}
+
+	.wallet-modal-header h3 {
+		color: #4785ff;
+		font-size: 16px;
 		font-weight: bold;
+		margin: 0;
+		font-family: 'Courier New', monospace;
+	}
+
+	.close-btn {
+		background: none;
+		border: none;
+		color: #666;
+		font-size: 20px;
+		cursor: pointer;
+		padding: 0;
+		width: 24px;
+		height: 24px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.close-btn:hover {
+		color: #fff;
+	}
+
+	.wallet-list {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+
+	.wallet-option {
+		background: #0a0a0a;
+		border: 1px solid #333;
+		color: #fff;
+		padding: 15px;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		transition: all 0.2s ease;
+		font-family: 'Courier New', monospace;
+	}
+
+	.wallet-option:hover {
+		border-color: #4785ff;
+		background: rgba(71, 133, 255, 0.1);
 	}
 
 	.wallet-name {
+		font-size: 14px;
+		font-weight: bold;
+	}
+
+	.wallet-status {
+		font-size: 10px;
 		color: #666;
-		font-family: 'Courier New', monospace;
-		font-size: 10px;
-	}
-
-	.disconnect-button {
-		background: #333;
-		color: #ff9500;
-		border: 1px solid #555;
-		padding: 4px 8px;
-		font-family: 'Courier New', monospace;
-		font-size: 10px;
-		cursor: pointer;
-		border-radius: 3px;
-		transition: all 0.2s ease;
-	}
-
-	.disconnect-button:hover {
-		background: #555;
-		border-color: #ff9500;
-	}
-
-	.spinner {
-		width: 14px;
-		height: 14px;
-		border: 2px solid #000;
-		border-top: 2px solid transparent;
-		border-radius: 50%;
-		animation: spin 1s linear infinite;
-	}
-
-	@keyframes spin {
-		0% { transform: rotate(0deg); }
-		100% { transform: rotate(360deg); }
 	}
 </style>
