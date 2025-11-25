@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { HermesClient } from '@pythnetwork/hermes-client';
 	import { polymarketClient, type PolyMarket } from '$lib/polymarket';
 	import WalletButton from '$lib/wallet/WalletButton.svelte';
@@ -146,6 +147,8 @@
 
 	function selectMarket(market: PolyMarket) {
 		selectedMarket = market;
+		// Navigate to market detail page
+		goto(`/market/${market.id}`);
 	}
 
 	onMount(() => {
