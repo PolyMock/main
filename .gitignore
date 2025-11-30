@@ -1,0 +1,67 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build artifacts
+target/
+build/
+dist/
+*.so
+*.wasm
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+tmp/
+temp/
+
+# Anchor
+.anchor/
+test-ledger/
+
+# Keypairs (keep production keypairs private)
+*-keypair.json
+*.key
+
+# Rust
+Cargo.lock
+target/
+
+# Solana
+test-ledger/
+
+# TypeScript
+*.tsbuildinfo
+
+# Package managers
+package-lock.json
+yarn.lock
+
+# Contract build artifacts (entire target directory)
+contracts/target/
+contracts/node_modules/
+contracts/package-lock.json
+
+# But keep essential deployment keypairs if needed
+# !contracts/target/deploy/*-keypair.json

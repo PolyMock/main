@@ -112,5 +112,3 @@ This is a demo/paper trading platform. No real trades are executed, and all trad
 To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
 
 ## License
-
-This project is for demonstration purposes only.

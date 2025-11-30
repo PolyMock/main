@@ -1,0 +1,26 @@
+[package]
+name = "polymarket-paper"
+version = "0.1.0"
+description = "A simplified paper trading program for Polymarket predictions on MagicBlock"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "polymarket_paper"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+anchor-lang = "0.30.0"
+bolt-lang = "0.1.12"
+
+[dev-dependencies]
+solana-sdk = "1.18.0"
+solana-program-test = "1.18.0"
+tokio = "1.35.0"
