@@ -16,7 +16,7 @@ export const GET: RequestHandler = async ({ params }) => {
 		const marketResponse = await fetch(`${GAMMA_API_BASE}/markets/${id}`, {
 			headers: {
 				'Accept': 'application/json',
-				'User-Agent': 'PolyPaper/1.0'
+				'User-Agent': 'PolyMock/1.0'
 			}
 		});
 
@@ -25,7 +25,7 @@ export const GET: RequestHandler = async ({ params }) => {
 			const marketsListResponse = await fetch(`${GAMMA_API_BASE}/markets?limit=100&active=true`, {
 				headers: {
 					'Accept': 'application/json',
-					'User-Agent': 'PolyPaper/1.0'
+					'User-Agent': 'PolyMock/1.0'
 				}
 			});
 
@@ -118,7 +118,7 @@ async function fetchTokenPrice(tokenId: string): Promise<number> {
 		const response = await fetch(`${CLOB_API_BASE}/midpoint?token_id=${tokenId}`, {
 			headers: {
 				'Accept': 'application/json',
-				'User-Agent': 'PolyPaper/1.0'
+				'User-Agent': 'PolyMock/1.0'
 			}
 		});
 		

@@ -94,7 +94,12 @@ export class PolymarketClient {
       if (response.data && Array.isArray(response.data)) {
         const markets = response.data.slice(0, limit);
         // Process each market to extract Yes/No prices
-        return markets.map(market => this.processMarketTokens(market));
+        const processedMarkets = markets.map(market => this.processMarketTokens(market));
+
+        // Fetch real-time prices from CLOB API for each market
+        await Promise.all(processedMarkets.map(market => this.enrichMarketWithCLOBPrices(market)));
+
+        return processedMarkets;
       }
       return [];
     } catch (error) {
@@ -172,6 +177,81 @@ export class PolymarketClient {
       endDate: new Date(market.end_date_iso),
       category: market.tags?.[0] || 'General'
     };
+  }
+
+  /**
+   * Fetches real-time prices from CLOB API using token IDs
+   * Updates the market object with yesPrice and noPrice
+   */
+  private async enrichMarketWithCLOBPrices(market: PolyMarket): Promise<void> {
+    // Check if market has clobTokenIds
+    if (!market.clobTokenIds || market.clobTokenIds.length < 2) {
+      console.log(`Market ${market.id} has no clobTokenIds, skipping price fetch`);
+      return;
+    }
+
+    try {
+      // Parse clobTokenIds if it's a string (JSON array)
+      const tokenIds = typeof market.clobTokenIds === 'string'
+        ? JSON.parse(market.clobTokenIds)
+        : market.clobTokenIds;
+
+      if (!Array.isArray(tokenIds) || tokenIds.length < 2) {
+        return;
+      }
+
+      const yesTokenId = tokenIds[0];
+      const noTokenId = tokenIds[1];
+
+      // Fetch prices for both outcomes in parallel
+      const [yesPriceResult, noPriceResult] = await Promise.allSettled([
+        this.fetchCLOBPrice(yesTokenId),
+        this.fetchCLOBPrice(noTokenId)
+      ]);
+
+      // Update market prices if successful
+      if (yesPriceResult.status === 'fulfilled' && yesPriceResult.value !== null) {
+        market.yesPrice = yesPriceResult.value;
+      }
+
+      if (noPriceResult.status === 'fulfilled' && noPriceResult.value !== null) {
+        market.noPrice = noPriceResult.value;
+      }
+
+      console.log(`Market ${market.id}: YES=${market.yesPrice}, NO=${market.noPrice}`);
+    } catch (error) {
+      console.error(`Error enriching market ${market.id} with CLOB prices:`, error);
+    }
+  }
+
+  /**
+   * Fetches price from CLOB API for a specific token
+   * @param tokenId - The token ID to fetch price for
+   * @returns The price as a number, or null if unavailable
+   */
+  private async fetchCLOBPrice(tokenId: string): Promise<number | null> {
+    try {
+      const response = await axios.get('https://clob.polymarket.com/price', {
+        params: {
+          token_id: tokenId,
+          side: 'buy'
+        },
+        timeout: 5000 // 5 second timeout
+      });
+
+      if (response.data && response.data.price) {
+        return parseFloat(response.data.price);
+      }
+
+      return null;
+    } catch (error: any) {
+      // Don't log errors for markets without orderbooks (common for inactive markets)
+      if (error.response?.data?.error?.includes('No orderbook')) {
+        return null;
+      }
+      console.error(`Error fetching CLOB price for token ${tokenId}:`, error.message);
+      return null;
+    }
   }
 }
 

@@ -1,10 +1,10 @@
-# PolyPaper
+# PolyMock
 
 A paper trading platform for Polymarket predictions built on Solana blockchain.
 
 ## Overview
 
-PolyPaper allows users to practice trading on Polymarket predictions with virtual USDC, providing a risk-free environment to test strategies and learn about prediction markets.
+PolyMock allows users to practice trading on Polymarket predictions with virtual USDC, providing a risk-free environment to test strategies and learn about prediction markets.
 
 ### Features
 
@@ -17,7 +17,7 @@ PolyPaper allows users to practice trading on Polymarket predictions with virtua
 ## Project Structure
 
 ```
-PolyPaper/
+PolyMock/
 ├── frontend/           # Svelte web application
 │   ├── src/
 │   │   ├── lib/       # Components and utilities
@@ -42,7 +42,7 @@ PolyPaper/
 1. **Clone the repository**
    ```bash
    git clone <repository-url>
-   cd PolyPaper
+   cd PolyMock
    ```
 
 2. **Install frontend dependencies**

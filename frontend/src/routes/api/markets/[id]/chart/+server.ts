@@ -57,7 +57,7 @@ async function getMarketById(marketId: string): Promise<any | null> {
 		const response = await fetch(`${GAMMA_API_BASE}/markets/${marketId}`, {
 			headers: {
 				'Accept': 'application/json',
-				'User-Agent': 'PolyPaper/1.0'
+				'User-Agent': 'PolyMock/1.0'
 			}
 		});
 
@@ -69,7 +69,7 @@ async function getMarketById(marketId: string): Promise<any | null> {
 		const listResponse = await fetch(`${GAMMA_API_BASE}/markets?limit=100&active=true`, {
 			headers: {
 				'Accept': 'application/json',
-				'User-Agent': 'PolyPaper/1.0'
+				'User-Agent': 'PolyMock/1.0'
 			}
 		});
 
@@ -106,7 +106,7 @@ async function fetchHistoricalPriceData(market: any, interval: string): Promise<
 				const response = await fetch(endpoint, {
 					headers: {
 						'Accept': 'application/json',
-						'User-Agent': 'PolyPaper/1.0'
+						'User-Agent': 'PolyMock/1.0'
 					}
 				});
 
@@ -188,7 +188,7 @@ async function fetchAndAggregateTradeData(marketId: string, interval: string): P
 				const response = await fetch(endpoint, {
 					headers: {
 						'Accept': 'application/json',
-						'User-Agent': 'PolyPaper/1.0'
+						'User-Agent': 'PolyMock/1.0'
 					}
 				});
 

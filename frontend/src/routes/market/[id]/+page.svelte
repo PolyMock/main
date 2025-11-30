@@ -248,7 +248,7 @@
 </script>
 
 <svelte:head>
-	<title>{market?.question || 'Market Details'} - PolyPaper</title>
+	<title>{market?.question || 'Market Details'} - PolyMock</title>
 </svelte:head>
 
 <div class="market-detail">

@@ -306,7 +306,7 @@ pub struct InitializeAccount<'info> {
     #[account(mut)]
     pub user: Signer<'info>,
 
-    /// CHECK: Treasury wallet that receives fees
+    /// CHECK: Treasury wallet that receives fees 
     #[account(mut, constraint = treasury.key() == config.treasury)]
     pub treasury: SystemAccount<'info>,
 

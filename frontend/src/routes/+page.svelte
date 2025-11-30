@@ -169,9 +169,9 @@
 	});
 </script>
 
-<div class="polypaper">
+<div class="polyMock">
 	<div class="command-bar">
-		<a href="/" class="logo">POLYPAPER</a>
+		<a href="/" class="logo">POLYMOCK</a>
 		<div class="nav-links">
 			<a href="/" class="nav-link active">TERMINAL</a>
 		</div>
@@ -326,7 +326,7 @@
 		overflow: auto;
 	}
 
-	.polypaper {
+	.polyMock {
 		min-height: 100vh;
 		background: #0A0E27;
 		display: flex;

@@ -91,7 +91,7 @@
 	}
 
 	onMount(async () => {
-		console.log('[POLYPAPER] Initializing competition page...');
+		console.log('[POLYMOCK] Initializing competition page...');
 
 		updateTime();
 		const timeInterval = setInterval(updateTime, 1000);
@@ -113,9 +113,9 @@
 	});
 </script>
 
-<div class="polypaper">
+<div class="polyMock">
 	<div class="command-bar">
-		<a href="/" class="logo">POLYPAPER</a>
+		<a href="/" class="logo">POLYMOCK</a>
 		<div class="nav-links">
 			<a href="/" class="nav-link">TERMINAL</a>
 			<a href="/competition" class="nav-link active">COMPETITION</a>
@@ -130,7 +130,7 @@
 
 	<div class="main-grid">
 		<div class="ticker-panel">
-			<div class="panel-header">POLYPAPER COMPETITION • DEMO MODE</div>
+			<div class="panel-header">POLYMOCK COMPETITION • DEMO MODE</div>
 			<div class="ticker-stats">
 				<div class="ticker-item">
 					<span class="ticker-label">MODE</span>
@@ -250,7 +250,7 @@
 </div>
 
 <style>
-	.polypaper {
+	.polyMock {
 		min-height: 100vh;
 		background: #000;
 		color: #fff;

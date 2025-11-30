@@ -14,7 +14,7 @@ export const GET: RequestHandler = async ({ url }) => {
 		const response = await fetch(`${POLYMARKET_API_BASE}/markets?limit=${limit}&active=${active}&closed=${closed}&order=volume24hr&ascending=false`, {
 			headers: {
 				'Accept': 'application/json',
-				'User-Agent': 'PolyPaper/1.0'
+				'User-Agent': 'PolyMock/1.0'
 			}
 		});
 
