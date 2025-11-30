@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { walletStore, setWalletAdapter, setWalletConnecting, setWalletDisconnecting, updateWalletConnection } from './stores';
-	import { 
-		PhantomWalletAdapter, 
+	import { walletStore, setWalletAdapter, setWalletConnecting, setWalletDisconnecting, updateWalletConnection, initializeUserAccountIfNeeded } from './stores';
+	import {
+		PhantomWalletAdapter,
 		SolflareWalletAdapter
 	} from '@solana/wallet-adapter-wallets';
 	import type { Adapter } from '@solana/wallet-adapter-base';
@@ -35,8 +35,10 @@
 			showWalletModal = false;
 
 			// Set up event listeners
-			wallet.on('connect', () => {
+			wallet.on('connect', async () => {
 				updateWalletConnection();
+				// Initialize user account on blockchain
+				await initializeUserAccountIfNeeded(wallet);
 			});
 
 			wallet.on('disconnect', () => {

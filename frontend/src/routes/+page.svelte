@@ -29,22 +29,38 @@
 	let previousPrices: Record<string, number> = {};
 	let command = '';
 	let selectedTab = 'MARKETS';
-	let currentTime = new Date().toLocaleTimeString();
 	let newsLoading = true;
 	let showAllNews = false;
 	let pythUpdateInterval: any = null;
 	let pythLastUpdate = 0;
 	let polymarketsLoading = true;
 	let selectedMarket: PolyMarket | null = null;
-	let connectedWallet: any = null;
+	let walletState = $walletStore;
 
-	// Subscribe to wallet changes
-	walletStore.subscribe(wallet => {
-		connectedWallet = wallet;
+	// Subscribe to wallet state
+	walletStore.subscribe(value => {
+		walletState = value;
 	});
 
-	function updateTime() {
-		currentTime = new Date().toLocaleTimeString();
+	let initializing = false;
+
+	async function handleInitialize() {
+		if (!walletState.adapter || !walletState.connected) {
+			alert('Please connect your wallet first');
+			return;
+		}
+
+		initializing = true;
+		try {
+			const { initializeUserAccountIfNeeded } = await import('$lib/wallet/stores');
+			await initializeUserAccountIfNeeded(walletState.adapter);
+			alert('Account initialized successfully with 10,000 USDC!');
+		} catch (error: any) {
+			console.error('Failed to initialize:', error);
+			alert(`Failed to initialize account: ${error.message || 'Unknown error'}`);
+		} finally {
+			initializing = false;
+		}
 	}
 
 	async function fetchNews() {
@@ -72,7 +88,7 @@
 	async function fetchPolymarkets() {
 		polymarketsLoading = true;
 		try {
-			polymarkets = await polymarketClient.fetchMarkets(10);
+			polymarkets = await polymarketClient.fetchMarkets(20);
 			if (polymarkets.length > 0) {
 				selectedMarket = polymarkets[0];
 			}
@@ -155,11 +171,9 @@
 		fetchNews();
 		fetchPolymarkets();
 		startPythPriceUpdates();
-		updateTime();
 
 		setInterval(fetchNews, 300000); // 5 minutes
-		setInterval(fetchPolymarkets, 10000); // 10 seconds  
-		setInterval(updateTime, 1000);
+		setInterval(fetchPolymarkets, 10000); // 10 seconds
 
 		return () => {
 			if (pythUpdateInterval) {
@@ -183,6 +197,26 @@
 			class="command-input"
 		/>
 		<button class="go-button" on:click={executeCommand}>GO</button>
+
+		{#if walletState.connected}
+			{#if !walletState.userAccountInitialized && !walletState.loading}
+				<button class="initialize-btn" on:click={handleInitialize} disabled={initializing}>
+					{initializing ? 'Initializing...' : 'Initialize Account (0.1 SOL)'}
+				</button>
+			{/if}
+
+			{#if walletState.userAccountInitialized}
+				<div class="balance-display">
+					<span class="balance-label">Balance:</span>
+					<span class="balance-amount">${walletState.usdcBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+				</div>
+			{/if}
+
+			{#if walletState.loading}
+				<div class="loading-badge">Loading...</div>
+			{/if}
+		{/if}
+
 		<WalletButton />
 		<div class="command-bar-right">
 			<div class="pyth-status">
@@ -192,7 +226,6 @@
 					<span class="status-age">{Math.floor((Date.now() - pythLastUpdate) / 1000)}s ago</span>
 				{/if}
 			</div>
-			<div class="clock">{currentTime}</div>
 		</div>
 	</div>
 
@@ -209,6 +242,7 @@
 	<div class="tabs">
 		<button class="tab" class:active={selectedTab === 'MARKETS'} on:click={() => switchTab('MARKETS')}>POLYMARKET</button>
 		<button class="tab" class:active={selectedTab === 'NEWS'} on:click={() => switchTab('NEWS')}>NEWS</button>
+		<button class="tab" on:click={() => goto('/dashboard')}>DASHBOARD</button>
 	</div>
 
 	<div class="main-grid">
@@ -272,26 +306,22 @@
 										</div>
 									{/if}
 									<div class="market-question">{market.question || 'Unknown Question'}</div>
-									
+
 									<!-- Yes/No Price Options -->
 									<div class="market-outcomes">
 										<div class="outcome-option yes-option">
 											<span class="outcome-label">YES</span>
-											<span class="outcome-price">{market.yesPrice ? `${(market.yesPrice * 100).toFixed(1)}¢` : 'N/A'}</span>
-											{#if market.yesPrice}
-												<span class="outcome-percentage">{(market.yesPrice * 100).toFixed(0)}%</span>
-											{/if}
+											<span class="outcome-price">{((market.yesPrice || 0) * 100).toFixed(1)}¢</span>
+											<span class="outcome-percentage">{((market.yesPrice || 0) * 100).toFixed(0)}%</span>
 										</div>
 										<div class="outcome-option no-option">
 											<span class="outcome-label">NO</span>
-											<span class="outcome-price">{market.noPrice ? `${(market.noPrice * 100).toFixed(1)}¢` : 'N/A'}</span>
-											{#if market.noPrice}
-												<span class="outcome-percentage">{(market.noPrice * 100).toFixed(0)}%</span>
-											{/if}
+											<span class="outcome-price">{((market.noPrice || 0) * 100).toFixed(1)}¢</span>
+											<span class="outcome-percentage">{((market.noPrice || 0) * 100).toFixed(0)}%</span>
 										</div>
 									</div>
 
-									<div class="market-volume-bar" style="--yes-percentage: {market.yesPrice ? (market.yesPrice * 100).toFixed(0) : 50}%"></div>
+									<div class="market-volume-bar" style="--yes-percentage: {((market.yesPrice || 0) * 100).toFixed(0)}%"></div>
 									
 									<div class="market-stats">
 										<div class="market-volume">
@@ -415,6 +445,73 @@
 		transform: scale(1.02);
 	}
 
+	.initialize-btn {
+		padding: 8px 16px;
+		background: linear-gradient(135deg, #00B4FF 0%, #0094D6 100%);
+		color: white;
+		border: none;
+		font-weight: 600;
+		font-size: 13px;
+		cursor: pointer;
+		font-family: Inter, sans-serif;
+		border-radius: 8px;
+		transition: all 200ms ease-out;
+		white-space: nowrap;
+		flex-shrink: 0;
+	}
+
+	.initialize-btn:hover:not(:disabled) {
+		background: linear-gradient(135deg, #00D4FF 0%, #00B4FF 100%);
+		transform: scale(1.02);
+		box-shadow: 0 4px 12px rgba(0, 180, 255, 0.3);
+	}
+
+	.initialize-btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.loading-badge {
+		padding: 8px 14px;
+		background: #2A2F45;
+		border: 1px solid #3A3F55;
+		border-radius: 8px;
+		color: #8B92AB;
+		font-size: 12px;
+		flex-shrink: 0;
+		animation: pulse 1.5s ease-in-out infinite;
+	}
+
+	@keyframes pulse {
+		0%, 100% { opacity: 1; }
+		50% { opacity: 0.6; }
+	}
+
+	.balance-display {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 8px 14px;
+		background: linear-gradient(135deg, #1E2139 0%, #252A45 100%);
+		border: 1px solid #00D084;
+		border-radius: 8px;
+		font-size: 13px;
+		font-weight: 600;
+		flex-shrink: 0;
+	}
+
+	.balance-label {
+		color: #8B92AB;
+		font-size: 11px;
+		letter-spacing: 0.5px;
+	}
+
+	.balance-amount {
+		color: #00D084;
+		font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+		font-size: 14px;
+	}
+
 	.pyth-status {
 		display: flex;
 		align-items: center;
@@ -452,15 +549,6 @@
 		gap: 10px;
 		margin-left: auto;
 		flex-shrink: 0;
-	}
-
-	.clock {
-		color: #A0A0A0;
-		font-size: 12px;
-		min-width: 80px;
-		text-align: right;
-		flex-shrink: 0;
-		font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
 	}
 
 	.ticker-bar {
@@ -758,6 +846,7 @@
 		line-height: 1.4;
 		display: -webkit-box;
 		-webkit-line-clamp: 3;
+		line-clamp: 3;
 		-webkit-box-orient: vertical;
 		overflow: hidden;
 		flex: 1;
@@ -856,10 +945,6 @@
 		width: 100%;
 		height: 100%;
 		object-fit: cover;
-	}
-
-	.market-details {
-		margin-bottom: 10px;
 	}
 
 	.market-volume-bar {

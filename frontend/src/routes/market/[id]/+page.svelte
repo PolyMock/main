@@ -3,6 +3,9 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import type { PolyMarket } from '$lib/polymarket';
+	import { walletStore, refreshUserBalance } from '$lib/wallet/stores';
+	import { polymarketService } from '$lib/solana/polymarket-service';
+	import { PublicKey } from '@solana/web3.js';
 
 	let marketId: string;
 	let market: PolyMarket | null = null;
@@ -11,8 +14,25 @@
 	let selectedTab = 'Graph';
 	let selectedOutcome = 'Yes';
 	let tradeAmount = 100;
+	let tradeMode: 'buy' | 'sell' = 'buy';
 	let loading = true;
 	let error = '';
+	let walletState = $walletStore;
+	let trading = false;
+
+	// Modal state
+	let showConfirmModal = false;
+	let showSuccessModal = false;
+	let showErrorModal = false;
+	let modalTitle = '';
+	let modalMessage = '';
+	let modalDetails: any = null;
+	let pendingTrade: (() => Promise<void>) | null = null;
+
+	// Subscribe to wallet state
+	walletStore.subscribe(value => {
+		walletState = value;
+	});
 
 	$: marketId = $page.params.id || '';
 	$: yesPrice = market?.yesPrice || 0;
@@ -20,7 +40,7 @@
 	$: currentPrice = selectedOutcome === 'Yes' ? yesPrice : noPrice;
 	$: sharesToWin = tradeAmount / currentPrice;
 	$: avgPriceFormatted = formatPrice(currentPrice);
-	$: toWinAmount = sharesToWin;
+	$: toWinAmount = tradeMode === 'buy' ? sharesToWin : tradeAmount * currentPrice;
 	$: volume = market?.volume_24hr || market?.volume || 0;
 	$: priceChangePercent = -27; 
 
@@ -116,10 +136,159 @@
 
 	function handleQuickAmount(amount: number) {
 		if (amount === -1) { // Max
-			tradeAmount = 1000; 
+			tradeAmount = walletState.usdcBalance || 0;
 		} else {
-			tradeAmount += amount;
+			const newAmount = tradeAmount + amount;
+			// Don't exceed user's balance
+			tradeAmount = Math.min(newAmount, walletState.usdcBalance || 0);
 		}
+	}
+
+	function handleBuyYes() {
+		selectedOutcome = 'Yes';
+		// Scroll to trading panel
+		const tradingPanel = document.querySelector('.trading-interface');
+		if (tradingPanel) {
+			tradingPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+		}
+	}
+
+	function handleBuyNo() {
+		selectedOutcome = 'No';
+		// Scroll to trading panel
+		const tradingPanel = document.querySelector('.trading-interface');
+		if (tradingPanel) {
+			tradingPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+		}
+	}
+
+	async function handleTrade() {
+		// Check wallet connection
+		if (!walletState.connected || !walletState.adapter) {
+			showErrorModal = true;
+			modalTitle = 'Wallet Not Connected';
+			modalMessage = 'Please connect your wallet first!';
+			return;
+		}
+
+		// Validate trade parameters
+		if (!tradeAmount || tradeAmount <= 0) {
+			showErrorModal = true;
+			modalTitle = 'Invalid Amount';
+			modalMessage = 'Please enter a valid trade amount';
+			return;
+		}
+
+		// Check if user has sufficient balance
+		if (tradeAmount > walletState.usdcBalance) {
+			showErrorModal = true;
+			modalTitle = 'Insufficient Balance';
+			modalMessage = `You have ${formatDollar(walletState.usdcBalance)} available.`;
+			return;
+		}
+
+		if (!selectedOutcome) {
+			showErrorModal = true;
+			modalTitle = 'No Outcome Selected';
+			modalMessage = 'Please select an outcome (Yes or No)';
+			return;
+		}
+
+		// Calculate trade details
+		const price = selectedOutcome === 'Yes' ? yesPrice : noPrice;
+
+		if (price <= 0) {
+			showErrorModal = true;
+			modalTitle = 'Invalid Price';
+			modalMessage = 'Please refresh the page.';
+			return;
+		}
+
+		if (tradeMode !== 'buy') {
+			showErrorModal = true;
+			modalTitle = 'Coming Soon';
+			modalMessage = 'Sell functionality coming soon! For now, you can only buy positions.';
+			return;
+		}
+
+		// Calculate and show confirmation modal
+		const shares = tradeAmount / price;
+		const potentialWin = shares;
+
+		modalTitle = `Buy ${selectedOutcome}`;
+		modalDetails = {
+			action: `Buy ${selectedOutcome}`,
+			amount: formatDollar(tradeAmount),
+			price: formatPrice(price),
+			shares: shares.toFixed(2),
+			potentialWin: formatDollar(potentialWin)
+		};
+		showConfirmModal = true;
+
+		// Store the actual trade execution
+		pendingTrade = async () => {
+			trading = true;
+			try {
+				// Execute the trade on Solana
+				let txSignature: string;
+
+				if (selectedOutcome === 'Yes') {
+					txSignature = await polymarketService.buyYes(
+						walletState.adapter,
+						marketId,
+						tradeAmount,
+						price
+					);
+				} else {
+					txSignature = await polymarketService.buyNo(
+						walletState.adapter,
+						marketId,
+						tradeAmount,
+						price
+					);
+				}
+
+				// Show success modal
+				modalTitle = 'Trade Successful!';
+				modalMessage = `Transaction: ${txSignature.slice(0, 20)}...`;
+				showSuccessModal = true;
+
+				// Refresh user balance after successful trade
+				if (walletState.publicKey) {
+					await refreshUserBalance(new PublicKey(walletState.publicKey.toString()));
+				}
+
+				// Reset trade amount
+				tradeAmount = 100;
+			} catch (error: any) {
+				console.error('Trade failed:', error);
+				showErrorModal = true;
+				modalTitle = 'Trade Failed';
+				modalMessage = error.message || 'Unknown error occurred';
+			} finally {
+				trading = false;
+			}
+		};
+	}
+
+	async function confirmTrade() {
+		showConfirmModal = false;
+		if (pendingTrade) {
+			await pendingTrade();
+			pendingTrade = null;
+		}
+	}
+
+	function cancelTrade() {
+		showConfirmModal = false;
+		pendingTrade = null;
+	}
+
+	function closeModal() {
+		showConfirmModal = false;
+		showSuccessModal = false;
+		showErrorModal = false;
+		modalDetails = null;
 	}
 
 	function formatDate(dateString: string): string {
@@ -325,78 +494,53 @@
 			<!-- Left Column -->
 			<div class="left-column">
 				{#if selectedTab === 'Graph'}
-					<!-- Chart Header -->
-					<div class="chart-header">
-						<div class="price-display">
-							<div class="current-price">{(currentPrice * 100).toFixed(0)}% chance</div>
-							<div class="price-change {priceChangePercent < 0 ? 'negative' : 'positive'}">
-								{priceChangePercent < 0 ? '▼' : '▲'}{Math.abs(priceChangePercent)}%
-							</div>
-						</div>
+					<!-- Outcomes Header -->
+					<div class="outcomes-header">
+						<h2>Market Outcomes</h2>
 						<div class="chart-watermark">Polymarket</div>
 					</div>
 
-					<!-- Chart Container -->
-					<div class="chart-container">
-						<div class="chart-wrapper">
-							{#if chartData.length > 0}
-								<canvas id="priceChart" width="800" height="400"></canvas>
-							{:else}
-								<div class="chart-placeholder">
-									<p>Loading chart data...</p>
+					<!-- Binary YES/NO Outcomes -->
+					<div class="outcomes-container">
+						<div class="outcomes-list">
+							<!-- YES Outcome -->
+							<div class="outcome-row">
+								<div class="outcome-info">
+									<div class="outcome-title">Yes</div>
+									<div class="outcome-volume">${((market?.volume_24hr || 0) / 2).toFixed(0)} Vol.</div>
 								</div>
-							{/if}
+								<div class="outcome-stats">
+									<div class="outcome-percentage-large">{((yesPrice || 0) * 100).toFixed(0)}%</div>
+									<div class="outcome-change">
+										<span class="change-indicator {priceChangePercent < 0 ? 'negative' : 'positive'}">
+											{priceChangePercent < 0 ? '▼' : '▲'}{Math.abs(priceChangePercent)}%
+										</span>
+									</div>
+								</div>
+								<div class="outcome-actions">
+									<button class="buy-yes-btn" on:click={handleBuyYes}>Buy Yes {formatPrice(yesPrice)}</button>
+								</div>
+							</div>
+
+							<!-- NO Outcome -->
+							<div class="outcome-row">
+								<div class="outcome-info">
+									<div class="outcome-title">No</div>
+									<div class="outcome-volume">${((market?.volume_24hr || 0) / 2).toFixed(0)} Vol.</div>
+								</div>
+								<div class="outcome-stats">
+									<div class="outcome-percentage-large">{((noPrice || 0) * 100).toFixed(0)}%</div>
+									<div class="outcome-change">
+										<span class="change-indicator {-priceChangePercent < 0 ? 'negative' : 'positive'}">
+											{-priceChangePercent < 0 ? '▼' : '▲'}{Math.abs(-priceChangePercent)}%
+										</span>
+									</div>
+								</div>
+								<div class="outcome-actions">
+									<button class="buy-no-btn" on:click={handleBuyNo}>Buy No {formatPrice(noPrice)}</button>
+								</div>
+							</div>
 						</div>
-					</div>
-
-					<!-- Time Intervals -->
-					<div class="time-intervals">
-						{#each ['1H', '6H', '1D', '1W', '1M', 'ALL'] as interval}
-							<button 
-								class="interval-btn"
-								class:active={selectedInterval === interval}
-								on:click={() => handleIntervalChange(interval)}
-							>
-								{interval}
-							</button>
-						{/each}
-					</div>
-
-					<!-- Chart Toolbar -->
-					<div class="chart-toolbar">
-						<button class="toolbar-btn">
-							<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-								<path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
-								<polyline points="16,6 12,2 8,6"/>
-								<line x1="12" x2="12" y1="2" y2="15"/>
-							</svg>
-						</button>
-						<button class="toolbar-btn">
-							<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-								<path d="M3 6h18"/>
-								<path d="M3 12h18"/>
-								<path d="M3 18h18"/>
-							</svg>
-						</button>
-						<button class="toolbar-btn">
-							<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-								<polyline points="16,18 22,12 16,6"/>
-								<polyline points="8,6 2,12 8,18"/>
-							</svg>
-						</button>
-						<button class="toolbar-btn">
-							<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-								<circle cx="12" cy="12" r="3"/>
-								<path d="M12 1v6"/>
-								<path d="M12 17v6"/>
-								<path d="m4.22 4.22 4.24 4.24"/>
-								<path d="m15.54 15.54 4.24 4.24"/>
-								<path d="M1 12h6"/>
-								<path d="M17 12h6"/>
-								<path d="m4.22 19.78 4.24-4.24"/>
-								<path d="m15.54 8.46 4.24-4.24"/>
-							</svg>
-						</button>
 					</div>
 
 					<!-- Terms -->
@@ -437,10 +581,22 @@
 					<div class="panel-header">
 						<div class="panel-date">{market.end_date_iso ? formatDate(market.end_date_iso) : 'November 30'}</div>
 						<div class="trade-tabs">
-							<button class="trade-tab active">Buy</button>
-							<button class="trade-tab">Sell</button>
+							<button
+								class="trade-tab"
+								class:active={tradeMode === 'buy'}
+								on:click={() => tradeMode = 'buy'}
+							>
+								Buy
+							</button>
+							<button
+								class="trade-tab"
+								class:active={tradeMode === 'sell'}
+								on:click={() => tradeMode = 'sell'}
+							>
+								Sell
+							</button>
 							<button class="trade-tab dropdown">
-								Market 
+								Market
 								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 									<polyline points="6,9 12,15 18,9"></polyline>
 								</svg>
@@ -472,11 +628,13 @@
 					<div class="amount-section">
 						<label class="amount-label">Amount</label>
 						<div class="amount-input-wrapper">
-							<input 
-								type="number" 
+							<input
+								type="number"
 								bind:value={tradeAmount}
 								class="amount-input"
 								min="1"
+								max={walletState.usdcBalance || 10000}
+								placeholder={`Max: ${formatDollar(walletState.usdcBalance || 0)}`}
 							/>
 						</div>
 						<div class="quick-amounts">
@@ -487,10 +645,10 @@
 						</div>
 					</div>
 
-					<!-- To Win Section -->
+					<!-- To Win/Receive Section -->
 					<div class="to-win-section">
 						<div class="to-win-header">
-							<span>To win 🟢</span>
+							<span>{tradeMode === 'buy' ? 'To win 🟢' : 'To receive 💵'}</span>
 						</div>
 						<div class="avg-price-row">
 							<span>Avg. Price {avgPriceFormatted}</span>
@@ -504,7 +662,9 @@
 					</div>
 
 					<!-- Trade Button -->
-					<button class="trade-button">Trade</button>
+					<button class="trade-button" on:click={handleTrade}>
+						{tradeMode === 'buy' ? 'Buy' : 'Sell'}
+					</button>
 
 					<!-- Footer -->
 					<div class="panel-footer">
@@ -520,6 +680,86 @@
 		</div>
 	{/if}
 </div>
+
+<!-- Confirmation Modal -->
+{#if showConfirmModal}
+<div class="modal-overlay" on:click={cancelTrade}>
+	<div class="modal-content" on:click|stopPropagation>
+		<div class="modal-header">
+			<h3>{modalTitle}</h3>
+			<button class="modal-close" on:click={cancelTrade}>×</button>
+		</div>
+		<div class="modal-body">
+			{#if modalDetails}
+			<div class="trade-summary">
+				<div class="summary-row">
+					<span class="summary-label">Action:</span>
+					<span class="summary-value">{modalDetails.action}</span>
+				</div>
+				<div class="summary-row">
+					<span class="summary-label">Amount:</span>
+					<span class="summary-value">{modalDetails.amount}</span>
+				</div>
+				<div class="summary-row">
+					<span class="summary-label">Price:</span>
+					<span class="summary-value">{modalDetails.price}</span>
+				</div>
+				<div class="summary-row">
+					<span class="summary-label">Shares:</span>
+					<span class="summary-value">{modalDetails.shares}</span>
+				</div>
+				<div class="summary-row highlight">
+					<span class="summary-label">Potential Win:</span>
+					<span class="summary-value">{modalDetails.potentialWin}</span>
+				</div>
+			</div>
+			{/if}
+		</div>
+		<div class="modal-footer">
+			<button class="modal-btn cancel-btn" on:click={cancelTrade}>Cancel</button>
+			<button class="modal-btn confirm-btn" on:click={confirmTrade} disabled={trading}>
+				{trading ? 'Processing...' : 'Confirm Trade'}
+			</button>
+		</div>
+	</div>
+</div>
+{/if}
+
+<!-- Success Modal -->
+{#if showSuccessModal}
+<div class="modal-overlay" on:click={closeModal}>
+	<div class="modal-content success-modal" on:click|stopPropagation>
+		<div class="modal-header">
+			<h3>✓ {modalTitle}</h3>
+			<button class="modal-close" on:click={closeModal}>×</button>
+		</div>
+		<div class="modal-body">
+			<p class="modal-message">{modalMessage}</p>
+		</div>
+		<div class="modal-footer">
+			<button class="modal-btn confirm-btn" on:click={closeModal}>Close</button>
+		</div>
+	</div>
+</div>
+{/if}
+
+<!-- Error Modal -->
+{#if showErrorModal}
+<div class="modal-overlay" on:click={closeModal}>
+	<div class="modal-content error-modal" on:click|stopPropagation>
+		<div class="modal-header">
+			<h3>⚠ {modalTitle}</h3>
+			<button class="modal-close" on:click={closeModal}>×</button>
+		</div>
+		<div class="modal-body">
+			<p class="modal-message">{modalMessage}</p>
+		</div>
+		<div class="modal-footer">
+			<button class="modal-btn confirm-btn" on:click={closeModal}>Close</button>
+		</div>
+	</div>
+</div>
+{/if}
 
 <style>
 	.market-detail {
@@ -680,37 +920,19 @@
 		flex-direction: column;
 	}
 
-	/* Chart Section */
-	.chart-header {
+	/* Outcomes Section */
+	.outcomes-header {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		margin-bottom: 16px;
+		margin-bottom: 20px;
 	}
 
-	.price-display {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-	}
-
-	.current-price {
-		font-size: 32px;
-		font-weight: 700;
-		color: #00B4FF;
-	}
-
-	.price-change {
-		font-size: 14px;
-		font-weight: 500;
-	}
-
-	.price-change.positive {
-		color: #00D084;
-	}
-
-	.price-change.negative {
-		color: #FF4757;
+	.outcomes-header h2 {
+		font-size: 20px;
+		font-weight: 600;
+		color: #E8E8E8;
+		margin: 0;
 	}
 
 	.chart-watermark {
@@ -718,6 +940,124 @@
 		color: #666666;
 	}
 
+	.outcomes-container {
+		background: #151B2F;
+		border: 1px solid #2A2F45;
+		border-radius: 12px;
+		padding: 24px;
+		margin-bottom: 16px;
+		min-height: 400px;
+	}
+
+	.outcomes-list {
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+	}
+
+	.outcome-row {
+		display: grid;
+		grid-template-columns: 1fr auto auto;
+		gap: 24px;
+		align-items: center;
+		padding: 20px;
+		background: rgba(255, 255, 255, 0.03);
+		border-radius: 8px;
+		border-left: 3px solid #00B4FF;
+		transition: all 200ms ease-out;
+	}
+
+	.outcome-row:hover {
+		background: rgba(255, 255, 255, 0.06);
+		border-left-color: #00D084;
+	}
+
+	.outcome-info {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.outcome-title {
+		font-size: 18px;
+		font-weight: 600;
+		color: #E8E8E8;
+	}
+
+	.outcome-volume {
+		font-size: 13px;
+		color: #A0A0A0;
+	}
+
+	.outcome-stats {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 4px;
+	}
+
+	.outcome-percentage-large {
+		font-size: 32px;
+		font-weight: 700;
+		color: #00B4FF;
+		font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+	}
+
+	.outcome-change {
+		font-size: 12px;
+	}
+
+	.change-indicator {
+		font-weight: 500;
+	}
+
+	.change-indicator.positive {
+		color: #00D084;
+	}
+
+	.change-indicator.negative {
+		color: #FF4757;
+	}
+
+	.outcome-actions {
+		display: flex;
+		gap: 12px;
+	}
+
+	.buy-yes-btn,
+	.buy-no-btn {
+		padding: 12px 20px;
+		border-radius: 6px;
+		font-size: 14px;
+		font-weight: 600;
+		cursor: pointer;
+		border: none;
+		transition: all 200ms ease-out;
+		white-space: nowrap;
+	}
+
+	.buy-yes-btn {
+		background: #00D084;
+		color: #ffffff;
+	}
+
+	.buy-yes-btn:hover {
+		background: #00B570;
+		transform: scale(1.02);
+	}
+
+	.buy-no-btn {
+		background: rgba(255, 71, 87, 0.2);
+		color: #FF4757;
+		border: 1px solid #FF4757;
+	}
+
+	.buy-no-btn:hover {
+		background: rgba(255, 71, 87, 0.3);
+		transform: scale(1.02);
+	}
+
+	/* Legacy chart styles (kept for compatibility) */
 	.chart-container {
 		background: #151B2F;
 		border: 1px solid #2A2F45;
@@ -1217,5 +1557,171 @@
 			padding: 16px;
 			gap: 16px;
 		}
+	}
+
+	/* Modal Styles */
+	.modal-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		width: 100%;
+		height: 100%;
+		background: rgba(0, 0, 0, 0.85);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 1000;
+		animation: fadeIn 0.2s ease-out;
+	}
+
+	@keyframes fadeIn {
+		from { opacity: 0; }
+		to { opacity: 1; }
+	}
+
+	.modal-content {
+		background: #151B2F;
+		border: 1px solid #2A2F45;
+		border-radius: 12px;
+		min-width: 400px;
+		max-width: 500px;
+		animation: slideUp 0.3s ease-out;
+	}
+
+	@keyframes slideUp {
+		from {
+			transform: translateY(20px);
+			opacity: 0;
+		}
+		to {
+			transform: translateY(0);
+			opacity: 1;
+		}
+	}
+
+	.modal-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 20px;
+		border-bottom: 1px solid #2A2F45;
+	}
+
+	.modal-header h3 {
+		margin: 0;
+		font-size: 20px;
+		font-weight: 600;
+		color: white;
+	}
+
+	.success-modal .modal-header h3 {
+		color: #00D68F;
+	}
+
+	.error-modal .modal-header h3 {
+		color: #FF6B6B;
+	}
+
+	.modal-close {
+		background: none;
+		border: none;
+		color: #8B92AB;
+		font-size: 28px;
+		cursor: pointer;
+		padding: 0;
+		width: 32px;
+		height: 32px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: color 0.2s;
+	}
+
+	.modal-close:hover {
+		color: white;
+	}
+
+	.modal-body {
+		padding: 24px 20px;
+	}
+
+	.trade-summary {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+
+	.summary-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 12px;
+		background: #0A0E1A;
+		border-radius: 8px;
+	}
+
+	.summary-row.highlight {
+		background: rgba(0, 180, 255, 0.1);
+		border: 1px solid #00B4FF;
+	}
+
+	.summary-label {
+		color: #8B92AB;
+		font-size: 14px;
+	}
+
+	.summary-value {
+		color: white;
+		font-weight: 600;
+		font-size: 16px;
+	}
+
+	.modal-message {
+		color: #E8E8E8;
+		font-size: 14px;
+		line-height: 1.6;
+		margin: 0;
+	}
+
+	.modal-footer {
+		display: flex;
+		gap: 12px;
+		padding: 20px;
+		border-top: 1px solid #2A2F45;
+		justify-content: flex-end;
+	}
+
+	.modal-btn {
+		padding: 10px 20px;
+		border-radius: 8px;
+		font-size: 14px;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.2s;
+		border: none;
+	}
+
+	.cancel-btn {
+		background: #2A2F45;
+		color: #E8E8E8;
+	}
+
+	.cancel-btn:hover {
+		background: #3A3F55;
+	}
+
+	.confirm-btn {
+		background: #00B4FF;
+		color: white;
+	}
+
+	.confirm-btn:hover:not(:disabled) {
+		background: #0094D6;
+		transform: translateY(-1px);
+	}
+
+	.confirm-btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 </style>

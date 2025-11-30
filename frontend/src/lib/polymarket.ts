@@ -1,7 +1,5 @@
 import axios from 'axios';
 
-const POLYMARKET_API_BASE = 'https://gamma-api.polymarket.com';
-
 export interface PolyMarket {
   id: string;
   question: string;
@@ -45,9 +43,15 @@ export interface PolyMarket {
     price?: number;
     winner?: boolean;
   }>;
-  // Helper function to get Yes/No prices
+  // Helper function to get Yes/No prices (for binary markets)
   yesPrice?: number;
   noPrice?: number;
+  // For multi-outcome markets
+  outcomes?: Array<{
+    name: string;
+    price: number;
+    tokenId: string;
+  }>;
   outcomePrices?: string[];
   volume_num?: number;
   clobTokenIds?: string[];
@@ -85,16 +89,27 @@ export class PolymarketClient {
     try {
       const response = await axios.get(`${this.baseURL}/markets`, {
         params: {
-          limit,
+          limit: limit * 3, // Fetch more to filter for binary markets
           active: true,
           closed: false
         }
       });
 
       if (response.data && Array.isArray(response.data)) {
-        const markets = response.data.slice(0, limit);
+        // Filter for ONLY binary markets (2 outcomes)
+        const binaryMarkets = response.data.filter(market => {
+          try {
+            const outcomes = market.outcomes
+              ? (typeof market.outcomes === 'string' ? JSON.parse(market.outcomes) : market.outcomes)
+              : [];
+            return Array.isArray(outcomes) && outcomes.length === 2;
+          } catch {
+            return false;
+          }
+        }).slice(0, limit);
+
         // Process each market to extract Yes/No prices
-        const processedMarkets = markets.map(market => this.processMarketTokens(market));
+        const processedMarkets = binaryMarkets.map(market => this.processMarketTokens(market));
 
         // Fetch real-time prices from CLOB API for each market
         await Promise.all(processedMarkets.map(market => this.enrichMarketWithCLOBPrices(market)));
@@ -109,31 +124,23 @@ export class PolymarketClient {
   }
 
   private processMarketTokens(market: PolyMarket): PolyMarket {
-    // Extract Yes/No prices from tokens or outcomePrices
-    if (market.tokens && market.tokens.length >= 2) {
-      // Look for Yes/No tokens
-      const yesToken = market.tokens.find(token => 
-        token.outcome?.toLowerCase().includes('yes') || 
-        token.outcome?.toLowerCase() === 'true' ||
-        token.outcome === '1'
-      );
-      const noToken = market.tokens.find(token => 
-        token.outcome?.toLowerCase().includes('no') || 
-        token.outcome?.toLowerCase() === 'false' ||
-        token.outcome === '0'
-      );
-
-      market.yesPrice = yesToken?.price || 0;
-      market.noPrice = noToken?.price || 0;
-    } else if (market.outcomePrices && market.outcomePrices.length >= 2) {
-      // Parse from outcomePrices array
-      market.yesPrice = parseFloat(market.outcomePrices[0]) || 0;
-      market.noPrice = parseFloat(market.outcomePrices[1]) || 0;
-    } else {
-      // Fallback - assume binary market with complementary prices
-      const price = market.last_trade_price || 0.5;
-      market.yesPrice = price;
-      market.noPrice = 1 - price;
+    try {
+      // Binary market only - set yes/no prices
+      if (market.outcomePrices) {
+        const prices = typeof market.outcomePrices === 'string'
+          ? JSON.parse(market.outcomePrices)
+          : market.outcomePrices;
+        market.yesPrice = parseFloat(prices[0]) || 0;
+        market.noPrice = parseFloat(prices[1]) || 0;
+      } else {
+        // Fallback
+        market.yesPrice = 0;
+        market.noPrice = 0;
+      }
+    } catch (error) {
+      console.error(`Error processing market ${market.id}:`, error);
+      market.yesPrice = 0;
+      market.noPrice = 0;
     }
 
     return market;
@@ -200,25 +207,32 @@ export class PolymarketClient {
         return;
       }
 
+      // Binary market - fetch YES/NO prices
       const yesTokenId = tokenIds[0];
       const noTokenId = tokenIds[1];
 
-      // Fetch prices for both outcomes in parallel
       const [yesPriceResult, noPriceResult] = await Promise.allSettled([
         this.fetchCLOBPrice(yesTokenId),
         this.fetchCLOBPrice(noTokenId)
       ]);
 
-      // Update market prices if successful
-      if (yesPriceResult.status === 'fulfilled' && yesPriceResult.value !== null) {
-        market.yesPrice = yesPriceResult.value;
+      let yes = yesPriceResult.status === 'fulfilled' && yesPriceResult.value !== null ? yesPriceResult.value : 0;
+      let no = noPriceResult.status === 'fulfilled' && noPriceResult.value !== null ? noPriceResult.value : 0;
+
+      // Calculate inverse when one price is 0
+      if (yes > 0 && no === 0) {
+        no = 1 - yes;
+      } else if (no > 0 && yes === 0) {
+        yes = 1 - no;
+      } else if (yes === 0 && no === 0) {
+        // Both are 0, keep as is (will use fallback values)
+        return;
       }
 
-      if (noPriceResult.status === 'fulfilled' && noPriceResult.value !== null) {
-        market.noPrice = noPriceResult.value;
-      }
+      market.yesPrice = yes;
+      market.noPrice = no;
 
-      console.log(`Market ${market.id}: YES=${market.yesPrice}, NO=${market.noPrice}`);
+      console.log(`Binary market ${market.id}: YES=${market.yesPrice}, NO=${market.noPrice}`);
     } catch (error) {
       console.error(`Error enriching market ${market.id} with CLOB prices:`, error);
     }
