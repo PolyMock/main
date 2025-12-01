@@ -147,7 +147,7 @@
 
 	function startPythPriceUpdates() {
 		fetchPythPrices(); // Initial fetch
-		pythUpdateInterval = setInterval(fetchPythPrices, 5000); // Update every 5 seconds
+		pythUpdateInterval = setInterval(fetchPythPrices, 15000); // Update every 15 seconds
 	}
 
 	function executeCommand() {
@@ -173,7 +173,7 @@
 		startPythPriceUpdates();
 
 		setInterval(fetchNews, 300000); // 5 minutes
-		setInterval(fetchPolymarkets, 10000); // 10 seconds
+		setInterval(fetchPolymarkets, 30000); // 30 seconds
 
 		return () => {
 			if (pythUpdateInterval) {
