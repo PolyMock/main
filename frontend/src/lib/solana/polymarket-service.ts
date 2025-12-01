@@ -8,6 +8,7 @@ import { AnchorProvider, Program, BN } from '@coral-xyz/anchor';
 import type { Idl } from '@coral-xyz/anchor';
 import { PUBLIC_SOLANA_PROGRAM_ID, PUBLIC_SOLANA_RPC_ENDPOINT } from '$env/static/public';
 import IDL from './polymarket_paper.json';
+import { erVerification } from './er-verification';
 
 // Program ID and RPC from environment variables
 const PROGRAM_ID = new PublicKey(PUBLIC_SOLANA_PROGRAM_ID);
@@ -39,13 +40,25 @@ export interface PredictionPosition {
 export class PolymarketService {
 	private connection: Connection;
 	private program: Program | null = null;
+	private verifyEREnabled: boolean = true; // Enable ER verification by default
 
 	constructor() {
+		// MagicBlock RPC handles ER automatically - no need for separate connections
 		this.connection = new Connection(RPC_ENDPOINT, 'confirmed');
+		console.log('Using MagicBlock RPC:', RPC_ENDPOINT);
+	}
+
+	/**
+	 * Enable or disable ER verification logging
+	 */
+	setERVerification(enabled: boolean) {
+		this.verifyEREnabled = enabled;
+		console.log(`ER verification ${enabled ? 'enabled' : 'disabled'}`);
 	}
 
 	/**
 	 * Initialize the Anchor program
+	 * MagicBlock RPC automatically routes to ER when needed
 	 */
 	async initializeProgram(wallet: any): Promise<void> {
 		try {
@@ -57,6 +70,7 @@ export class PolymarketService {
 
 			// Use the local IDL file
 			this.program = new Program(IDL as Idl, provider);
+			console.log('Program initialized with MagicBlock RPC');
 		} catch (error) {
 			console.error('Failed to initialize program:', error);
 			throw error;
@@ -174,7 +188,7 @@ export class PolymarketService {
 	}
 
 	/**
-	 * Buy YES shares
+	 * Buy YES shares (MagicBlock RPC handles ER routing automatically)
 	 */
 	async buyYes(
 		wallet: any,
@@ -214,6 +228,14 @@ export class PolymarketService {
 				.rpc();
 
 			console.log('YES position created:', tx);
+
+			// Verify ER usage
+			if (this.verifyEREnabled) {
+				setTimeout(async () => {
+					await erVerification.logERVerification(tx, userAccountPDA);
+				}, 1000); // Wait 1 second for transaction to propagate
+			}
+
 			return tx;
 		} catch (error) {
 			console.error('Error buying YES:', error);
@@ -222,7 +244,7 @@ export class PolymarketService {
 	}
 
 	/**
-	 * Buy NO shares
+	 * Buy NO shares (MagicBlock RPC handles ER routing automatically)
 	 */
 	async buyNo(
 		wallet: any,
@@ -262,6 +284,14 @@ export class PolymarketService {
 				.rpc();
 
 			console.log('NO position created:', tx);
+
+			// Verify ER usage
+			if (this.verifyEREnabled) {
+				setTimeout(async () => {
+					await erVerification.logERVerification(tx, userAccountPDA);
+				}, 1000); // Wait 1 second for transaction to propagate
+			}
+
 			return tx;
 		} catch (error) {
 			console.error('Error buying NO:', error);
@@ -306,7 +336,7 @@ export class PolymarketService {
 	}
 
 	/**
-	 * Close a position
+	 * Close a position (MagicBlock RPC handles ER routing automatically)
 	 */
 	async closePosition(
 		wallet: any,

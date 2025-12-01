@@ -97,7 +97,8 @@ export async function initializeUserAccountIfNeeded(wallet: any) {
 
 		setWalletLoading(true);
 
-		// Initialize the Solana program
+		// Initialize the Solana program with MagicBlock RPC
+		// MagicBlock RPC automatically handles ER routing - no delegation needed!
 		await polymarketService.initializeProgram(wallet);
 
 		const userPublicKey = new PublicKey(wallet.publicKey.toString());
