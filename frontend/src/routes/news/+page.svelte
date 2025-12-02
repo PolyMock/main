@@ -1,6 +1,20 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 
+	type NewsDataArticle = {
+		article_id: string;
+		title: string;
+		description?: string;
+		content?: string;
+		link: string;
+		source_id: string;
+		pubDate: string;
+		image_url?: string;
+		category?: string[];
+		country?: string[];
+		language?: string;
+	};
+
 	type NewsArticle = {
 		id: string;
 		title: string;
@@ -13,34 +27,75 @@
 		categories?: string;
 	};
 
+	const categories = [
+		{ id: 'top', label: 'Top Stories', icon: '' },
+		{ id: 'business', label: 'Business', icon: '' },
+		{ id: 'technology', label: 'Technology', icon: '' },
+		{ id: 'science', label: 'Science', icon: '' },
+		{ id: 'sports', label: 'Sports', icon: '' },
+		{ id: 'entertainment', label: 'Entertainment', icon: '' },
+		{ id: 'health', label: 'Health', icon: '' },
+		{ id: 'politics', label: 'Politics', icon: '' }
+	];
+
 	let news: NewsArticle[] = [];
 	let selectedArticle: NewsArticle | null = null;
 	let newsLoading = true;
 	let articleLoading = false;
+	let selectedCategory = 'top';
+	let errorMessage = '';
 
 	async function fetchNews() {
 		newsLoading = true;
+		errorMessage = '';
 		try {
-			const response = await fetch('https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories=BTC,ETH,SOL');
+			const response = await fetch(`/api/newsdata?category=${selectedCategory}`);
 
 			if (!response.ok) {
-				throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+				const errorData = await response.json();
+				throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
 			}
 
 			const data = await response.json();
 
-			if (data.Data && data.Data.length > 0) {
-				news = data.Data.slice(0, 50);
+			if (data.results && data.results.length > 0) {
+				// Convert NewsData format to our format
+				news = data.results.map((article: NewsDataArticle) => ({
+					id: article.article_id,
+					title: article.title,
+					body: article.description || article.content || 'No description available.',
+					url: article.link,
+					source: article.source_id || 'Unknown',
+					published_on: new Date(article.pubDate).getTime() / 1000,
+					imageurl: article.image_url,
+					tags: article.category ? article.category.join('|') : '',
+					categories: article.category ? article.category.join(', ') : ''
+				}));
+
 				// Auto-select the first article
-				if (news.length > 0 && !selectedArticle) {
+				if (news.length > 0) {
 					selectedArticle = news[0];
+				} else {
+					selectedArticle = null;
 				}
+			} else {
+				news = [];
+				selectedArticle = null;
 			}
-		} catch (error) {
+		} catch (error: any) {
 			console.error('Error fetching news:', error);
+			errorMessage = error.message || 'Failed to load news';
 			news = [];
+			selectedArticle = null;
 		} finally {
 			newsLoading = false;
+		}
+	}
+
+	function changeCategory(categoryId: string) {
+		if (selectedCategory !== categoryId) {
+			selectedCategory = categoryId;
+			fetchNews();
 		}
 	}
 
@@ -73,16 +128,33 @@
 </script>
 
 <div class="news-page">
-	<div class="news-list-panel">
-		<div class="panel-header">
-			<h2>CRYPTO NEWS</h2>
-			<span class="news-count">{news.length} Articles</span>
-		</div>
-		<div class="news-list">
-			{#if newsLoading}
-				<div class="loading-state">Loading news from CryptoCompare API...</div>
-			{:else if news.length === 0}
-				<div class="error-state">Failed to load news. Please try again later.</div>
+	<!-- Category Tabs -->
+	<div class="category-tabs">
+		{#each categories as category}
+			<button
+				class="category-tab"
+				class:active={selectedCategory === category.id}
+				on:click={() => changeCategory(category.id)}
+			>
+				<span class="category-icon">{category.icon}</span>
+				<span class="category-label">{category.label}</span>
+			</button>
+		{/each}
+	</div>
+
+	<div class="news-content-wrapper">
+		<div class="news-list-panel">
+			<div class="panel-header">
+				<h2>{categories.find(c => c.id === selectedCategory)?.label.toUpperCase() || 'NEWS'}</h2>
+				<span class="news-count">{news.length} Articles</span>
+			</div>
+			<div class="news-list">
+				{#if newsLoading}
+					<div class="loading-state">Loading news from NewsData API...</div>
+				{:else if errorMessage}
+					<div class="error-state">{errorMessage}</div>
+				{:else if news.length === 0}
+					<div class="error-state">No articles available for this category.</div>
 			{:else}
 				{#each news as article}
 					<button
@@ -105,10 +177,10 @@
 					</button>
 				{/each}
 			{/if}
+			</div>
 		</div>
-	</div>
 
-	<div class="article-viewer-panel">
+		<div class="article-viewer-panel">
 		{#if articleLoading}
 			<div class="loading-state">Loading article...</div>
 		{:else if selectedArticle}
@@ -153,17 +225,72 @@
 				<p>Select an article to read</p>
 			</div>
 		{/if}
+		</div>
 	</div>
 </div>
 
 <style>
 	.news-page {
-		display: grid;
-		grid-template-columns: 400px 1fr;
-		gap: 24px;
+		display: flex;
+		flex-direction: column;
 		padding: 24px;
 		min-height: calc(100vh - 64px);
 		background: #0A0E27;
+		gap: 20px;
+	}
+
+	.category-tabs {
+		display: flex;
+		gap: 12px;
+		padding: 16px;
+		background: #151B2F;
+		border: 1px solid #2A2F45;
+		border-radius: 12px;
+		overflow-x: auto;
+		flex-wrap: wrap;
+	}
+
+	.category-tab {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 10px 20px;
+		background: transparent;
+		border: 1px solid #2A2F45;
+		border-radius: 8px;
+		color: #8B92AB;
+		font-size: 14px;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.2s;
+		white-space: nowrap;
+	}
+
+	.category-tab:hover {
+		background: rgba(0, 180, 255, 0.05);
+		border-color: #00B4FF;
+		color: #E8E8E8;
+	}
+
+	.category-tab.active {
+		background: rgba(0, 180, 255, 0.1);
+		border-color: #00B4FF;
+		color: #00B4FF;
+	}
+
+	.category-icon {
+		font-size: 18px;
+	}
+
+	.category-label {
+		font-size: 13px;
+	}
+
+	.news-content-wrapper {
+		display: grid;
+		grid-template-columns: 400px 1fr;
+		gap: 24px;
+		flex: 1;
 	}
 
 	.news-list-panel {
@@ -416,9 +543,26 @@
 
 	@media (max-width: 1024px) {
 		.news-page {
+			padding: 16px;
+		}
+
+		.category-tabs {
+			padding: 12px;
+			gap: 8px;
+		}
+
+		.category-tab {
+			padding: 8px 16px;
+			font-size: 13px;
+		}
+
+		.category-icon {
+			font-size: 16px;
+		}
+
+		.news-content-wrapper {
 			grid-template-columns: 1fr;
 			gap: 16px;
-			padding: 16px;
 		}
 
 		.news-list-panel {

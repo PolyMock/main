@@ -45,7 +45,7 @@
 			const data = await response.json();
 
 			if (data.Data && data.Data.length > 0) {
-				news = data.Data.slice(0, 30);
+				news = data.Data.slice(0, 10);
 			}
 		} catch (error) {
 			console.error('Error fetching news:', error);
@@ -443,16 +443,16 @@
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
+		height: 100%;
+		min-height: 650px;
 	}
 
 	.news-panel {
-		height: 100%;
-		min-height: 650px;
+		/* Inherits from .panel */
 	}
 
 	.main-panel {
-		height: 100%;
-		min-height: 650px;
+		/* Inherits from .panel */
 	}
 
 	.panel-header {
@@ -466,14 +466,14 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
+		flex-shrink: 0;
 	}
 
 	.news-list {
 		overflow-y: auto;
 		padding: 24px;
 		flex: 1;
-		height: 100%;
-		max-height: calc(100vh - 20px);
+		min-height: 0;
 	}
 
 	.loading-state,

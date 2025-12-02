@@ -40,6 +40,7 @@
 		<a href="/news" class="nav-link" class:active={currentPath === '/news'}>NEWS</a>
 		<a href="/competition" class="nav-link" class:active={currentPath === '/competition'}>COMPETITION</a>
 		<a href="/dashboard" class="nav-link" class:active={currentPath === '/dashboard'}>DASHBOARD</a>
+		<a href="/backtesting" class="nav-link" class:active={currentPath === '/backtesting'}>BACKTESTING</a>
 	</div>
 
 	<div class="navbar-right">
