@@ -114,7 +114,32 @@ export class PolymarketClient {
         // Fetch real-time prices from CLOB API for each market
         await Promise.all(processedMarkets.map(market => this.enrichMarketWithCLOBPrices(market)));
 
-        return processedMarkets;
+        
+        const balancedMarkets = processedMarkets
+          .map(market => {
+         
+            const yesPrice = market.yesPrice || 0;
+            const noPrice = market.noPrice || 0;
+
+            // If prices are invalid, give worst balance score
+            if (yesPrice === 0 || noPrice === 0) {
+              return { market, balance: 1 };
+            }
+
+            
+            const yesDistance = Math.abs(yesPrice - 0.5);
+            const noDistance = Math.abs(noPrice - 0.5);
+            const balance = (yesDistance + noDistance) / 2;
+
+            return { market, balance };
+          })
+          
+          .sort((a, b) => a.balance - b.balance)
+          
+          .slice(0, limit)
+          .map(item => item.market);
+
+        return balancedMarkets;
       }
       return [];
     } catch (error) {

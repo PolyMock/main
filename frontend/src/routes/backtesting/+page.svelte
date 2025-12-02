@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { walletStore } from '$lib/wallet/stores';
 	import { polymarketService } from '$lib/solana/polymarket-service';
+	import { polymarketClient } from '$lib/polymarket';
 	import { PublicKey } from '@solana/web3.js';
 
 	interface Position {
@@ -102,34 +103,54 @@
 			const userPublicKey = new PublicKey(walletState.publicKey.toString());
 			const blockchainPositions = await polymarketService.getUserPositions(userPublicKey);
 
-			// Convert blockchain positions to display format
-			positions = blockchainPositions.map((pos, index) => {
+			
+			const initialPositions: Position[] = blockchainPositions.map((pos) => {
 				const isYes = 'yes' in pos.predictionType;
 				const amountUsdc = pos.amountUsdc.toNumber() / 1_000_000;
 				const shares = pos.shares.toNumber() / 1_000_000;
 				const pricePerShare = pos.pricePerShare.toNumber() / 1_000_000;
 
-				// For now, use entry price as current price
-				const currentPrice = pricePerShare;
-				const currentValue = shares * currentPrice;
-				const pnl = currentValue - amountUsdc;
-				const pnlPercentage = (pnl / amountUsdc) * 100;
-
 				return {
 					id: pos.positionId.toString(),
 					marketId: pos.marketId,
 					marketName: `Market ${pos.marketId.slice(0, 10)}...`,
-					predictionType: isYes ? 'Yes' : 'No',
+					predictionType: (isYes ? 'Yes' : 'No') as 'Yes' | 'No',
 					amountUsdc,
 					shares,
 					pricePerShare,
-					currentPrice,
-					pnl,
-					pnlPercentage,
-					status: 'active' in pos.status ? 'Active' : 'Closed',
+					currentPrice: pricePerShare, 
+					pnl: 0, 
+					pnlPercentage: 0, 
+					status: ('active' in pos.status ? 'Active' : 'Closed') as 'Active' | 'Closed',
 					openedAt: new Date(pos.openedAt.toNumber() * 1000)
 				};
 			});
+
+			
+			await Promise.all(initialPositions.map(async (pos) => {
+				try {
+					const market = await polymarketClient.getMarketById(pos.marketId);
+					if (market) {
+						
+						const currentPrice = pos.predictionType === 'Yes'
+							? (market.yesPrice || pos.pricePerShare)
+							: (market.noPrice || pos.pricePerShare);
+
+						pos.currentPrice = currentPrice;
+						const currentValue = pos.shares * currentPrice;
+						pos.pnl = currentValue - pos.amountUsdc;
+						pos.pnlPercentage = (pos.pnl / pos.amountUsdc) * 100;
+					}
+				} catch (error) {
+					console.error(`Error fetching current price for market ${pos.marketId}:`, error);
+					// Keep using entry price as fallback
+					const currentValue = pos.shares * pos.pricePerShare;
+					pos.pnl = currentValue - pos.amountUsdc;
+					pos.pnlPercentage = (pos.pnl / pos.amountUsdc) * 100;
+				}
+			}));
+
+			positions = initialPositions;
 
 			calculateMetrics();
 		} catch (error) {
@@ -507,10 +528,7 @@
 		font-size: 36px;
 		font-weight: 700;
 		margin: 0 0 8px 0;
-		background: linear-gradient(135deg, #00B4FF 0%, #00D084 100%);
-		-webkit-background-clip: text;
-		-webkit-text-fill-color: transparent;
-		background-clip: text;
+		color: #E8E8E8;
 	}
 
 	.subtitle {
