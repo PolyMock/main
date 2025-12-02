@@ -114,18 +114,11 @@
 </script>
 
 <div class="polyMock">
-	<div class="command-bar">
-		<a href="/" class="logo">POLYMOCK</a>
-		<div class="nav-links">
-			<a href="/" class="nav-link">TERMINAL</a>
-			<a href="/competition" class="nav-link active">COMPETITION</a>
-		</div>
-		<div class="status-bar">
-			<span class="status-item">DEMO MODE</span>
-			<span class="status-item">TIME: {timeRemaining}</span>
-			<span class="status-item">VOL: ${(competitionStats.totalVolume / 1000).toFixed(0)}K</span>
-			<span class="status-item">TRADES: {competitionStats.totalTrades}</span>
-		</div>
+	<div class="status-bar">
+		<span class="status-item">DEMO MODE</span>
+		<span class="status-item">TIME: {timeRemaining}</span>
+		<span class="status-item">VOL: ${(competitionStats.totalVolume / 1000).toFixed(0)}K</span>
+		<span class="status-item">TRADES: {competitionStats.totalTrades}</span>
 	</div>
 
 	<div class="main-grid">
@@ -257,52 +250,14 @@
 		font-family: 'Courier New', monospace;
 	}
 
-	.command-bar {
-		background: #1a1a1a;
-		padding: 8px 15px;
-		display: flex;
-		align-items: center;
-		gap: 15px;
-		border-bottom: 1px solid #333;
-	}
-
-	.logo {
-		font-size: 18px;
-		font-weight: bold;
-		color: #4785ff;
-		letter-spacing: 2px;
-		text-decoration: none;
-	}
-
-	.nav-links {
-		display: flex;
-		gap: 15px;
-	}
-
-	.nav-link {
-		color: #666;
-		text-decoration: none;
-		font-size: 13px;
-		padding: 4px 10px;
-		border: 1px solid transparent;
-		transition: all 0.2s;
-	}
-
-	.nav-link:hover {
-		color: #fff;
-		border-color: #333;
-	}
-
-	.nav-link.active {
-		color: #4785ff;
-		border-color: #4785ff;
-	}
-
 	.status-bar {
+		background: #1a1a1a;
+		padding: 8px 24px;
 		display: flex;
 		gap: 20px;
-		margin-left: auto;
+		border-bottom: 1px solid #333;
 		font-size: 12px;
+		justify-content: center;
 	}
 
 	.status-item {

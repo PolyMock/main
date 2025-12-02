@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import WalletButton from '$lib/wallet/WalletButton.svelte';
-	import { walletStore, refreshUserBalance, initializeUserAccountIfNeeded } from '$lib/wallet/stores';
+	import { walletStore, refreshUserBalance } from '$lib/wallet/stores';
 	import { polymarketService } from '$lib/solana/polymarket-service';
 	import { PublicKey } from '@solana/web3.js';
 
@@ -25,8 +24,14 @@
 	let loading = true;
 	let totalPnl = 0;
 	let totalValue = 0;
+	let openPositionsCount = 0;
+	let closedPositionsCount = 0;
+	let openPositionsValue = 0;
+	let closedPositionsValue = 0;
+	let openPositionsPnl = 0;
+	let closedPositionsPnl = 0;
+	let positionFilter: 'all' | 'open' | 'closed' = 'all';
 	let walletState = $walletStore;
-	let initializing = false;
 
 	// Modal state
 	let showConfirmModal = false;
@@ -103,9 +108,36 @@
 	}
 
 	function calculateTotals() {
+		const openPositions = positions.filter(p => p.status === 'Active');
+		const closedPositions = positions.filter(p => p.status === 'Closed');
+
+		openPositionsCount = openPositions.length;
+		closedPositionsCount = closedPositions.length;
+
+		openPositionsPnl = openPositions.reduce((sum, pos) => sum + pos.pnl, 0);
+		closedPositionsPnl = closedPositions.reduce((sum, pos) => sum + pos.pnl, 0);
+
+		openPositionsValue = openPositions.reduce((sum, pos) => sum + (pos.shares * pos.currentPrice), 0);
+		closedPositionsValue = closedPositions.reduce((sum, pos) => sum + (pos.shares * pos.currentPrice), 0);
+
 		totalPnl = positions.reduce((sum, pos) => sum + pos.pnl, 0);
 		totalValue = positions.reduce((sum, pos) => sum + (pos.shares * pos.currentPrice), 0);
 	}
+
+	$: filteredPositions = positions.filter(pos => {
+		if (positionFilter === 'open') return pos.status === 'Active';
+		if (positionFilter === 'closed') return pos.status === 'Closed';
+		return true;
+	});
+
+	$: displayTotalPositions = positionFilter === 'all' ? positions.length :
+		positionFilter === 'open' ? openPositionsCount : closedPositionsCount;
+
+	$: displayTotalValue = positionFilter === 'all' ? totalValue :
+		positionFilter === 'open' ? openPositionsValue : closedPositionsValue;
+
+	$: displayTotalPnl = positionFilter === 'all' ? totalPnl :
+		positionFilter === 'open' ? openPositionsPnl : closedPositionsPnl;
 
 	function formatUSDC(amount: number): string {
 		return new Intl.NumberFormat('en-US', {
@@ -194,99 +226,91 @@
 		showErrorModal = false;
 		modalDetails = null;
 	}
-
-	async function handleInitialize() {
-		if (!walletState.adapter || !walletState.connected) {
-			showErrorModal = true;
-			modalTitle = 'Wallet Not Connected';
-			modalMessage = 'Please connect your wallet first';
-			return;
-		}
-		initializing = true;
-		try {
-			await initializeUserAccountIfNeeded(walletState.adapter);
-			showSuccessModal = true;
-			modalTitle = 'Account Initialized!';
-			modalMessage = 'You now have 10,000 USDC to trade with!';
-		} catch (error: any) {
-			console.error('Failed to initialize:', error);
-			showErrorModal = true;
-			modalTitle = 'Initialization Failed';
-			modalMessage = error.message || 'Unknown error';
-		} finally {
-			initializing = false;
-		}
-	}
 </script>
 
-<div class="polyMock">
-	<!-- Command Bar -->
-	<div class="command-bar">
-		<a href="/" class="logo">POLYMOCK</a>
-		<div class="nav-links">
-			<a href="/" class="nav-link active">TERMINAL</a>
-		</div>
-		<input
-			type="text"
-			placeholder="Type command and press GO"
-			class="command-input"
-			disabled
-		/>
-		<button class="go-button" disabled>GO</button>
-
-		{#if walletState.connected}
-			{#if !walletState.userAccountInitialized && !walletState.loading}
-				<button class="initialize-btn" on:click={handleInitialize} disabled={initializing}>
-					{initializing ? 'Initializing...' : 'Initialize Account (0.1 SOL)'}
-				</button>
-			{/if}
-
-			{#if walletState.userAccountInitialized}
-				<div class="balance-display">
-					<span class="balance-label">Balance:</span>
-					<span class="balance-amount">${walletState.usdcBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-				</div>
-			{/if}
-
-			{#if walletState.loading}
-				<div class="loading-badge">Loading...</div>
-			{/if}
-		{/if}
-
-		<WalletButton />
-	</div>
-
-	<!-- Tabs -->
-	<div class="tabs">
-		<button class="tab" on:click={() => goto('/')}>POLYMARKET</button>
-		<button class="tab" on:click={() => goto('/')}>NEWS</button>
-		<button class="tab active">DASHBOARD</button>
-	</div>
-
 <div class="dashboard-container">
+
+	<!-- Position Filter Tabs -->
+	<div class="filter-tabs">
+		<button
+			class="filter-tab"
+			class:active={positionFilter === 'all'}
+			on:click={() => positionFilter = 'all'}
+		>
+			All Positions
+			<span class="tab-count">{positions.length}</span>
+		</button>
+		<button
+			class="filter-tab"
+			class:active={positionFilter === 'open'}
+			on:click={() => positionFilter = 'open'}
+		>
+			Open
+			<span class="tab-count">{openPositionsCount}</span>
+		</button>
+		<button
+			class="filter-tab"
+			class:active={positionFilter === 'closed'}
+			on:click={() => positionFilter = 'closed'}
+		>
+			Closed
+			<span class="tab-count">{closedPositionsCount}</span>
+		</button>
+	</div>
 
 	<!-- Stats Overview -->
 	<div class="stats-grid">
 		<div class="stat-card">
-			<div class="stat-label">Total Positions</div>
-			<div class="stat-value">{positions.length}</div>
+			<div class="stat-label">
+				{positionFilter === 'all' ? 'Total Positions' :
+				 positionFilter === 'open' ? 'Open Positions' : 'Closed Positions'}
+			</div>
+			<div class="stat-value">{displayTotalPositions}</div>
+			{#if positionFilter === 'all'}
+				<div class="stat-breakdown">
+					<span class="breakdown-item">Open: {openPositionsCount}</span>
+					<span class="breakdown-separator">•</span>
+					<span class="breakdown-item">Closed: {closedPositionsCount}</span>
+				</div>
+			{/if}
 		</div>
 		<div class="stat-card">
 			<div class="stat-label">Total Value</div>
-			<div class="stat-value">{formatUSDC(totalValue)}</div>
+			<div class="stat-value">{formatUSDC(displayTotalValue)}</div>
+			{#if positionFilter === 'all'}
+				<div class="stat-breakdown">
+					<span class="breakdown-item">Open: {formatUSDC(openPositionsValue)}</span>
+					<span class="breakdown-separator">•</span>
+					<span class="breakdown-item">Closed: {formatUSDC(closedPositionsValue)}</span>
+				</div>
+			{/if}
 		</div>
 		<div class="stat-card">
 			<div class="stat-label">Total P&L</div>
-			<div class="stat-value" class:positive={totalPnl >= 0} class:negative={totalPnl < 0}>
-				{formatUSDC(totalPnl)}
+			<div class="stat-value" class:positive={displayTotalPnl >= 0} class:negative={displayTotalPnl < 0}>
+				{formatUSDC(displayTotalPnl)}
 			</div>
+			{#if positionFilter === 'all'}
+				<div class="stat-breakdown">
+					<span class="breakdown-item" class:positive={openPositionsPnl >= 0} class:negative={openPositionsPnl < 0}>
+						Open: {formatUSDC(openPositionsPnl)}
+					</span>
+					<span class="breakdown-separator">•</span>
+					<span class="breakdown-item" class:positive={closedPositionsPnl >= 0} class:negative={closedPositionsPnl < 0}>
+						Closed: {formatUSDC(closedPositionsPnl)}
+					</span>
+				</div>
+			{/if}
 		</div>
 	</div>
 
 	<!-- Positions Table -->
 	<div class="positions-section">
 		<div class="section-header">
-			<h2>Active Positions</h2>
+			<h2>
+				{positionFilter === 'all' ? 'All Positions' :
+				 positionFilter === 'open' ? 'Open Positions' : 'Closed Positions'}
+			</h2>
 			<button class="refresh-btn" on:click={loadPositions} disabled={loading}>
 				{loading ? 'Loading...' : 'Refresh'}
 			</button>
@@ -297,7 +321,7 @@
 				<div class="spinner"></div>
 				<p>Loading positions...</p>
 			</div>
-		{:else if positions.length === 0}
+		{:else if filteredPositions.length === 0}
 			<div class="empty-state">
 				<div class="empty-icon"></div>
 				<h3>No Active Positions</h3>
@@ -323,7 +347,7 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each positions as position (position.id)}
+						{#each filteredPositions as position (position.id)}
 							<tr>
 								<td class="market-cell">
 									<button class="market-link" on:click={() => goToMarket(position.marketId)}>
@@ -450,14 +474,64 @@
 </div>
 {/if}
 
-</div>
-
 <style>
 	.dashboard-container {
 		min-height: 100vh;
 		background: #0A0E1A;
 		color: white;
 		padding: 20px;
+	}
+
+	.filter-tabs {
+		display: flex;
+		gap: 12px;
+		max-width: 1400px;
+		margin: 0 auto 24px;
+		padding: 4px;
+		background: #151B2F;
+		border: 1px solid #2A2F45;
+		border-radius: 12px;
+	}
+
+	.filter-tab {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		padding: 12px 20px;
+		background: transparent;
+		border: none;
+		border-radius: 8px;
+		color: #8B92AB;
+		font-size: 14px;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+
+	.filter-tab:hover {
+		background: rgba(0, 180, 255, 0.05);
+		color: #E8E8E8;
+	}
+
+	.filter-tab.active {
+		background: rgba(0, 180, 255, 0.1);
+		color: #00B4FF;
+		border: 1px solid #00B4FF;
+	}
+
+	.tab-count {
+		padding: 2px 8px;
+		background: rgba(0, 180, 255, 0.15);
+		border-radius: 12px;
+		font-size: 12px;
+		font-weight: 700;
+	}
+
+	.filter-tab.active .tab-count {
+		background: #00B4FF;
+		color: #0A0E1A;
 	}
 
 	.dashboard-header {
@@ -511,6 +585,32 @@
 
 	.stat-value.negative {
 		color: #FF6B6B;
+	}
+
+	.stat-breakdown {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-top: 12px;
+		font-size: 13px;
+		color: #8B92AB;
+	}
+
+	.breakdown-item {
+		font-size: 12px;
+	}
+
+	.breakdown-item.positive {
+		color: #00D68F;
+	}
+
+	.breakdown-item.negative {
+		color: #FF6B6B;
+	}
+
+	.breakdown-separator {
+		color: #2A2F45;
+		font-weight: bold;
 	}
 
 	.positions-section {
@@ -748,153 +848,6 @@
 		.positions-table {
 			min-width: 900px;
 		}
-	}
-
-	/* polyMock container */
-	.polyMock {
-		background: #0A0E27;
-		min-height: 100vh;
-		color: #E8E8E8;
-	}
-
-	/* Command bar styles */
-	.command-bar {
-		background: #1E2139;
-		padding: 12px 24px;
-		display: flex;
-		align-items: center;
-		gap: 16px;
-		border-bottom: 1px solid #2A2F45;
-	}
-
-	.logo {
-		font-family: 'Courier New', monospace;
-		font-weight: bold;
-		font-size: 14px;
-		color: #00D084;
-		text-decoration: none;
-	}
-
-	.nav-links {
-		display: flex;
-		gap: 16px;
-	}
-
-	.nav-link {
-		color: #E8E8E8;
-		text-decoration: none;
-		font-size: 12px;
-		font-weight: 600;
-		padding: 6px 12px;
-		border: 1px solid transparent;
-	}
-
-	.nav-link.active {
-		color: #00D084;
-		border-color: #00D084;
-	}
-
-	.command-input {
-		flex: 1;
-		background: #0A0E1A;
-		border: 1px solid #2A2F45;
-		color: #E8E8E8;
-		padding: 8px 12px;
-		font-family: 'Courier New', monospace;
-		font-size: 12px;
-	}
-
-	.command-input:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.go-button {
-		background: #00D084;
-		color: #0A0E1A;
-		border: none;
-		padding: 8px 20px;
-		font-weight: bold;
-		font-size: 12px;
-		cursor: pointer;
-	}
-
-	.go-button:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.initialize-btn {
-		background: #00B4FF;
-		color: white;
-		border: none;
-		padding: 8px 16px;
-		font-size: 12px;
-		font-weight: 600;
-		cursor: pointer;
-		border-radius: 6px;
-		white-space: nowrap;
-	}
-
-	.initialize-btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-
-	.balance-display {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 6px 12px;
-		background: #0A0E1A;
-		border: 1px solid #2A2F45;
-		border-radius: 6px;
-	}
-
-	.balance-label {
-		color: #8B92AB;
-		font-size: 12px;
-	}
-
-	.balance-amount {
-		color: #00D084;
-		font-weight: 600;
-		font-size: 14px;
-	}
-
-	.loading-badge {
-		color: #8B92AB;
-		font-size: 12px;
-	}
-
-	/* Tabs */
-	.tabs {
-		display: flex;
-		gap: 2px;
-		background: #151B2F;
-		padding: 0 24px;
-		border-bottom: 1px solid #2A2F45;
-	}
-
-	.tab {
-		background: transparent;
-		color: #8B92AB;
-		border: none;
-		padding: 12px 20px;
-		font-size: 12px;
-		font-weight: 600;
-		cursor: pointer;
-		border-bottom: 2px solid transparent;
-		transition: all 0.2s;
-	}
-
-	.tab:hover {
-		color: #E8E8E8;
-	}
-
-	.tab.active {
-		color: #00D084;
-		border-bottom-color: #00D084;
 	}
 
 	/* Modal Styles */

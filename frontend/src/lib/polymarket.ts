@@ -181,7 +181,7 @@ export class PolymarketClient {
       description: market.description || '',
       price: market.last_trade_price || 0,
       volume24h: market.volume_24hr || 0,
-      endDate: new Date(market.end_date_iso),
+      endDate: new Date(market.endDate || market.end_date_iso || ''),
       category: market.tags?.[0] || 'General'
     };
   }

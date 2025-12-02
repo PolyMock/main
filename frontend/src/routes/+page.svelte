@@ -3,8 +3,6 @@
 	import { goto } from '$app/navigation';
 	import { HermesClient } from '@pythnetwork/hermes-client';
 	import { polymarketClient, type PolyMarket } from '$lib/polymarket';
-	import WalletButton from '$lib/wallet/WalletButton.svelte';
-	import { walletStore } from '$lib/wallet/stores';
 
 	const hermesClient = new HermesClient('https://hermes.pyth.network', {});
 
@@ -28,40 +26,12 @@
 	};
 	let previousPrices: Record<string, number> = {};
 	let command = '';
-	let selectedTab = 'MARKETS';
-	let newsLoading = true;
-	let showAllNews = false;
 	let pythUpdateInterval: any = null;
 	let pythLastUpdate = 0;
 	let polymarketsLoading = true;
+	let newsLoading = true;
+	let showAllNews = false;
 	let selectedMarket: PolyMarket | null = null;
-	let walletState = $walletStore;
-
-	// Subscribe to wallet state
-	walletStore.subscribe(value => {
-		walletState = value;
-	});
-
-	let initializing = false;
-
-	async function handleInitialize() {
-		if (!walletState.adapter || !walletState.connected) {
-			alert('Please connect your wallet first');
-			return;
-		}
-
-		initializing = true;
-		try {
-			const { initializeUserAccountIfNeeded } = await import('$lib/wallet/stores');
-			await initializeUserAccountIfNeeded(walletState.adapter);
-			alert('Account initialized successfully with 10,000 USDC!');
-		} catch (error: any) {
-			console.error('Failed to initialize:', error);
-			alert(`Failed to initialize account: ${error.message || 'Unknown error'}`);
-		} finally {
-			initializing = false;
-		}
-	}
 
 	async function fetchNews() {
 		newsLoading = true;
@@ -76,9 +46,9 @@
 
 			if (data.Data && data.Data.length > 0) {
 				news = data.Data.slice(0, 30);
-			} else {
 			}
 		} catch (error) {
+			console.error('Error fetching news:', error);
 			news = [];
 		} finally {
 			newsLoading = false;
@@ -152,13 +122,9 @@
 
 	function executeCommand() {
 		const cmd = command.toUpperCase();
-		if (cmd.includes('MARKETS')) switchTab('MARKETS');
-		else if (cmd.includes('NEWS')) switchTab('NEWS');
+		if (cmd.includes('MARKETS')) goto('/');
+		else if (cmd.includes('NEWS')) goto('/news');
 		command = '';
-	}
-
-	function switchTab(newTab: string) {
-		selectedTab = newTab;
 	}
 
 	function selectMarket(market: PolyMarket) {
@@ -173,7 +139,7 @@
 		startPythPriceUpdates();
 
 		setInterval(fetchNews, 300000); // 5 minutes
-		setInterval(fetchPolymarkets, 30000); // 30 seconds
+		setInterval(fetchPolymarkets, 300000); // 5 minutes
 
 		return () => {
 			if (pythUpdateInterval) {
@@ -185,10 +151,6 @@
 
 <div class="polyMock">
 	<div class="command-bar">
-		<a href="/" class="logo">POLYMOCK</a>
-		<div class="nav-links">
-			<a href="/" class="nav-link active">TERMINAL</a>
-		</div>
 		<input
 			type="text"
 			bind:value={command}
@@ -198,26 +160,6 @@
 		/>
 		<button class="go-button" on:click={executeCommand}>GO</button>
 
-		{#if walletState.connected}
-			{#if !walletState.userAccountInitialized && !walletState.loading}
-				<button class="initialize-btn" on:click={handleInitialize} disabled={initializing}>
-					{initializing ? 'Initializing...' : 'Initialize Account (0.1 SOL)'}
-				</button>
-			{/if}
-
-			{#if walletState.userAccountInitialized}
-				<div class="balance-display">
-					<span class="balance-label">Balance:</span>
-					<span class="balance-amount">${walletState.usdcBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-				</div>
-			{/if}
-
-			{#if walletState.loading}
-				<div class="loading-badge">Loading...</div>
-			{/if}
-		{/if}
-
-		<WalletButton />
 		<div class="command-bar-right">
 			<div class="pyth-status">
 				<span class="status-label">SOL PRICE:</span>
@@ -239,16 +181,11 @@
 		</div>
 	</div>
 
-	<div class="tabs">
-		<button class="tab" class:active={selectedTab === 'MARKETS'} on:click={() => switchTab('MARKETS')}>POLYMARKET</button>
-		<button class="tab" class:active={selectedTab === 'NEWS'} on:click={() => switchTab('NEWS')}>NEWS</button>
-		<button class="tab" on:click={() => goto('/dashboard')}>DASHBOARD</button>
-	</div>
-
 	<div class="main-grid">
+		<!-- News Panel -->
 		<div class="panel news-panel">
 			<div class="panel-header">
-				TOP NEWS - CRYPTO
+				<span>TOP NEWS - CRYPTO</span>
 				{#if !newsLoading && news.length > 7}
 					<button class="news-toggle" on:click={() => showAllNews = !showAllNews}>
 						{showAllNews ? '▲ COLLAPSE' : '▼ SHOW ALL'}
@@ -283,65 +220,61 @@
 			</div>
 		</div>
 
+		<!-- Markets Panel -->
 		<div class="panel main-panel">
-			{#if selectedTab === 'MARKETS'}
-				<div class="panel-header">
-					POLYMARKET PREDICTION MARKETS
-				</div>
-				<div class="markets-container">
-					{#if polymarketsLoading}
-						<div class="loading-state">Loading Polymarket markets...</div>
-					{:else if polymarkets.length === 0}
-						<div class="error-state">Failed to load markets from Polymarket API.</div>
-					{:else}
-						<div class="markets-grid">
-							{#each polymarkets as market}
-								<button class="market-card" class:selected={selectedMarket?.id === market.id} on:click={() => selectMarket(market)}>
-									{#if market.tags && market.tags[0]}
-										<div class="market-category">{market.tags[0]}</div>
-									{/if}
-									{#if market.image}
-										<div class="market-image-corner">
-											<img src={market.image} alt="Market" />
-										</div>
-									{/if}
-									<div class="market-question">{market.question || 'Unknown Question'}</div>
-
-									<!-- Yes/No Price Options -->
-									<div class="market-outcomes">
-										<div class="outcome-option yes-option">
-											<span class="outcome-label">YES</span>
-											<span class="outcome-price">{((market.yesPrice || 0) * 100).toFixed(1)}¢</span>
-											<span class="outcome-percentage">{((market.yesPrice || 0) * 100).toFixed(0)}%</span>
-										</div>
-										<div class="outcome-option no-option">
-											<span class="outcome-label">NO</span>
-											<span class="outcome-price">{((market.noPrice || 0) * 100).toFixed(1)}¢</span>
-											<span class="outcome-percentage">{((market.noPrice || 0) * 100).toFixed(0)}%</span>
-										</div>
+			<div class="panel-header">
+				POLYMARKET PREDICTION MARKETS
+			</div>
+			<div class="markets-container">
+				{#if polymarketsLoading}
+					<div class="loading-state">Loading Polymarket markets...</div>
+				{:else if polymarkets.length === 0}
+					<div class="error-state">Failed to load markets from Polymarket API.</div>
+				{:else}
+					<div class="markets-grid">
+						{#each polymarkets as market}
+							<button class="market-card" class:selected={selectedMarket?.id === market.id} on:click={() => selectMarket(market)}>
+								{#if market.tags && market.tags[0]}
+									<div class="market-category">{market.tags[0]}</div>
+								{/if}
+								{#if market.image}
+									<div class="market-image-corner">
+										<img src={market.image} alt="Market" />
 									</div>
+								{/if}
+								<div class="market-question">{market.question || 'Unknown Question'}</div>
 
-									<div class="market-volume-bar" style="--yes-percentage: {((market.yesPrice || 0) * 100).toFixed(0)}%"></div>
-									
-									<div class="market-stats">
-										<div class="market-volume">
-											{market.volume_24hr ? `$${(market.volume_24hr / 1000000).toFixed(1)}M` : (market.volume ? `$${(market.volume / 1000000).toFixed(1)}M` : 'No volume')}
-										</div>
-										<div class="market-end">
-											{market.end_date_iso ? new Date(market.end_date_iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'No date'}
-										</div>
+								<!-- Yes/No Price Options -->
+								<div class="market-outcomes">
+									<div class="outcome-option yes-option">
+										<span class="outcome-label">YES</span>
+										<span class="outcome-price">{((market.yesPrice || 0) * 100).toFixed(1)}¢</span>
+										<span class="outcome-percentage">{((market.yesPrice || 0) * 100).toFixed(0)}%</span>
 									</div>
-								</button>
-							{/each}
-						</div>
-					{/if}
-				</div>
-			{:else if selectedTab === 'NEWS'}
-				<div class="panel-header">NEWS DETAILS</div>
-				<div class="news-details">
-					<p>Click on any news article in the left panel to read more details.</p>
-				</div>
-			{/if}
+									<div class="outcome-option no-option">
+										<span class="outcome-label">NO</span>
+										<span class="outcome-price">{((market.noPrice || 0) * 100).toFixed(1)}¢</span>
+										<span class="outcome-percentage">{((market.noPrice || 0) * 100).toFixed(0)}%</span>
+									</div>
+								</div>
+
+								<div class="market-volume-bar" style="--yes-percentage: {((market.yesPrice || 0) * 100).toFixed(0)}%"></div>
+
+								<div class="market-stats">
+									<div class="market-stat-item">
+										<span class="stat-value">{market.volume_24hr ? `$${(market.volume_24hr / 1000000).toFixed(1)}M` : (market.volume ? `$${(market.volume / 1000000).toFixed(1)}M` : '$0')}</span>
+										<span class="stat-label">Vol</span>
+									</div>
+									<div class="market-stat-item">
+										<span class="stat-value">{market.endDate ? new Date(market.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'TBD'}</span>
+										<span class="stat-label">Ends</span>
+									</div>
+								</div>
+							</button>
+						{/each}
+					</div>
+				{/if}
+			</div>
 		</div>
 	</div>
 </div>
@@ -365,45 +298,12 @@
 
 	.command-bar {
 		background: #151B2F;
-		padding: 16px 24px;
+		padding: 12px 24px;
 		display: flex;
 		align-items: center;
 		gap: 16px;
 		border-bottom: 1px solid #2A2F45;
 		flex-wrap: wrap;
-		min-height: 64px;
-	}
-
-	.logo {
-		font-size: 20px;
-		font-weight: 700;
-		color: #E8E8E8;
-		letter-spacing: 1px;
-		text-decoration: none;
-	}
-
-	.nav-links {
-		display: flex;
-		gap: 15px;
-	}
-
-	.nav-link {
-		color: #666;
-		text-decoration: none;
-		font-size: 13px;
-		padding: 4px 10px;
-		border: 1px solid transparent;
-		transition: all 0.2s;
-	}
-
-	.nav-link:hover {
-		color: #fff;
-		border-color: #333;
-	}
-
-	.nav-link.active {
-		color: #4785ff;
-		border-color: #4785ff;
 	}
 
 	.command-input {
@@ -443,73 +343,6 @@
 	.go-button:hover {
 		background: #00B570;
 		transform: scale(1.02);
-	}
-
-	.initialize-btn {
-		padding: 8px 16px;
-		background: linear-gradient(135deg, #00B4FF 0%, #0094D6 100%);
-		color: white;
-		border: none;
-		font-weight: 600;
-		font-size: 13px;
-		cursor: pointer;
-		font-family: Inter, sans-serif;
-		border-radius: 8px;
-		transition: all 200ms ease-out;
-		white-space: nowrap;
-		flex-shrink: 0;
-	}
-
-	.initialize-btn:hover:not(:disabled) {
-		background: linear-gradient(135deg, #00D4FF 0%, #00B4FF 100%);
-		transform: scale(1.02);
-		box-shadow: 0 4px 12px rgba(0, 180, 255, 0.3);
-	}
-
-	.initialize-btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-
-	.loading-badge {
-		padding: 8px 14px;
-		background: #2A2F45;
-		border: 1px solid #3A3F55;
-		border-radius: 8px;
-		color: #8B92AB;
-		font-size: 12px;
-		flex-shrink: 0;
-		animation: pulse 1.5s ease-in-out infinite;
-	}
-
-	@keyframes pulse {
-		0%, 100% { opacity: 1; }
-		50% { opacity: 0.6; }
-	}
-
-	.balance-display {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		padding: 8px 14px;
-		background: linear-gradient(135deg, #1E2139 0%, #252A45 100%);
-		border: 1px solid #00D084;
-		border-radius: 8px;
-		font-size: 13px;
-		font-weight: 600;
-		flex-shrink: 0;
-	}
-
-	.balance-label {
-		color: #8B92AB;
-		font-size: 11px;
-		letter-spacing: 0.5px;
-	}
-
-	.balance-amount {
-		color: #00D084;
-		font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
-		font-size: 14px;
 	}
 
 	.pyth-status {
@@ -591,36 +424,6 @@
 		font-style: italic;
 	}
 
-	.tabs {
-		background: #151B2F;
-		display: flex;
-		gap: 4px;
-		padding: 0 24px;
-		border-bottom: 1px solid #2A2F45;
-	}
-
-	.tab {
-		background: transparent;
-		color: #A0A0A0;
-		border: none;
-		padding: 12px 20px;
-		font-family: Inter, sans-serif;
-		font-size: 14px;
-		font-weight: 500;
-		cursor: pointer;
-		border-bottom: 2px solid transparent;
-		transition: all 200ms ease-out;
-	}
-
-	.tab.active {
-		color: #E8E8E8;
-		border-bottom-color: #00D084;
-	}
-
-	.tab:hover {
-		color: #E8E8E8;
-	}
-
 	.main-grid {
 		display: grid;
 		grid-template-columns: 320px 1fr;
@@ -643,14 +446,14 @@
 	}
 
 	.news-panel {
-		height: 650px;
-		max-height: 650px;
-	}
-
-	.main-panel {
+		height: 100%;
 		min-height: 650px;
 	}
 
+	.main-panel {
+		height: 100%;
+		min-height: 650px;
+	}
 
 	.panel-header {
 		background: transparent;
@@ -724,19 +527,20 @@
 	}
 
 	.news-toggle {
-		color: #00ff00;
+		color: #00D084;
 		cursor: pointer;
-		font-size: 9px;
+		font-size: 10px;
 		font-weight: bold;
 		transition: all 0.2s ease;
-		padding: 2px 6px;
-		border: 1px solid #00ff00;
-		background: rgba(0, 255, 0, 0.1);
-		font-family: 'Courier New', monospace;
+		padding: 4px 8px;
+		border: 1px solid #00D084;
+		background: rgba(0, 208, 132, 0.1);
+		font-family: Inter, sans-serif;
+		border-radius: 4px;
 	}
 
 	.news-toggle:hover {
-		background: #00ff00;
+		background: #00D084;
 		color: #000;
 		transform: scale(1.05);
 	}
@@ -744,25 +548,26 @@
 	.news-more {
 		text-align: center;
 		padding: 15px;
-		border-top: 1px solid #333;
+		border-top: 1px solid #2A2F45;
 		margin-top: 10px;
 	}
 
 	.show-more-btn {
-		background: #1a1a1a;
-		color: #4785ff;
-		border: 1px solid #4785ff;
+		background: #1E2139;
+		color: #00B4FF;
+		border: 1px solid #00B4FF;
 		padding: 8px 16px;
-		font-family: 'Courier New', monospace;
+		font-family: Inter, sans-serif;
 		font-size: 11px;
 		font-weight: bold;
 		cursor: pointer;
 		transition: all 0.2s ease;
 		letter-spacing: 0.5px;
+		border-radius: 4px;
 	}
 
 	.show-more-btn:hover {
-		background: #4785ff;
+		background: #00B4FF;
 		color: #000;
 		transform: scale(1.05);
 	}
@@ -960,22 +765,28 @@
 		justify-content: space-between;
 		align-items: center;
 		margin-top: auto;
+		gap: 12px;
 	}
 
-	.market-volume,
-	.market-end {
-		color: #A0A0A0;
-		font-size: 12px;
-		font-weight: 400;
+	.market-stat-item {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
 	}
 
+	.stat-value {
+		color: #E8E8E8;
+		font-size: 13px;
+		font-weight: 600;
+		font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+	}
 
-
-	.news-details {
-		padding: 40px;
-		text-align: center;
+	.stat-label {
 		color: #666;
-		font-size: 14px;
+		font-size: 10px;
+		font-weight: 500;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
 	}
 
 	::-webkit-scrollbar {

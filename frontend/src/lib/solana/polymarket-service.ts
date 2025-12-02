@@ -4,8 +4,9 @@ import {
 	SystemProgram,
 	LAMPORTS_PER_SOL,
 } from '@solana/web3.js';
-import { AnchorProvider, Program, BN } from '@coral-xyz/anchor';
+import { AnchorProvider, Program } from '@coral-xyz/anchor';
 import type { Idl } from '@coral-xyz/anchor';
+import BN from 'bn.js';
 import { PUBLIC_SOLANA_PROGRAM_ID, PUBLIC_SOLANA_RPC_ENDPOINT } from '$env/static/public';
 import IDL from './polymarket_paper.json';
 import { erVerification } from './er-verification';

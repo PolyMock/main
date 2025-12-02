@@ -434,6 +434,13 @@
 	{:else if market}
 		<!-- Header Section -->
 		<div class="market-header">
+			<button class="back-button" on:click={handleBack}>
+				<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+					<path d="M19 12H5M12 19l-7-7 7-7"/>
+				</svg>
+				Back to Markets
+			</button>
+
 			<div class="header-left">
 				<div class="market-info">
 					{#if market.image}
@@ -447,9 +454,9 @@
 					</div>
 				</div>
 			</div>
-			
+
 			<div class="header-right">
-				<div class="market-date">{market.end_date_iso ? formatDate(market.end_date_iso) : 'November 30'}</div>
+				<div class="market-date">{market.endDate ? formatDate(market.endDate) : 'TBD'}</div>
 				<div class="header-icons">
 					<button class="icon-btn">
 						<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -551,23 +558,70 @@
 				{:else if selectedTab === 'Resolution'}
 					<!-- Resolution Content -->
 					<div class="resolution-content">
+						<!-- Resolution Outcome -->
+						{#if market.closed}
+							<div class="resolution-section outcome-section">
+								<div class="section-header">
+									<h3>🎯 Resolution Outcome</h3>
+								</div>
+								<div class="section-content">
+									<div class="outcome-result">
+										{#if market.resolvedOutcome}
+											<div class="resolved-badge resolved-{market.resolvedOutcome.toLowerCase()}">
+												Resolved: {market.resolvedOutcome}
+											</div>
+										{:else}
+											<div class="resolved-badge resolved-pending">
+												Market Closed - Awaiting Resolution
+											</div>
+										{/if}
+									</div>
+									{#if market.resolvedAt}
+										<p class="resolution-date">
+											Resolved on: {new Date(market.resolvedAt).toLocaleDateString('en-US', {
+												month: 'long',
+												day: 'numeric',
+												year: 'numeric',
+												hour: '2-digit',
+												minute: '2-digit'
+											})}
+										</p>
+									{/if}
+								</div>
+							</div>
+						{:else}
+							<div class="resolution-section outcome-section">
+								<div class="section-header">
+									<h3>📊 Market Status</h3>
+								</div>
+								<div class="section-content">
+									<div class="outcome-result">
+										<div class="resolved-badge resolved-active">
+											Market Active - Trading Open
+										</div>
+									</div>
+									<p class="resolution-info">
+										This market is currently active and accepting trades. It will resolve when the outcome is determined.
+									</p>
+								</div>
+							</div>
+						{/if}
+
 						<div class="resolution-section">
 							<div class="section-header">
 								<h3>Market Description</h3>
 							</div>
 							<div class="section-content">
 								<p>{market.description || 'In the past week, significant developments have emerged regarding the potential release of Jeffrey Epstein-related files by the Trump administration. On November 19, 2025, reports surfaced indicating that the new administration is considering declassifying various documents...'}</p>
-								<button class="show-more">Show more ▼</button>
 							</div>
 						</div>
 
 						<div class="resolution-section">
 							<div class="section-header">
-								<h3>Rules</h3>
+								<h3>Resolution Rules</h3>
 							</div>
 							<div class="section-content">
-								<p>This market will resolve to "Yes" if the Trump Administration publicly releases any files pertaining to the illegal activities of Jeffrey Epstein by the resolution date. The release must be official and accessible to the public...</p>
-								<button class="show-more">Show more ▼</button>
+								<p>{market.rules || 'This market will resolve based on the outcome of the specified event. The resolution criteria will be determined by official sources and verified information.'}</p>
 							</div>
 						</div>
 					</div>
@@ -579,7 +633,7 @@
 				<div class="trading-interface">
 					<!-- Date & Tabs -->
 					<div class="panel-header">
-						<div class="panel-date">{market.end_date_iso ? formatDate(market.end_date_iso) : 'November 30'}</div>
+						<div class="panel-date">{market.endDate ? formatDate(market.endDate) : 'TBD'}</div>
 						<div class="trade-tabs">
 							<button
 								class="trade-tab"
@@ -771,10 +825,44 @@
 	/* Header Section */
 	.market-header {
 		display: flex;
+		flex-wrap: wrap;
 		justify-content: space-between;
 		align-items: flex-start;
 		padding: 24px;
 		border-bottom: 1px solid #2A2F45;
+		gap: 16px;
+	}
+
+	.back-button {
+		width: 100%;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 10px 16px;
+		background: transparent;
+		border: 1px solid #2A2F45;
+		border-radius: 8px;
+		color: #A0A0A0;
+		font-size: 14px;
+		font-weight: 500;
+		cursor: pointer;
+		transition: all 200ms ease-out;
+		font-family: Inter, sans-serif;
+	}
+
+	.back-button:hover {
+		background: rgba(255, 255, 255, 0.05);
+		border-color: #00D084;
+		color: #00D084;
+		transform: translateX(-4px);
+	}
+
+	.back-button svg {
+		transition: transform 200ms ease-out;
+	}
+
+	.back-button:hover svg {
+		transform: translateX(-2px);
 	}
 
 	.header-left {
@@ -1455,6 +1543,58 @@
 
 	.show-more:hover {
 		text-decoration: underline;
+	}
+
+	/* Resolution Outcome Styles */
+	.outcome-section {
+		background: linear-gradient(135deg, #1E2139 0%, #252A45 100%);
+		border: 1px solid #3A4055;
+	}
+
+	.outcome-result {
+		margin-bottom: 16px;
+	}
+
+	.resolved-badge {
+		display: inline-block;
+		padding: 12px 20px;
+		border-radius: 8px;
+		font-size: 16px;
+		font-weight: 700;
+		border: 2px solid;
+		text-align: center;
+	}
+
+	.resolved-badge.resolved-yes {
+		background: rgba(0, 208, 132, 0.15);
+		border-color: #00D084;
+		color: #00D084;
+	}
+
+	.resolved-badge.resolved-no {
+		background: rgba(255, 71, 87, 0.15);
+		border-color: #FF4757;
+		color: #FF4757;
+	}
+
+	.resolved-badge.resolved-pending {
+		background: rgba(0, 180, 255, 0.15);
+		border-color: #00B4FF;
+		color: #00B4FF;
+	}
+
+	.resolved-badge.resolved-active {
+		background: rgba(0, 208, 132, 0.15);
+		border-color: #00D084;
+		color: #00D084;
+	}
+
+	.resolution-date,
+	.resolution-info {
+		color: #A0A0A0;
+		font-size: 14px;
+		margin: 8px 0 0 0;
+		line-height: 1.6;
 	}
 
 	/* Loading States */
