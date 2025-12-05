@@ -36,7 +36,7 @@
 	async function fetchNews() {
 		newsLoading = true;
 		try {
-			const response = await fetch('/api/news?lang=EN&categories=BTC,ETH,SOL');
+			const response = await fetch('/api/news?lang=EN');
 
 			if (!response.ok) {
 				throw new Error(`HTTP ${response.status}: ${response.statusText}`);

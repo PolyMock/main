@@ -7,10 +7,9 @@ export const GET: RequestHandler = async ({ url }) => {
 	try {
 		// Get query parameters from the request
 		const lang = url.searchParams.get('lang') || 'EN';
-		const categories = url.searchParams.get('categories') || 'BTC,ETH,SOL';
 
-		// Fetch from CryptoCompare API
-		const response = await fetch(`${CRYPTOCOMPARE_API_BASE}/data/v2/news/?lang=${lang}&categories=${categories}`, {
+		// Note: categories parameter causes API timeouts, so we fetch all news and filter later if needed
+		const response = await fetch(`${CRYPTOCOMPARE_API_BASE}/data/v2/news/?lang=${lang}`, {
 			headers: {
 				'Accept': 'application/json',
 				'User-Agent': 'PolyMock/1.0'
