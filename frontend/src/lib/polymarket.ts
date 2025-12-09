@@ -292,6 +292,80 @@ export class PolymarketClient {
       return null;
     }
   }
+
+  /**
+   * Fetches the current price for a position based on market ID and prediction type
+   * For closed markets, returns the settlement price (0 or 1)
+   * For open markets, fetches real-time price from CLOB API
+   * @param marketId - The market ID
+   * @param predictionType - 'Yes' or 'No'
+   * @returns The current price, or null if unavailable
+   */
+  async getPositionCurrentPrice(marketId: string, predictionType: 'Yes' | 'No'): Promise<number | null> {
+    try {
+      // First, get market details to check if closed and get token IDs
+      const market = await this.getMarketById(marketId);
+
+      if (!market) {
+        console.error(`Market ${marketId} not found`);
+        return null;
+      }
+
+      // If market is closed, check settlement prices from outcomePrices
+      if (market.closed && market.outcomePrices) {
+        try {
+          const prices = typeof market.outcomePrices === 'string'
+            ? JSON.parse(market.outcomePrices)
+            : market.outcomePrices;
+
+          if (Array.isArray(prices) && prices.length >= 2) {
+            // For binary markets, indices map to: [Yes/First Outcome, No/Second Outcome]
+            // predictionType 'Yes' = index 0, 'No' = index 1
+            const priceIndex = predictionType === 'Yes' ? 0 : 1;
+            const settledPrice = parseFloat(prices[priceIndex]);
+
+            console.log(`Market ${marketId} is closed. ${predictionType} settled at: ${settledPrice}`);
+            return settledPrice;
+          }
+        } catch (error) {
+          console.error(`Error parsing outcomePrices for closed market ${marketId}:`, error);
+        }
+      }
+
+      // Fallback: Check tokens array for winner info (legacy format)
+      if (market.closed && market.tokens) {
+        const relevantToken = market.tokens.find(token =>
+          token.outcome?.toLowerCase() === predictionType.toLowerCase()
+        );
+
+        if (relevantToken && relevantToken.winner !== undefined) {
+          return relevantToken.winner ? 1 : 0;
+        }
+      }
+
+      // For open markets or closed markets without settlement, fetch real-time price
+      if (!market.clobTokenIds || market.clobTokenIds.length < 2) {
+        console.warn(`Market ${marketId} has no clobTokenIds`);
+        return null;
+      }
+
+      const tokenIds = typeof market.clobTokenIds === 'string'
+        ? JSON.parse(market.clobTokenIds)
+        : market.clobTokenIds;
+
+      if (!Array.isArray(tokenIds) || tokenIds.length < 2) {
+        return null;
+      }
+
+      // Token IDs are ordered: [Yes/First Outcome, No/Second Outcome]
+      const tokenId = predictionType === 'Yes' ? tokenIds[0] : tokenIds[1];
+
+      return await this.fetchCLOBPrice(tokenId);
+    } catch (error) {
+      console.error(`Error fetching position price for market ${marketId}:`, error);
+      return null;
+    }
+  }
 }
 
 export const polymarketClient = new PolymarketClient();

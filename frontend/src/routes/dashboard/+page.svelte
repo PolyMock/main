@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { walletStore, refreshUserBalance } from '$lib/wallet/stores';
 	import { polymarketService } from '$lib/solana/polymarket-service';
+	import { polymarketClient } from '$lib/polymarket';
 	import { PublicKey } from '@solana/web3.js';
 
 	interface Position {
@@ -69,34 +70,50 @@
 			const userPublicKey = new PublicKey(walletState.publicKey.toString());
 			const blockchainPositions = await polymarketService.getUserPositions(userPublicKey);
 
-			// Convert blockchain positions to display format
-			positions = blockchainPositions.map((pos, index) => {
+			// Convert blockchain positions to display format and fetch real-time prices
+			const positionsPromises = blockchainPositions.map(async (pos) => {
 				const isYes = 'yes' in pos.predictionType;
 				const amountUsdc = pos.amountUsdc.toNumber() / 1_000_000;
 				const shares = pos.shares.toNumber() / 1_000_000;
 				const pricePerShare = pos.pricePerShare.toNumber() / 1_000_000;
+				const predictionType: 'Yes' | 'No' = isYes ? 'Yes' : 'No';
 
-				// For now, use entry price as current price (would need to fetch from Polymarket API)
-				const currentPrice = pricePerShare;
+				// Fetch current price from Polymarket API
+				let currentPrice = pricePerShare; // Fallback to entry price
+				try {
+					const fetchedPrice = await polymarketClient.getPositionCurrentPrice(
+						pos.marketId,
+						predictionType
+					);
+					if (fetchedPrice !== null) {
+						currentPrice = fetchedPrice;
+					}
+				} catch (error) {
+					console.error(`Error fetching price for position ${pos.positionId}:`, error);
+				}
+
 				const currentValue = shares * currentPrice;
 				const pnl = currentValue - amountUsdc;
 				const pnlPercentage = (pnl / amountUsdc) * 100;
+				const status: 'Active' | 'Closed' = 'active' in pos.status ? 'Active' : 'Closed';
 
 				return {
 					id: pos.positionId.toString(),
 					marketId: pos.marketId,
 					marketName: `Market ${pos.marketId.slice(0, 10)}...`,
-					predictionType: isYes ? 'Yes' : 'No',
+					predictionType,
 					amountUsdc,
 					shares,
 					pricePerShare,
 					currentPrice,
 					pnl,
 					pnlPercentage,
-					status: 'active' in pos.status ? 'Active' : 'Closed',
+					status,
 					openedAt: new Date(pos.openedAt.toNumber() * 1000)
 				};
 			});
+
+			positions = await Promise.all(positionsPromises);
 
 			calculateTotals();
 		} catch (error) {

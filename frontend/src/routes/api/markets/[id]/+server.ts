@@ -79,9 +79,24 @@ export const GET: RequestHandler = async ({ params }) => {
 };
 
 async function enrichMarketWithPrices(market: any): Promise<any> {
-	console.log('Enriching market with prices:', market.id);
+	console.log('Enriching market with prices:', market.id, 'closed:', market.closed);
 
 	try {
+		// If market is closed, use settlement prices from outcomePrices
+		if (market.closed && market.outcomePrices) {
+			const prices = typeof market.outcomePrices === 'string'
+				? JSON.parse(market.outcomePrices)
+				: market.outcomePrices;
+
+			if (Array.isArray(prices) && prices.length >= 2) {
+				market.yesPrice = parseFloat(prices[0]);
+				market.noPrice = parseFloat(prices[1]);
+				console.log('Closed market settlement prices:', { yes: market.yesPrice, no: market.noPrice });
+				return market;
+			}
+		}
+
+		// For open markets, fetch current prices from CLOB API
 		// Parse clobTokenIds
 		const tokenIds = market.clobTokenIds
 			? (typeof market.clobTokenIds === 'string' ? JSON.parse(market.clobTokenIds) : market.clobTokenIds)
@@ -115,7 +130,7 @@ async function enrichMarketWithPrices(market: any): Promise<any> {
 		market.yesPrice = yes;
 		market.noPrice = no;
 
-		console.log('Binary market prices:', { yes: market.yesPrice, no: market.noPrice });
+		console.log('Open market prices:', { yes: market.yesPrice, no: market.noPrice });
 	} catch (error) {
 		console.error('Error enriching market with prices:', error);
 		// Fallback
