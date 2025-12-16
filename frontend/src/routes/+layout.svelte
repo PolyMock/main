@@ -2,11 +2,15 @@
 	import { onMount } from 'svelte';
 	import favicon from '$lib/assets/favicon.svg';
 	import Navbar from '$lib/components/Navbar.svelte';
+	import { handleAuthCallback } from '$lib/auth/auth-store';
 
 	let { children } = $props();
 
-	// Auto-refresh every 5 minutes
 	onMount(() => {
+		// Handle OAuth callback
+		handleAuthCallback();
+
+		// Auto-refresh every 5 minutes
 		const refreshInterval = setInterval(() => {
 			window.location.reload();
 		}, 5 * 60 * 1000); // 5 minutes in milliseconds

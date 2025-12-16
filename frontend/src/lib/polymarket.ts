@@ -81,7 +81,7 @@ export class PolymarketClient {
   private baseURL: string;
 
   constructor() {
-    // Use local API route instead of direct API call to avoid CORS
+    
     this.baseURL = '/api';
   }
 
@@ -89,14 +89,14 @@ export class PolymarketClient {
     try {
       const response = await axios.get(`${this.baseURL}/markets`, {
         params: {
-          limit: limit * 3, // Fetch more to filter for binary markets
+          limit: limit * 3, 
           active: true,
           closed: false
         }
       });
 
       if (response.data && Array.isArray(response.data)) {
-        // Filter for ONLY binary markets (2 outcomes)
+       
         const binaryMarkets = response.data.filter(market => {
           try {
             const outcomes = market.outcomes

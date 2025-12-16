@@ -2,11 +2,13 @@
 	import { page } from '$app/stores';
 	import WalletButton from '$lib/wallet/WalletButton.svelte';
 	import { walletStore } from '$lib/wallet/stores';
+	import { authStore, loginWithGoogle } from '$lib/auth/auth-store';
 
 	let walletState = $walletStore;
 	let initializing = false;
+	let showProfileDropdown = false;
 
-	// Subscribe to wallet state
+	// Subscribe to wallet store
 	walletStore.subscribe(value => {
 		walletState = value;
 	});
@@ -30,8 +32,39 @@
 		}
 	}
 
+	async function handleConnectAccount() {
+		try {
+			const user = await loginWithGoogle();
+			console.log('Login successful:', user);
+		} catch (error: any) {
+			console.error('Login failed:', error);
+			if (error.message !== 'Authentication cancelled') {
+				alert(`Login failed: ${error.message}`);
+			}
+		}
+	}
+
+	function handleLogout() {
+		authStore.logout();
+		showProfileDropdown = false;
+	}
+
+	function toggleProfileDropdown() {
+		showProfileDropdown = !showProfileDropdown;
+	}
+
+	// Close dropdown when clicking outside
+	function handleClickOutside(event: MouseEvent) {
+		const target = event.target as HTMLElement;
+		if (!target.closest('.profile-dropdown-container')) {
+			showProfileDropdown = false;
+		}
+	}
+
 	$: currentPath = $page.url.pathname;
 </script>
+
+<svelte:window on:click={handleClickOutside} />
 
 <div class="navbar">
 	<a href="/" class="logo">POLYMOCK</a>
@@ -61,6 +94,50 @@
 			{#if walletState.loading}
 				<div class="loading-badge">Loading...</div>
 			{/if}
+		{/if}
+
+		<!-- Account Button -->
+		{#if $authStore.isAuthenticated}
+			<div class="profile-dropdown-container">
+				<button class="account-btn" on:click={toggleProfileDropdown}>
+					<img src={$authStore.user?.picture} alt="Profile" class="profile-pic" />
+					<span class="account-name">{$authStore.user?.name?.split(' ')[0]}</span>
+					<svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+						<path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+					</svg>
+				</button>
+
+				{#if showProfileDropdown}
+					<div class="profile-dropdown">
+						<div class="dropdown-header">
+							<img src={$authStore.user?.picture} alt="Profile" class="dropdown-profile-pic" />
+							<div class="dropdown-user-info">
+								<div class="dropdown-user-name">{$authStore.user?.name}</div>
+								<div class="dropdown-user-email">{$authStore.user?.email}</div>
+							</div>
+						</div>
+						<div class="dropdown-divider"></div>
+						<button class="dropdown-item" on:click={handleLogout}>
+							<svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+								<path d="M6 14H3C2.44772 14 2 13.5523 2 13V3C2 2.44772 2.44772 2 3 2H6M11 11L14 8M14 8L11 5M14 8H6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+							</svg>
+							Logout
+						</button>
+					</div>
+				{/if}
+			</div>
+		{:else}
+			<button class="connect-account-btn" on:click={handleConnectAccount} disabled={$authStore.loading}>
+				{#if $authStore.loading}
+					Connecting...
+				{:else}
+					<svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+						<path d="M8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2Z" stroke="currentColor" stroke-width="1.5"/>
+						<path d="M8 5V8L10 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+					</svg>
+					Log In
+				{/if}
+			</button>
 		{/if}
 
 		<WalletButton />
@@ -198,6 +275,168 @@
 		font-size: 14px;
 	}
 
+	.connect-account-btn {
+		padding: 8px 16px;
+		background: linear-gradient(135deg, #00B4FF 0%, #0094D6 100%);
+		color: white;
+		border: none;
+		font-weight: 600;
+		font-size: 13px;
+		cursor: pointer;
+		font-family: Inter, sans-serif;
+		border-radius: 8px;
+		transition: all 200ms ease-out;
+		white-space: nowrap;
+		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.connect-account-btn:hover:not(:disabled) {
+		background: linear-gradient(135deg, #00D4FF 0%, #00B4FF 100%);
+		transform: scale(1.02);
+		box-shadow: 0 4px 12px rgba(0, 180, 255, 0.3);
+	}
+
+	.connect-account-btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.profile-dropdown-container {
+		position: relative;
+	}
+
+	.account-btn {
+		padding: 6px 12px;
+		background: #1E2139;
+		border: 1px solid #2A2F45;
+		border-radius: 8px;
+		color: #E8E8E8;
+		font-family: Inter, sans-serif;
+		font-size: 13px;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 200ms ease-out;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		white-space: nowrap;
+	}
+
+	.account-btn:hover {
+		background: #252A45;
+		border-color: #00D084;
+	}
+
+	.profile-pic {
+		width: 24px;
+		height: 24px;
+		border-radius: 50%;
+		object-fit: cover;
+	}
+
+	.account-name {
+		max-width: 100px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.profile-dropdown {
+		position: absolute;
+		top: calc(100% + 8px);
+		right: 0;
+		min-width: 280px;
+		background: #151B2F;
+		border: 1px solid #2A2F45;
+		border-radius: 12px;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+		z-index: 1000;
+		animation: slideDown 0.2s ease-out;
+	}
+
+	@keyframes slideDown {
+		from {
+			opacity: 0;
+			transform: translateY(-10px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+
+	.dropdown-header {
+		padding: 16px;
+		display: flex;
+		align-items: center;
+		gap: 12px;
+	}
+
+	.dropdown-profile-pic {
+		width: 48px;
+		height: 48px;
+		border-radius: 50%;
+		object-fit: cover;
+		border: 2px solid #2A2F45;
+	}
+
+	.dropdown-user-info {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.dropdown-user-name {
+		font-size: 14px;
+		font-weight: 600;
+		color: #E8E8E8;
+		margin-bottom: 4px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.dropdown-user-email {
+		font-size: 12px;
+		color: #8B92AB;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.dropdown-divider {
+		height: 1px;
+		background: #2A2F45;
+		margin: 0 8px;
+	}
+
+	.dropdown-item {
+		width: 100%;
+		padding: 12px 16px;
+		background: transparent;
+		border: none;
+		color: #E8E8E8;
+		font-family: Inter, sans-serif;
+		font-size: 13px;
+		font-weight: 500;
+		cursor: pointer;
+		transition: all 200ms ease-out;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		text-align: left;
+	}
+
+	.dropdown-item:hover {
+		background: rgba(255, 107, 107, 0.1);
+		color: #FF6B6B;
+	}
+
+	.dropdown-item svg {
+		flex-shrink: 0;
+	}
+
 	@media (max-width: 768px) {
 		.navbar {
 			padding: 12px 16px;
@@ -207,6 +446,10 @@
 			order: 3;
 			width: 100%;
 			flex-basis: 100%;
+		}
+
+		.account-name {
+			display: none;
 		}
 	}
 </style>
