@@ -39,6 +39,7 @@
 	let showAllNews = false;
 	let selectedMarket: PolyMarket | null = null;
 	let selectedCategory = 'all';
+	let filteredPolymarkets: PolyMarket[] = [];
 
 	async function fetchNews() {
 		newsLoading = true;
@@ -91,9 +92,11 @@
 			if (polymarkets.length > 0) {
 				selectedMarket = polymarkets[0];
 			}
+			filteredPolymarkets = polymarkets;
 		} catch (error) {
 			console.error('Error fetching Polymarket markets:', error);
 			polymarkets = [];
+			filteredPolymarkets = [];
 		} finally {
 			polymarketsLoading = false;
 		}
@@ -156,10 +159,52 @@
 	}
 
 	function executeCommand() {
-		const cmd = command.toUpperCase();
-		if (cmd.includes('MARKETS')) goto('/');
-		else if (cmd.includes('NEWS')) goto('/news');
-		command = '';
+		const cmd = command.trim();
+
+		// If command is empty, reset to show all markets
+		if (!cmd) {
+			filteredPolymarkets = polymarkets;
+			return;
+		}
+
+		// Navigation commands
+		const upperCmd = cmd.toUpperCase();
+		if (upperCmd.includes('MARKETS')) {
+			goto('/');
+			command = '';
+			return;
+		} else if (upperCmd.includes('NEWS')) {
+			goto('/news');
+			command = '';
+			return;
+		}
+
+		// Search markets
+		searchMarkets(cmd);
+	}
+
+	function searchMarkets(query: string) {
+		if (!query.trim()) {
+			filteredPolymarkets = polymarkets;
+			return;
+		}
+
+		const lowerQuery = query.toLowerCase();
+		filteredPolymarkets = polymarkets.filter(market => {
+			const questionMatch = market.question?.toLowerCase().includes(lowerQuery);
+			const categoryMatch = market.tags?.some(tag => tag.toLowerCase().includes(lowerQuery));
+			return questionMatch || categoryMatch;
+		});
+	}
+
+	// Real-time search as user types
+	$: if (command) {
+		const trimmed = command.trim();
+		if (trimmed && !trimmed.toUpperCase().includes('MARKETS') && !trimmed.toUpperCase().includes('NEWS')) {
+			searchMarkets(trimmed);
+		}
+	} else {
+		filteredPolymarkets = polymarkets;
 	}
 
 	function selectMarket(market: PolyMarket) {
@@ -190,7 +235,7 @@
 			type="text"
 			bind:value={command}
 			on:keydown={(e) => e.key === 'Enter' && executeCommand()}
-			placeholder="Type command and press GO"
+			placeholder="Search markets or type command..."
 			class="command-input"
 		/>
 		<button class="go-button" on:click={executeCommand}>GO</button>
@@ -259,7 +304,7 @@
 		<div class="panel main-panel">
 			<div class="panel-header">
 				<span>POLYMARKET PREDICTION MARKETS</span>
-				<span class="market-count">{polymarkets.length} markets</span>
+				<span class="market-count">{filteredPolymarkets.length} / {polymarkets.length} markets</span>
 			</div>
 
 			<!-- Category Tabs -->
@@ -278,11 +323,11 @@
 			<div class="markets-container">
 				{#if polymarketsLoading}
 					<div class="loading-state">Loading Polymarket markets...</div>
-				{:else if polymarkets.length === 0}
-					<div class="error-state">No markets found for this category.</div>
+				{:else if filteredPolymarkets.length === 0}
+					<div class="error-state">No markets found matching your search.</div>
 				{:else}
 					<div class="markets-grid">
-						{#each polymarkets as market}
+						{#each filteredPolymarkets as market}
 							<button class="market-card" class:selected={selectedMarket?.id === market.id} on:click={() => selectMarket(market)}>
 								{#if market.tags && market.tags[0]}
 									<div class="market-category">{market.tags[0]}</div>

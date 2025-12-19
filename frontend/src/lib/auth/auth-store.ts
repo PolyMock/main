@@ -6,6 +6,7 @@ export interface UserAccount {
 	email: string;
 	name: string;
 	picture: string;
+	walletAddress?: string;
 	createdAt: Date;
 }
 
@@ -69,6 +70,38 @@ function createAuthStore() {
 				localStorage.removeItem('auth_state');
 			}
 			set(initialState);
+		},
+		linkWallet: (walletAddress: string) => {
+			update(state => {
+				if (!state.user) return state;
+				const newState = {
+					...state,
+					user: {
+						...state.user,
+						walletAddress
+					}
+				};
+				if (browser) {
+					localStorage.setItem('auth_state', JSON.stringify(newState));
+				}
+				return newState;
+			});
+		},
+		updateProfilePicture: (pictureUrl: string) => {
+			update(state => {
+				if (!state.user) return state;
+				const newState = {
+					...state,
+					user: {
+						...state.user,
+						picture: pictureUrl
+					}
+				};
+				if (browser) {
+					localStorage.setItem('auth_state', JSON.stringify(newState));
+				}
+				return newState;
+			});
 		},
 		reset: () => set(initialState)
 	};

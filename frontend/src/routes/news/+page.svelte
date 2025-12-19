@@ -239,6 +239,146 @@
 		gap: 20px;
 	}
 
+	:global(.light-mode) .news-page {
+		background: #FFFFFF;
+	}
+
+	:global(.light-mode) .category-tabs {
+		background: #F5F5F5;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .category-tab {
+		border-color: #E0E0E0;
+		color: #666;
+	}
+
+	:global(.light-mode) .category-tab:hover {
+		background: rgba(0, 181, 112, 0.05);
+		border-color: #00B570;
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .category-tab.active {
+		background: rgba(0, 181, 112, 0.1);
+		border-color: #00B570;
+		color: #00B570;
+	}
+
+	:global(.light-mode) .news-list-panel,
+	:global(.light-mode) .article-viewer-panel {
+		background: #FFFFFF;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .panel-header {
+		border-bottom-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .panel-header h2 {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .news-count {
+		background: #F5F5F5;
+		color: #666;
+	}
+
+	:global(.light-mode) .news-item {
+		border-color: #E0E0E0;
+		background: transparent;
+	}
+
+	:global(.light-mode) .news-item:hover {
+		background: rgba(0, 0, 0, 0.03);
+		border-color: #CCC;
+	}
+
+	:global(.light-mode) .news-item.active {
+		background: rgba(0, 181, 112, 0.1);
+		border-color: #00B570;
+	}
+
+	:global(.light-mode) .news-meta {
+		color: #666;
+	}
+
+	:global(.light-mode) .news-time {
+		color: #999;
+	}
+
+	:global(.light-mode) .news-source {
+		color: #00B570;
+	}
+
+	:global(.light-mode) .news-title {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .tag {
+		background: #F5F5F5;
+		color: #666;
+	}
+
+	:global(.light-mode) .article-title {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .article-meta {
+		border-bottom-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .article-source {
+		color: #00B570;
+	}
+
+	:global(.light-mode) .article-date {
+		color: #666;
+	}
+
+	:global(.light-mode) .article-body p {
+		color: #333;
+	}
+
+	:global(.light-mode) .article-tags {
+		border-top-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .article-tag {
+		background: #F5F5F5;
+		color: #00B570;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .article-footer {
+		border-top-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .read-more-btn {
+		background: #00B570;
+		color: #FFFFFF;
+	}
+
+	:global(.light-mode) .read-more-btn:hover {
+		background: #009560;
+	}
+
+	:global(.light-mode) .empty-state {
+		color: #999;
+	}
+
+	:global(.light-mode) .empty-state svg {
+		stroke: #999;
+	}
+
+	:global(.light-mode) .loading-state {
+		color: #666;
+	}
+
+	:global(.light-mode) .error-state {
+		color: #FF0000;
+	}
+
 	.category-tabs {
 		display: flex;
 		gap: 12px;

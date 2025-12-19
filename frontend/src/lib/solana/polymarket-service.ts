@@ -372,6 +372,53 @@ export class PolymarketService {
 			throw error;
 		}
 	}
+	/**
+	 * Get all user accounts from the blockchain
+	 */
+	async getAllUserAccounts(): Promise<Array<{ publicKey: PublicKey; account: UserAccount }>> {
+		try {
+			if (!this.program) {
+				// Initialize without wallet for read-only operations
+				const provider = new AnchorProvider(
+					this.connection,
+					{} as any,
+					{ commitment: 'confirmed' }
+				);
+				this.program = new Program(IDL as Idl, provider);
+			}
+
+			// Get all UserAccount accounts from the program
+			const accounts = await this.connection.getProgramAccounts(PROGRAM_ID, {
+				filters: [
+					{
+						memcmp: {
+							offset: 0,
+							bytes: Buffer.from([164, 158, 127, 176, 241, 194, 98, 247]).toString('base64'), // UserAccount discriminator
+						},
+					},
+				],
+			});
+
+			const userAccounts: Array<{ publicKey: PublicKey; account: UserAccount }> = [];
+
+			for (const { pubkey, account } of accounts) {
+				try {
+					const decoded = this.program.coder.accounts.decode('UserAccount', account.data);
+					userAccounts.push({
+						publicKey: pubkey,
+						account: decoded as UserAccount,
+					});
+				} catch (error) {
+					console.error('Error decoding user account:', error);
+				}
+			}
+
+			return userAccounts;
+		} catch (error) {
+			console.error('Error fetching all user accounts:', error);
+			return [];
+		}
+	}
 }
 
 // Export singleton instance

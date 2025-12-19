@@ -499,6 +499,262 @@
 		padding: 20px;
 	}
 
+	:global(.light-mode) .dashboard-container {
+		background: #FFFFFF;
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .filter-tabs {
+		background: #F5F5F5;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .filter-tab {
+		background: transparent;
+		border-color: #E0E0E0;
+		color: #666;
+	}
+
+	:global(.light-mode) .filter-tab:hover {
+		background: rgba(0, 181, 112, 0.05);
+	}
+
+	:global(.light-mode) .filter-tab.active {
+		background: rgba(0, 181, 112, 0.1);
+		border-color: #00B570;
+		color: #00B570;
+	}
+
+	:global(.light-mode) .tab-count {
+		background: rgba(0, 181, 112, 0.15);
+		color: #00B570;
+	}
+
+	:global(.light-mode) .stat-card {
+		background: #FFFFFF;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .stat-label {
+		color: #666;
+	}
+
+	:global(.light-mode) .stat-value {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .stat-breakdown {
+		color: #666;
+	}
+
+	:global(.light-mode) .breakdown-item {
+		color: #666;
+	}
+
+	:global(.light-mode) .position-card {
+		background: #FFFFFF;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .position-card:hover {
+		border-color: #CCC;
+		background: #FAFAFA;
+	}
+
+	:global(.light-mode) .position-header {
+		border-bottom-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .market-name {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .prediction-badge {
+		background: rgba(0, 181, 112, 0.1);
+		color: #00B570;
+	}
+
+	:global(.light-mode) .prediction-badge.no {
+		background: rgba(255, 107, 107, 0.1);
+		color: #FF6B6B;
+	}
+
+	:global(.light-mode) .close-position-btn {
+		background: #FFFFFF;
+		color: #FF6B6B;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .close-position-btn:hover {
+		background: #FF6B6B;
+		color: #FFFFFF;
+	}
+
+	:global(.light-mode) .position-details {
+		color: #666;
+	}
+
+	:global(.light-mode) .detail-label {
+		color: #999;
+	}
+
+	:global(.light-mode) .detail-value {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .pnl-display {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .pnl-display.positive {
+		color: #00B570;
+	}
+
+	:global(.light-mode) .pnl-display.negative {
+		color: #FF6B6B;
+	}
+
+	:global(.light-mode) .modal-overlay {
+		background: rgba(0, 0, 0, 0.85);
+	}
+
+	:global(.light-mode) .modal-content {
+		background: #FFFFFF;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .modal-header h2 {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .close-modal-btn {
+		background: transparent;
+		color: #999;
+		border: none;
+	}
+
+	:global(.light-mode) .close-modal-btn:hover {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .modal-body {
+		color: #333;
+	}
+
+	:global(.light-mode) .confirm-btn {
+		background: #00B570;
+	}
+
+	:global(.light-mode) .confirm-btn:hover {
+		background: #009560;
+	}
+
+	:global(.light-mode) .cancel-btn {
+		background: #F5F5F5;
+		color: #1A1A1A;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .cancel-btn:hover {
+		background: #E0E0E0;
+	}
+
+	:global(.light-mode) .empty-state {
+		color: #999;
+	}
+
+	:global(.light-mode) .empty-state svg {
+		stroke: #999;
+	}
+
+	:global(.light-mode) .loading-state {
+		color: #666;
+	}
+
+	:global(.light-mode) .empty-icon {
+		background: #F5F5F5;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .empty-state h3 {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .empty-state p {
+		color: #666;
+	}
+
+	:global(.light-mode) .cta-button {
+		background: #00B570;
+		color: #FFFFFF;
+	}
+
+	:global(.light-mode) .cta-button:hover {
+		background: #009560;
+	}
+
+	:global(.light-mode) .table-container {
+		background: #FFFFFF;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .positions-table {
+		background: #FFFFFF;
+	}
+
+	:global(.light-mode) .positions-table thead {
+		background: #F5F5F5;
+		border-bottom-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .positions-table th {
+		color: #666;
+		border-bottom-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .positions-table td {
+		color: #1A1A1A;
+		border-bottom-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .positions-table tbody tr:hover {
+		background: #FAFAFA;
+	}
+
+	:global(.light-mode) .market-cell {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .type-badge {
+		background: rgba(0, 181, 112, 0.1);
+		color: #00B570;
+	}
+
+	:global(.light-mode) .type-badge.no {
+		background: rgba(255, 107, 107, 0.1);
+		color: #FF6B6B;
+	}
+
+	:global(.light-mode) .status-badge {
+		background: rgba(0, 181, 112, 0.1);
+		color: #00B570;
+	}
+
+	:global(.light-mode) .status-badge.closed {
+		background: rgba(139, 146, 171, 0.1);
+		color: #666;
+	}
+
+	:global(.light-mode) .refresh-btn {
+		background: #FFFFFF;
+		color: #00B570;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .refresh-btn:hover {
+		background: rgba(0, 181, 112, 0.1);
+	}
+
 	.filter-tabs {
 		display: flex;
 		gap: 12px;
