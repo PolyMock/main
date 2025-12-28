@@ -10,10 +10,10 @@
 		// Handle OAuth callback
 		handleAuthCallback();
 
-		// Auto-refresh every 5 minutes
+		// Auto-refresh every 10 minutes
 		const refreshInterval = setInterval(() => {
 			window.location.reload();
-		}, 5 * 60 * 1000); // 5 minutes in milliseconds
+		}, 10 * 60 * 1000); // 10 minutes in milliseconds
 
 		return () => {
 			clearInterval(refreshInterval);
