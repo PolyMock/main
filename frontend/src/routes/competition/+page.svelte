@@ -250,6 +250,54 @@
 		font-family: 'Courier New', monospace;
 	}
 
+	:global(.light-mode) .polyMock {
+		background: #FFFFFF;
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .status-bar {
+		background: #F5F5F5;
+		border-bottom-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .status-item {
+		color: #666;
+	}
+
+	:global(.light-mode) .main-container {
+		background: #FFFFFF;
+	}
+
+	:global(.light-mode) .leaderboard {
+		background: #FFFFFF;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .leaderboard h2 {
+		color: #1A1A1A;
+		border-bottom-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .rank-item {
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .rank-item:hover {
+		background: #FAFAFA;
+	}
+
+	:global(.light-mode) .rank-number {
+		color: #00B570;
+	}
+
+	:global(.light-mode) .rank-name {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .rank-score {
+		color: #666;
+	}
+
 	.status-bar {
 		background: #1a1a1a;
 		padding: 8px 24px;

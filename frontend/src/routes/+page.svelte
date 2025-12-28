@@ -19,6 +19,12 @@
 		spread: number;
 	};
 
+	const MARKET_CATEGORIES = [
+		{ id: 'all', name: 'All Markets', tag: null },
+		{ id: 'trending', name: 'Trending', tag: 'trending' },
+		{ id: 'new', name: 'New', tag: 'new' }
+	];
+
 	let news: any[] = [];
 	let polymarkets: PolyMarket[] = [];
 	let prices: Record<string, PriceData> = {
@@ -32,6 +38,8 @@
 	let newsLoading = true;
 	let showAllNews = false;
 	let selectedMarket: PolyMarket | null = null;
+	let selectedCategory = 'all';
+	let filteredPolymarkets: PolyMarket[] = [];
 
 	async function fetchNews() {
 		newsLoading = true;
@@ -55,18 +63,48 @@
 		}
 	}
 
-	async function fetchPolymarkets() {
+	async function fetchPolymarkets(category: string = 'all') {
 		polymarketsLoading = true;
 		try {
-			polymarkets = await polymarketClient.fetchMarkets(20);
+			// Fetch 60 markets
+			let allMarkets = await polymarketClient.fetchMarkets(60);
+
+			// Apply sorting based on category
+			if (category === 'trending') {
+				// Sort by volume (highest first)
+				polymarkets = allMarkets.sort((a, b) => {
+					const volA = a.volume_24hr || a.volume || 0;
+					const volB = b.volume_24hr || b.volume || 0;
+					return volB - volA;
+				});
+			} else if (category === 'new') {
+				// Sort by creation date (newest first)
+				polymarkets = allMarkets.sort((a, b) => {
+					const dateA = new Date(a.createdAt || a.startDate || 0).getTime();
+					const dateB = new Date(b.createdAt || b.startDate || 0).getTime();
+					return dateB - dateA;
+				});
+			} else {
+				// 'all' - use default sorting (balanced markets)
+				polymarkets = allMarkets;
+			}
+
 			if (polymarkets.length > 0) {
 				selectedMarket = polymarkets[0];
 			}
+			filteredPolymarkets = polymarkets;
 		} catch (error) {
 			console.error('Error fetching Polymarket markets:', error);
+			polymarkets = [];
+			filteredPolymarkets = [];
 		} finally {
 			polymarketsLoading = false;
 		}
+	}
+
+	function selectCategory(categoryId: string) {
+		selectedCategory = categoryId;
+		fetchPolymarkets(categoryId);
 	}
 
 	async function fetchPythPrices() {
@@ -121,10 +159,52 @@
 	}
 
 	function executeCommand() {
-		const cmd = command.toUpperCase();
-		if (cmd.includes('MARKETS')) goto('/');
-		else if (cmd.includes('NEWS')) goto('/news');
-		command = '';
+		const cmd = command.trim();
+
+		// If command is empty, reset to show all markets
+		if (!cmd) {
+			filteredPolymarkets = polymarkets;
+			return;
+		}
+
+		// Navigation commands
+		const upperCmd = cmd.toUpperCase();
+		if (upperCmd.includes('MARKETS')) {
+			goto('/');
+			command = '';
+			return;
+		} else if (upperCmd.includes('NEWS')) {
+			goto('/news');
+			command = '';
+			return;
+		}
+
+		// Search markets
+		searchMarkets(cmd);
+	}
+
+	function searchMarkets(query: string) {
+		if (!query.trim()) {
+			filteredPolymarkets = polymarkets;
+			return;
+		}
+
+		const lowerQuery = query.toLowerCase();
+		filteredPolymarkets = polymarkets.filter(market => {
+			const questionMatch = market.question?.toLowerCase().includes(lowerQuery);
+			const categoryMatch = market.tags?.some(tag => tag.toLowerCase().includes(lowerQuery));
+			return questionMatch || categoryMatch;
+		});
+	}
+
+	// Real-time search as user types
+	$: if (command) {
+		const trimmed = command.trim();
+		if (trimmed && !trimmed.toUpperCase().includes('MARKETS') && !trimmed.toUpperCase().includes('NEWS')) {
+			searchMarkets(trimmed);
+		}
+	} else {
+		filteredPolymarkets = polymarkets;
 	}
 
 	function selectMarket(market: PolyMarket) {
@@ -155,7 +235,7 @@
 			type="text"
 			bind:value={command}
 			on:keydown={(e) => e.key === 'Enter' && executeCommand()}
-			placeholder="Type command and press GO"
+			placeholder="Search markets or type command..."
 			class="command-input"
 		/>
 		<button class="go-button" on:click={executeCommand}>GO</button>
@@ -223,16 +303,31 @@
 		<!-- Markets Panel -->
 		<div class="panel main-panel">
 			<div class="panel-header">
-				POLYMARKET PREDICTION MARKETS
+				<span>POLYMARKET PREDICTION MARKETS</span>
+				<span class="market-count">{filteredPolymarkets.length} / {polymarkets.length} markets</span>
 			</div>
+
+			<!-- Category Tabs -->
+			<div class="category-tabs">
+				{#each MARKET_CATEGORIES as category}
+					<button
+						class="category-tab"
+						class:active={selectedCategory === category.id}
+						on:click={() => selectCategory(category.id)}
+					>
+						{category.name}
+					</button>
+				{/each}
+			</div>
+
 			<div class="markets-container">
 				{#if polymarketsLoading}
 					<div class="loading-state">Loading Polymarket markets...</div>
-				{:else if polymarkets.length === 0}
-					<div class="error-state">Failed to load markets from Polymarket API.</div>
+				{:else if filteredPolymarkets.length === 0}
+					<div class="error-state">No markets found matching your search.</div>
 				{:else}
 					<div class="markets-grid">
-						{#each polymarkets as market}
+						{#each filteredPolymarkets as market}
 							<button class="market-card" class:selected={selectedMarket?.id === market.id} on:click={() => selectMarket(market)}>
 								{#if market.tags && market.tags[0]}
 									<div class="market-category">{market.tags[0]}</div>
@@ -578,11 +673,59 @@
 		flex: 1;
 	}
 
+	.market-count {
+		font-size: 12px;
+		color: #666;
+		font-weight: 400;
+		margin-left: auto;
+	}
+
+	.category-tabs {
+		display: flex;
+		gap: 8px;
+		padding: 16px 24px;
+		border-bottom: 1px solid #2A2F45;
+		overflow-x: auto;
+		flex-wrap: wrap;
+	}
+
+	.category-tab {
+		background: #1E2139;
+		color: #A0A0A0;
+		border: 1px solid #2A2F45;
+		padding: 8px 16px;
+		font-size: 12px;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 200ms ease-out;
+		border-radius: 6px;
+		font-family: Inter, sans-serif;
+		white-space: nowrap;
+	}
+
+	.category-tab:hover {
+		background: rgba(0, 208, 132, 0.1);
+		border-color: #00D084;
+		color: #00D084;
+	}
+
+	.category-tab.active {
+		background: #00D084;
+		color: #000;
+		border-color: #00D084;
+	}
+
 	.markets-grid {
 		display: grid;
-		grid-template-columns: repeat(3, 1fr);
+		grid-template-columns: repeat(4, 1fr);
 		gap: 20px;
 		max-width: 100%;
+	}
+
+	@media (max-width: 1400px) {
+		.markets-grid {
+			grid-template-columns: repeat(3, 1fr);
+		}
 	}
 
 	@media (max-width: 1024px) {

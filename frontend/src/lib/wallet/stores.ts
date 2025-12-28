@@ -1,7 +1,8 @@
-import { writable } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 import type { Adapter } from '@solana/wallet-adapter-base';
 import { polymarketService } from '$lib/solana/polymarket-service';
 import { PublicKey } from '@solana/web3.js';
+import { authStore } from '$lib/auth/auth-store';
 
 export interface WalletState {
 	connected: boolean;
@@ -54,13 +55,23 @@ export function updateWalletConnection() {
 	walletStore.update(state => {
 		if (!state.adapter) return state;
 
-		return {
+		const newState = {
 			...state,
 			connected: state.adapter.connected ?? false,
 			publicKey: state.adapter.publicKey ?? null,
 			connecting: false,
 			disconnecting: false
 		};
+
+		// Link wallet to Google account if authenticated
+		if (newState.connected && newState.publicKey) {
+			const auth = get(authStore);
+			if (auth.isAuthenticated && !auth.user?.walletAddress) {
+				authStore.linkWallet(newState.publicKey.toString());
+			}
+		}
+
+		return newState;
 	});
 }
 

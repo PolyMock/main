@@ -519,6 +519,201 @@
 		margin: 0 auto;
 	}
 
+	:global(.light-mode) .backtesting-container {
+		background: #FFFFFF;
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .page-header h1 {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .subtitle {
+		color: #666;
+	}
+
+	:global(.light-mode) .section {
+		background: #FFFFFF;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .section h2 {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .metrics-grid,
+	:global(.light-mode) .metric-card {
+		background: #FFFFFF;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .metric-label {
+		color: #666;
+	}
+
+	:global(.light-mode) .metric-value {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .metric-value.positive {
+		color: #00B570;
+	}
+
+	:global(.light-mode) .metric-value.negative {
+		color: #FF6B6B;
+	}
+
+	:global(.light-mode) .metric-sublabel {
+		color: #999;
+	}
+
+	:global(.light-mode) .metric-progress {
+		background: #E0E0E0;
+	}
+
+	:global(.light-mode) .progress-bar {
+		background: linear-gradient(90deg, #00B570 0%, #00D68F 100%);
+	}
+
+	:global(.light-mode) .chart-container {
+		background: #FFFFFF;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .trade-history {
+		background: #FFFFFF;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .trade-list {
+		background: #FFFFFF;
+	}
+
+	:global(.light-mode) .trade-item {
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .trade-item:hover {
+		background: #FAFAFA;
+	}
+
+	:global(.light-mode) .trade-market {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .trade-side {
+		background: rgba(0, 181, 112, 0.1);
+		color: #00B570;
+	}
+
+	:global(.light-mode) .trade-side.no {
+		background: rgba(255, 107, 107, 0.1);
+		color: #FF6B6B;
+	}
+
+	:global(.light-mode) .trade-details {
+		color: #666;
+	}
+
+	:global(.light-mode) .trade-detail-label {
+		color: #999;
+	}
+
+	:global(.light-mode) .trade-detail-value {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .trade-pnl {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .trade-pnl.positive {
+		color: #00B570;
+	}
+
+	:global(.light-mode) .trade-pnl.negative {
+		color: #FF6B6B;
+	}
+
+	:global(.light-mode) .empty-state {
+		color: #999;
+	}
+
+	:global(.light-mode) .empty-icon {
+		background: #F5F5F5;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .loading-state {
+		color: #666;
+	}
+
+	:global(.light-mode) .spinner {
+		border-color: #E0E0E0;
+		border-top-color: #00B570;
+	}
+
+	:global(.light-mode) .trades-comparison {
+		background: transparent;
+	}
+
+	:global(.light-mode) .trades-panel {
+		background: #FFFFFF;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .trades-panel h2 {
+		color: #1A1A1A;
+		border-bottom-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .trades-list {
+		background: #FFFFFF;
+	}
+
+	:global(.light-mode) .trade-info {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .trade-type {
+		background: rgba(0, 181, 112, 0.1);
+		color: #00B570;
+	}
+
+	:global(.light-mode) .trade-type.no {
+		background: rgba(255, 107, 107, 0.1);
+		color: #FF6B6B;
+	}
+
+	:global(.light-mode) .trade-result {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .trade-result.positive {
+		color: #00B570;
+	}
+
+	:global(.light-mode) .trade-result.negative {
+		color: #FF6B6B;
+	}
+
+	:global(.light-mode) .no-trades {
+		color: #999;
+	}
+
+	:global(.light-mode) .insights-grid {
+		background: transparent;
+	}
+
+	:global(.light-mode) .insight-card {
+		background: #FFFFFF;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .insight-card p {
+		color: #333;
+	}
+
 	.page-header {
 		margin-bottom: 40px;
 		text-align: center;

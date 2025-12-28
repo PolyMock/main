@@ -6,6 +6,7 @@
 	import { walletStore, refreshUserBalance } from '$lib/wallet/stores';
 	import { polymarketService } from '$lib/solana/polymarket-service';
 	import { PublicKey } from '@solana/web3.js';
+	import MarketChat from '$lib/components/MarketChat.svelte';
 
 	let marketId: string;
 	let market: PolyMarket | null = null;
@@ -479,19 +480,26 @@
 		<!-- Tabs Section -->
 		<div class="tabs-section">
 			<div class="tabs">
-				<button 
-					class="tab" 
+				<button
+					class="tab"
 					class:active={selectedTab === 'Graph'}
 					on:click={() => selectedTab = 'Graph'}
 				>
 					Graph
 				</button>
-				<button 
-					class="tab" 
+				<button
+					class="tab"
 					class:active={selectedTab === 'Resolution'}
 					on:click={() => selectedTab = 'Resolution'}
 				>
 					Resolution
+				</button>
+				<button
+					class="tab"
+					class:active={selectedTab === 'Chat'}
+					on:click={() => selectedTab = 'Chat'}
+				>
+					Chat
 				</button>
 			</div>
 		</div>
@@ -554,6 +562,10 @@
 					<div class="terms-text">
 						By trading, you agree to the <a href="#" class="terms-link">Terms of Use</a>.
 					</div>
+
+				{:else if selectedTab === 'Chat'}
+					<!-- Chat Content -->
+					<MarketChat {marketId} />
 
 				{:else if selectedTab === 'Resolution'}
 					<!-- Resolution Content -->
@@ -820,6 +832,134 @@
 		min-height: 100vh;
 		background: #0A0E27;
 		color: #E8E8E8;
+	}
+
+	:global(.light-mode) .market-detail {
+		background: #FFFFFF;
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .market-header {
+		border-bottom-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .market-title {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .market-info {
+		color: #666;
+	}
+
+	:global(.light-mode) .market-image {
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .category-badge {
+		background: #F5F5F5;
+		color: #666;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .trade-section {
+		background: #FFFFFF;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .trade-options {
+		background: #FFFFFF;
+	}
+
+	:global(.light-mode) .trade-option {
+		background: #FFFFFF;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .trade-option:hover {
+		background: #FAFAFA;
+	}
+
+	:global(.light-mode) .trade-option.selected {
+		border-color: #00B570;
+		background: rgba(0, 181, 112, 0.05);
+	}
+
+	:global(.light-mode) .option-label {
+		color: #666;
+	}
+
+	:global(.light-mode) .option-price {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .option-percentage {
+		color: #666;
+	}
+
+	:global(.light-mode) .input-group label {
+		color: #666;
+	}
+
+	:global(.light-mode) .input-group input {
+		background: #FFFFFF;
+		border-color: #E0E0E0;
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .trade-summary {
+		background: #F5F5F5;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .summary-row {
+		color: #666;
+	}
+
+	:global(.light-mode) .summary-label {
+		color: #999;
+	}
+
+	:global(.light-mode) .summary-value {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .place-trade-btn {
+		background: #00B570;
+	}
+
+	:global(.light-mode) .place-trade-btn:hover {
+		background: #009560;
+	}
+
+	:global(.light-mode) .chart-panel {
+		background: #FFFFFF;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .chart-header h2 {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .stats-grid {
+		background: #FFFFFF;
+	}
+
+	:global(.light-mode) .stat-item {
+		background: #FFFFFF;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .stat-label {
+		color: #999;
+	}
+
+	:global(.light-mode) .stat-value {
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .loading-spinner {
+		border-color: #E0E0E0;
+		border-top-color: #00B570;
 	}
 
 	/* Header Section */
