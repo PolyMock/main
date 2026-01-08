@@ -13,7 +13,7 @@
 	let selectedInterval = '1D';
 	let selectedTab = 'Graph';
 	let selectedOutcome = 'Yes';
-	let tradeAmount = 100;
+	let tradeAmount = 100; // For buy: USD amount, For sell: shares count
 	let tradeMode: 'buy' | 'sell' = 'buy';
 	let loading = true;
 	let error = '';
@@ -28,11 +28,22 @@
 	let modalMessage = '';
 	let modalDetails: any = null;
 	let pendingTrade: (() => Promise<void>) | null = null;
+	let userPositions: any[] = [];
+	let selectedPosition: any = null;
+	let loadingPositions = false;
 
 	// Subscribe to wallet state
 	walletStore.subscribe(value => {
 		walletState = value;
+		if (value.connected && value.publicKey && tradeMode === 'sell') {
+			loadUserPositions();
+		}
 	});
+
+	// Load positions when switching to sell mode or when outcome changes
+	$: if (walletState.connected && walletState.publicKey && tradeMode === 'sell' && market) {
+		loadUserPositions();
+	}
 
 	$: marketId = $page.params.id || '';
 	$: yesPrice = market?.yesPrice || 0;
@@ -135,12 +146,70 @@
 	}
 
 	function handleQuickAmount(amount: number) {
-		if (amount === -1) { // Max
-			tradeAmount = walletState.usdcBalance || 0;
-		} else {
-			const newAmount = tradeAmount + amount;
-			// Don't exceed user's balance
-			tradeAmount = Math.min(newAmount, walletState.usdcBalance || 0);
+		if (tradeMode === 'buy') {
+			if (amount === -1) { // Max
+				tradeAmount = walletState.usdcBalance || 0;
+			} else {
+				const newAmount = tradeAmount + amount;
+				// Don't exceed user's balance
+				tradeAmount = Math.min(newAmount, walletState.usdcBalance || 0);
+			}
+		}
+	}
+
+	async function loadUserPositions() {
+		if (!walletState.connected || !walletState.publicKey || !market) {
+			userPositions = [];
+			return;
+		}
+
+		loadingPositions = true;
+		try {
+			const userPublicKey = new PublicKey(walletState.publicKey.toString());
+			const blockchainPositions = await polymarketService.getUserPositions(userPublicKey);
+
+			// Filter positions for the selected market and outcome
+			userPositions = blockchainPositions
+				.filter(pos => {
+					const isYes = 'yes' in pos.predictionType;
+					const matchesMarket = pos.marketId === market.id;
+					const matchesOutcome = (selectedOutcome === 'Yes' && isYes) || (selectedOutcome === 'No' && !isYes);
+					const isActive = 'active' in pos.status || 'partiallySold' in pos.status;
+					return matchesMarket && matchesOutcome && isActive;
+				})
+				.map(pos => {
+					const isYes = 'yes' in pos.predictionType;
+					const remainingShares = pos.remainingShares.toNumber() / 1_000_000;
+					const shares = pos.shares.toNumber() / 1_000_000;
+					const pricePerShare = pos.pricePerShare.toNumber() / 1_000_000;
+					
+					return {
+						positionId: pos.positionId.toNumber(),
+						marketId: pos.marketId,
+						predictionType: isYes ? 'Yes' : 'No',
+						shares,
+						remainingShares,
+						pricePerShare,
+						amountUsdc: pos.amountUsdc.toNumber() / 1_000_000
+					};
+				});
+
+			// Auto-select first position if available (for sell mode)
+			if (userPositions.length > 0) {
+				selectedPosition = userPositions[0];
+				// Don't auto-set amount, let user choose
+				if (tradeAmount === 0 || tradeAmount === 100) {
+					tradeAmount = 0;
+				}
+			} else {
+				selectedPosition = null;
+				tradeAmount = 0;
+			}
+		} catch (error) {
+			console.error('Error loading user positions:', error);
+			userPositions = [];
+		} finally {
+			loadingPositions = false;
 		}
 	}
 
@@ -204,71 +273,143 @@
 			return;
 		}
 
-		if (tradeMode !== 'buy') {
-			showErrorModal = true;
-			modalTitle = 'Coming Soon';
-			modalMessage = 'Sell functionality coming soon! For now, you can only buy positions.';
-			return;
-		}
+		if (tradeMode === 'buy') {
+			// Calculate and show confirmation modal for buy
+			const shares = tradeAmount / price;
+			const potentialWin = shares;
 
-		// Calculate and show confirmation modal
-		const shares = tradeAmount / price;
-		const potentialWin = shares;
+			modalTitle = `Buy ${selectedOutcome}`;
+			modalDetails = {
+				action: `Buy ${selectedOutcome}`,
+				amount: formatDollar(tradeAmount),
+				price: formatPrice(price),
+				shares: shares.toFixed(2),
+				potentialWin: formatDollar(potentialWin)
+			};
+			showConfirmModal = true;
 
-		modalTitle = `Buy ${selectedOutcome}`;
-		modalDetails = {
-			action: `Buy ${selectedOutcome}`,
-			amount: formatDollar(tradeAmount),
-			price: formatPrice(price),
-			shares: shares.toFixed(2),
-			potentialWin: formatDollar(potentialWin)
-		};
-		showConfirmModal = true;
+			// Store the actual trade execution
+			pendingTrade = async () => {
+				trading = true;
+				try {
+					// Execute the trade on Solana
+					let txSignature: string;
 
-		// Store the actual trade execution
-		pendingTrade = async () => {
-			trading = true;
-			try {
-				// Execute the trade on Solana
-				let txSignature: string;
+					if (selectedOutcome === 'Yes') {
+						txSignature = await polymarketService.buyYes(
+							walletState.adapter,
+							marketId,
+							tradeAmount,
+							price
+						);
+					} else {
+						txSignature = await polymarketService.buyNo(
+							walletState.adapter,
+							marketId,
+							tradeAmount,
+							price
+						);
+					}
 
-				if (selectedOutcome === 'Yes') {
-					txSignature = await polymarketService.buyYes(
-						walletState.adapter,
-						marketId,
-						tradeAmount,
-						price
-					);
-				} else {
-					txSignature = await polymarketService.buyNo(
-						walletState.adapter,
-						marketId,
-						tradeAmount,
-						price
-					);
+					// Show success modal
+					modalTitle = 'Trade Successful!';
+					modalMessage = `Transaction: ${txSignature.slice(0, 20)}...`;
+					showSuccessModal = true;
+
+					// Refresh user balance after successful trade
+					if (walletState.publicKey) {
+						await refreshUserBalance(new PublicKey(walletState.publicKey.toString()));
+					}
+
+					// Reset trade amount
+					tradeAmount = 100;
+				} catch (error: any) {
+					console.error('Trade failed:', error);
+					showErrorModal = true;
+					modalTitle = 'Trade Failed';
+					modalMessage = error.message || 'Unknown error occurred';
+				} finally {
+					trading = false;
 				}
-
-				// Show success modal
-				modalTitle = 'Trade Successful!';
-				modalMessage = `Transaction: ${txSignature.slice(0, 20)}...`;
-				showSuccessModal = true;
-
-				// Refresh user balance after successful trade
-				if (walletState.publicKey) {
-					await refreshUserBalance(new PublicKey(walletState.publicKey.toString()));
-				}
-
-				// Reset trade amount
-				tradeAmount = 100;
-			} catch (error: any) {
-				console.error('Trade failed:', error);
+			};
+		} else {
+			// Sell logic
+			if (!selectedPosition) {
 				showErrorModal = true;
-				modalTitle = 'Trade Failed';
-				modalMessage = error.message || 'Unknown error occurred';
-			} finally {
-				trading = false;
+				modalTitle = 'No Position Selected';
+				modalMessage = 'Please select a position to sell.';
+				return;
 			}
-		};
+
+			// TradeAmount is already in shares for sell mode
+			const sharesToSell = tradeAmount;
+			const remainingShares = selectedPosition.remainingShares;
+
+			if (sharesToSell <= 0 || sharesToSell > remainingShares) {
+				showErrorModal = true;
+				modalTitle = 'Invalid Amount';
+				modalMessage = `You can only sell up to ${remainingShares.toFixed(2)} shares.`;
+				return;
+			}
+
+			const payout = sharesToSell * price;
+
+			modalTitle = `Sell ${selectedOutcome}`;
+			modalDetails = {
+				action: `Sell ${selectedOutcome}`,
+				shares: sharesToSell.toFixed(2),
+				price: formatPrice(price),
+				amount: `${sharesToSell.toFixed(2)} shares`,
+				potentialWin: formatDollar(payout)
+			};
+			showConfirmModal = true;
+
+			// Store the actual trade execution
+			pendingTrade = async () => {
+				trading = true;
+				try {
+					// Execute the sell on Solana
+					let txSignature: string;
+
+					if (selectedOutcome === 'Yes') {
+						txSignature = await polymarketService.sellYes(
+							walletState.adapter,
+							selectedPosition.positionId,
+							sharesToSell,
+							price
+						);
+					} else {
+						txSignature = await polymarketService.sellNo(
+							walletState.adapter,
+							selectedPosition.positionId,
+							sharesToSell,
+							price
+						);
+					}
+
+					// Show success modal
+					modalTitle = 'Sell Successful!';
+					modalMessage = `Transaction: ${txSignature.slice(0, 20)}...`;
+					showSuccessModal = true;
+
+					// Refresh user balance and positions after successful sell
+					if (walletState.publicKey) {
+						await refreshUserBalance(new PublicKey(walletState.publicKey.toString()));
+						await loadUserPositions();
+					}
+
+					// Reset trade amount
+					tradeAmount = 100;
+				} catch (error: any) {
+					console.error('Sell failed:', error);
+					showErrorModal = true;
+					modalTitle = 'Sell Failed';
+					modalMessage = error.message || 'Unknown error occurred';
+				} finally {
+					trading = false;
+				}
+			};
+		}
 	}
 
 	async function confirmTrade() {
@@ -663,7 +804,7 @@
 						<button 
 							class="outcome-box"
 							class:active={selectedOutcome === 'Yes'}
-							on:click={() => selectedOutcome = 'Yes'}
+							on:click={() => { selectedOutcome = 'Yes'; selectedPosition = null; tradeAmount = 0; }}
 						>
 							<div class="outcome-label">Yes</div>
 							<div class="outcome-price">{formatPrice(yesPrice)}</div>
@@ -671,7 +812,7 @@
 						<button 
 							class="outcome-box"
 							class:active={selectedOutcome === 'No'}
-							on:click={() => selectedOutcome = 'No'}
+							on:click={() => { selectedOutcome = 'No'; selectedPosition = null; tradeAmount = 0; }}
 						>
 							<div class="outcome-label">No</div>
 							<div class="outcome-price">{formatPrice(noPrice)}</div>
@@ -680,22 +821,45 @@
 
 					<!-- Amount Input -->
 					<div class="amount-section">
-						<label class="amount-label">Amount</label>
+						<label class="amount-label">{tradeMode === 'buy' ? 'Amount' : 'Shares'}</label>
 						<div class="amount-input-wrapper">
+							{#if tradeMode === 'buy'}
+								<span class="amount-currency">$</span>
+							{/if}
 							<input
 								type="number"
 								bind:value={tradeAmount}
 								class="amount-input"
-								min="1"
-								max={walletState.usdcBalance || 10000}
-								placeholder={`Max: ${formatDollar(walletState.usdcBalance || 0)}`}
+								class:sell-mode={tradeMode === 'sell'}
+								min="0"
+								step={tradeMode === 'buy' ? '0.01' : '0.01'}
+								max={tradeMode === 'buy' ? (walletState.usdcBalance || 10000) : (selectedPosition ? selectedPosition.remainingShares : 0)}
+								placeholder={tradeMode === 'buy' ? `Max: ${formatDollar(walletState.usdcBalance || 0)}` : (selectedPosition ? `${selectedPosition.remainingShares.toFixed(2)} shares max` : 'No position')}
 							/>
+							{#if tradeMode === 'sell'}
+								<span class="amount-suffix">shares</span>
+							{/if}
 						</div>
 						<div class="quick-amounts">
-							<button class="quick-btn" on:click={() => handleQuickAmount(1)}>+$1</button>
-							<button class="quick-btn" on:click={() => handleQuickAmount(20)}>+$20</button>
-							<button class="quick-btn" on:click={() => handleQuickAmount(100)}>+$100</button>
-							<button class="quick-btn" on:click={() => handleQuickAmount(-1)}>Max</button>
+							{#if tradeMode === 'buy'}
+								<button class="quick-btn" on:click={() => handleQuickAmount(1)}>+$1</button>
+								<button class="quick-btn" on:click={() => handleQuickAmount(20)}>+$20</button>
+								<button class="quick-btn" on:click={() => handleQuickAmount(100)}>+$100</button>
+								<button class="quick-btn" on:click={() => handleQuickAmount(-1)}>Max</button>
+							{:else if selectedPosition}
+								<button class="quick-btn" on:click={() => {
+									tradeAmount = selectedPosition.remainingShares * 0.25;
+								}}>25%</button>
+								<button class="quick-btn" on:click={() => {
+									tradeAmount = selectedPosition.remainingShares * 0.5;
+								}}>50%</button>
+								<button class="quick-btn" on:click={() => {
+									tradeAmount = selectedPosition.remainingShares * 0.75;
+								}}>75%</button>
+								<button class="quick-btn" on:click={() => {
+									tradeAmount = selectedPosition.remainingShares;
+								}}>Max</button>
+							{/if}
 						</div>
 					</div>
 
@@ -716,8 +880,20 @@
 					</div>
 
 					<!-- Trade Button -->
-					<button class="trade-button" on:click={handleTrade}>
-						{tradeMode === 'buy' ? 'Buy' : 'Sell'}
+					<button 
+						class="trade-button" 
+						on:click={handleTrade}
+						disabled={!walletState.connected || tradeAmount <= 0 || trading || (tradeMode === 'sell' && (!selectedPosition || userPositions.length === 0))}
+					>
+						{#if !walletState.connected}
+							Connect Wallet
+						{:else if tradeMode === 'sell' && (!selectedPosition || userPositions.length === 0)}
+							No {selectedOutcome} Position
+						{:else if trading}
+							Processing...
+						{:else}
+							{tradeMode === 'buy' ? 'Buy' : 'Sell'}
+						{/if}
 					</button>
 
 					<!-- Footer -->
@@ -1375,6 +1551,9 @@
 
 	.amount-input-wrapper {
 		position: relative;
+		display: flex;
+		align-items: center;
+		gap: 8px;
 	}
 
 	.amount-input {
@@ -1383,6 +1562,7 @@
 		border: none;
 		border-bottom: 2px solid #2A2F45;
 		padding: 8px 0;
+		padding-left: 20px;
 		font-size: 28px;
 		font-weight: 700;
 		color: #E8E8E8;
@@ -1390,20 +1570,29 @@
 		text-align: right;
 	}
 
+	.amount-input.sell-mode {
+		padding-left: 0;
+	}
+
 	.amount-input:focus {
 		outline: none;
 		border-bottom-color: #00B4FF;
 	}
 
-	.amount-input::before {
-		content: '$';
+	.amount-currency {
 		position: absolute;
 		left: 0;
-		top: 50%;
-		transform: translateY(-50%);
 		font-size: 28px;
 		font-weight: 700;
 		color: #E8E8E8;
+		pointer-events: none;
+	}
+
+	.amount-suffix {
+		font-size: 14px;
+		font-weight: 600;
+		color: #999999;
+		white-space: nowrap;
 	}
 
 	.quick-amounts {
@@ -1486,6 +1675,12 @@
 		font-weight: 700;
 		cursor: pointer;
 		transition: all 200ms ease-out;
+	}
+
+	.trade-button:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+		background: #3A4055;
 	}
 
 	.trade-button:hover {

@@ -24,7 +24,12 @@ ProgramID : AmuwGa8LXKW63ZHzGm1TkqSugbJ8fMVXr6HKksYkwUNT
 - **Advanced Analytics**:
   - Position tracking dashboard
   - Trade history and performance metrics
-  - Market backtesting capabilities
+  - **Professional Strategy Backtesting Engine**:
+    - Test strategies on historical Polymarket data via Dome API
+    - Configurable entry/exit rules and position sizing
+    - Comprehensive metrics (Win rate, ROI, Sharpe ratio, Max drawdown)
+    - Equity curve visualization
+    - CSV/JSON export for further analysis
 
 ## Architecture
 
@@ -201,6 +206,64 @@ The application integrates with Polymarket's public API:
 - **Market Details**: `GET https://clob.polymarket.com/markets/{market_id}`
 - **Order Book**: `GET https://clob.polymarket.com/order-book/{token_id}`
 
+### Dome API (Backtesting)
+
+Historical market data powered by Dome API:
+
+- **Markets**: `GET /v1/polymarket/markets`
+- **Candlesticks**: `GET /v1/polymarket/candlesticks/{condition_id}`
+- **Historical Prices**: `GET /v1/polymarket/market-price/{token_id}`
+- **Orderbooks**: `GET /v1/polymarket/orderbooks`
+
+Documentation: https://docs.domeapi.io/
+
+## Using the Backtesting Engine
+
+### Quick Start
+
+1. Navigate to `/backtesting-v2` in your browser
+2. Configure your strategy:
+   - Set date range (e.g., last 30 days)
+   - Choose entry type (YES, NO, or BOTH)
+   - Set position sizing (fixed amount or % of bankroll)
+   - Configure exit rules (stop loss, take profit, max hold time)
+3. Click "Run Backtest"
+4. View results: metrics, equity curve, and trade history
+5. Export data (CSV or JSON) for further analysis
+
+### Strategy Examples
+
+**Conservative Strategy:**
+- Entry: YES positions only, price 0.35-0.65
+- Exit: 15% stop loss, 40% take profit
+- Position: 5% of bankroll
+
+**Aggressive Strategy:**
+- Entry: Both YES and NO, price 0.60-0.80
+- Exit: 10% stop loss, 20% take profit, max 24h hold
+- Position: Fixed $200
+
+See `BACKTESTING_GUIDE.md` for detailed documentation.
+
+### Metrics Explained
+
+**Free Metrics:**
+- Total trades, win rate, P&L, ROI
+- Average win/loss, best/worst trade
+- YES vs NO performance breakdown
+
+**Pro Metrics:**
+- Equity curve over time
+- Max drawdown, Sharpe ratio, volatility
+- Expectancy, median win/loss
+- Consecutive wins/losses
+
+### Performance
+
+- 50-100 markets, 30 days: ~30-60 seconds
+- Results depend on market filters and date range
+- Export to CSV for Excel analysis
+
 ## Environment Variables
 
 Create `.env` files in the respective directories:
@@ -210,7 +273,14 @@ Create `.env` files in the respective directories:
 PUBLIC_SOLANA_RPC_URL=https://rpc.magicblock.app/devnet/
 PUBLIC_PROGRAM_ID=AmuwGa8LXKW63ZHzGm1TkqSugbJ8fMVXr6HKksYkwUNT
 PUBLIC_POLYMARKET_API=https://clob.polymarket.com
+DOME_API_KEY=your_dome_api_key_here  # Required for backtesting
 ```
+
+**Get your Dome API key:**
+1. Visit https://domeapi.io
+2. Sign up for an account
+3. Generate API key from dashboard
+4. Add to `.env` file
 
 ### Contracts `.env`
 ```bash
@@ -241,6 +311,13 @@ anchor test
 
 MIT License
 
+
+curl --request GET \
+  --url 'https://api.domeapi.io/v1/polymarket/markets?market_slug=will-gavin-newsom-win-the-2028-us-presidential-election' \
+  --header 'Authorization: Bearer ab2f39be5223770bbef420594277b9db2768bb89'
+
+
+  ab2f39be5223770bbef420594277b9db2768bb89
 
 
 

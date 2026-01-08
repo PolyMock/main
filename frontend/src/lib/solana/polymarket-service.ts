@@ -33,7 +33,10 @@ export interface PredictionPosition {
 	amountUsdc: BN;
 	pricePerShare: BN;
 	shares: BN;
-	status: { active: {} } | { closed: {} };
+	remainingShares: BN;
+	totalSoldShares: BN;
+	averageSellPrice: BN;
+	status: { active: {} } | { closed: {} } | { partiallySold: {} } | { fullySold: {} };
 	openedAt: BN;
 	closedAt: BN;
 }
@@ -296,6 +299,100 @@ export class PolymarketService {
 			return tx;
 		} catch (error) {
 			console.error('Error buying NO:', error);
+			throw error;
+		}
+	}
+
+	/**
+	 * Sell YES shares from an existing position
+	 */
+	async sellYes(
+		wallet: any,
+		positionId: number,
+		sharesToSell: number,
+		currentPrice: number
+	): Promise<string> {
+		try {
+			if (!this.program) {
+				throw new Error('Program not initialized');
+			}
+
+			const userPublicKey = wallet.publicKey;
+			const [userAccountPDA] = this.getUserAccountPDA(userPublicKey);
+			const [positionPDA] = this.getPositionPDA(userPublicKey, positionId);
+
+			// Convert to 6 decimal places
+			const sharesToSellBN = new BN(Math.floor(sharesToSell * 1_000_000));
+			const currentPriceBN = new BN(Math.floor(currentPrice * 1_000_000));
+
+			const tx = await this.program.methods
+				.sellYes(sharesToSellBN, currentPriceBN)
+				.accounts({
+					userAccount: userAccountPDA,
+					positionAccount: positionPDA,
+					user: userPublicKey,
+				})
+				.rpc();
+
+			console.log('YES shares sold:', tx);
+
+			// Verify ER usage
+			if (this.verifyEREnabled) {
+				setTimeout(async () => {
+					await erVerification.logERVerification(tx, userAccountPDA);
+				}, 1000);
+			}
+
+			return tx;
+		} catch (error) {
+			console.error('Error selling YES:', error);
+			throw error;
+		}
+	}
+
+	/**
+	 * Sell NO shares from an existing position
+	 */
+	async sellNo(
+		wallet: any,
+		positionId: number,
+		sharesToSell: number,
+		currentPrice: number
+	): Promise<string> {
+		try {
+			if (!this.program) {
+				throw new Error('Program not initialized');
+			}
+
+			const userPublicKey = wallet.publicKey;
+			const [userAccountPDA] = this.getUserAccountPDA(userPublicKey);
+			const [positionPDA] = this.getPositionPDA(userPublicKey, positionId);
+
+			// Convert to 6 decimal places
+			const sharesToSellBN = new BN(Math.floor(sharesToSell * 1_000_000));
+			const currentPriceBN = new BN(Math.floor(currentPrice * 1_000_000));
+
+			const tx = await this.program.methods
+				.sellNo(sharesToSellBN, currentPriceBN)
+				.accounts({
+					userAccount: userAccountPDA,
+					positionAccount: positionPDA,
+					user: userPublicKey,
+				})
+				.rpc();
+
+			console.log('NO shares sold:', tx);
+
+			// Verify ER usage
+			if (this.verifyEREnabled) {
+				setTimeout(async () => {
+					await erVerification.logERVerification(tx, userAccountPDA);
+				}, 1000);
+			}
+
+			return tx;
+		} catch (error) {
+			console.error('Error selling NO:', error);
 			throw error;
 		}
 	}

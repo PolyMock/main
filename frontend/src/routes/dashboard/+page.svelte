@@ -78,18 +78,25 @@
 				const pricePerShare = pos.pricePerShare.toNumber() / 1_000_000;
 				const predictionType: 'Yes' | 'No' = isYes ? 'Yes' : 'No';
 
-				// Fetch current price from Polymarket API
+				// Fetch market details to get the actual market name
+				let marketName = `Market ${pos.marketId.slice(0, 10)}...`; // Fallback
 				let currentPrice = pricePerShare; // Fallback to entry price
 				try {
-					const fetchedPrice = await polymarketClient.getPositionCurrentPrice(
-						pos.marketId,
-						predictionType
-					);
-					if (fetchedPrice !== null) {
-						currentPrice = fetchedPrice;
+					const market = await polymarketClient.getMarketById(pos.marketId);
+					if (market) {
+						marketName = market.question || market.title || marketName;
+
+						// Also fetch current price
+						const fetchedPrice = await polymarketClient.getPositionCurrentPrice(
+							pos.marketId,
+							predictionType
+						);
+						if (fetchedPrice !== null) {
+							currentPrice = fetchedPrice;
+						}
 					}
 				} catch (error) {
-					console.error(`Error fetching price for position ${pos.positionId}:`, error);
+					console.error(`Error fetching market data for position ${pos.positionId}:`, error);
 				}
 
 				const currentValue = shares * currentPrice;
@@ -100,7 +107,7 @@
 				return {
 					id: pos.positionId.toString(),
 					marketId: pos.marketId,
-					marketName: `Market ${pos.marketId.slice(0, 10)}...`,
+					marketName,
 					predictionType,
 					amountUsdc,
 					shares,
@@ -170,8 +177,17 @@
 		return `${sign}${percentage.toFixed(2)}%`;
 	}
 
-	function goToMarket(marketId: string) {
-		goto(`/market/${marketId}`);
+	async function goToMarket(marketId: string) {
+		// Try to find the event slug for this market
+		const eventSlug = await polymarketClient.getEventSlugForMarket(marketId);
+
+		if (eventSlug) {
+			// Navigate to the event page which shows all markets for this event
+			goto(`/event/${eventSlug}`);
+		} else {
+			// Fallback: try navigating to market page directly (if it exists)
+			goto(`/market/${marketId}`);
+		}
 	}
 
 	async function closePosition(positionId: string, currentPrice: number, position: Position) {

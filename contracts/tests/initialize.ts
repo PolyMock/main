@@ -5,8 +5,8 @@ import * as os from "os";
 import * as path from "path";
 import type { PolymarketPaper } from "../target/types/polymarket_paper";
 
-const PROGRAM_ID = new PublicKey("AmuwGa8LXKW63ZHzGm1TkqSugbJ8fMVXr6HKksYkwUNT");
-const RPC_URL = "https://rpc.magicblock.app/devnet/";
+const PROGRAM_ID = new PublicKey("cWcQsqrGLagy6KfjKkFjeNWm651s85b7q2ehKp7zSmL");
+const RPC_URL = "https://api.devnet.solana.com";
 
 async function main() {
   const connection = new Connection(RPC_URL, "confirmed");

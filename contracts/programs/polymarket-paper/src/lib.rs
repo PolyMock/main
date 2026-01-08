@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use bolt_lang::*;
 
-declare_id!("AmuwGa8LXKW63ZHzGm1TkqSugbJ8fMVXr6HKksYkwUNT");
+declare_id!("cWcQsqrGLagy6KfjKkFjeNWm651s85b7q2ehKp7zSmL");
 
 /// User account for Polymarket paper trading
 /// USDC balance for Yes/No predictions
@@ -24,8 +24,11 @@ pub struct PredictionPosition {
     pub position_id: u64,
     pub prediction_type: PredictionType, // Yes or No
     pub amount_usdc: u64,        // Amount of USDC invested (6 decimals)
-    pub price_per_share: u64,    // Price paid per share (6 decimals)
-    pub shares: u64,             // Number of shares owned (6 decimals)
+    pub price_per_share: u64,    // Price paid per share when bought (6 decimals)
+    pub shares: u64,             // Original number of shares purchased (6 decimals)
+    pub remaining_shares: u64,   // Shares still held (can be sold)
+    pub total_sold_shares: u64,  // Total shares that have been sold
+    pub average_sell_price: u64, // Weighted average sell price (6 decimals)
     pub status: PositionStatus,
     pub opened_at: i64,
     pub closed_at: i64,
@@ -135,6 +138,9 @@ pub mod polymarket_paper {
         position_account.amount_usdc = amount_usdc;
         position_account.price_per_share = price_per_share;
         position_account.shares = shares;
+        position_account.remaining_shares = shares; // Initially, all shares are remaining
+        position_account.total_sold_shares = 0;
+        position_account.average_sell_price = 0;
         position_account.status = PositionStatus::Active;
         position_account.opened_at = clock.unix_timestamp;
         position_account.closed_at = 0;
@@ -195,6 +201,9 @@ pub mod polymarket_paper {
         position_account.amount_usdc = amount_usdc;
         position_account.price_per_share = price_per_share;
         position_account.shares = shares;
+        position_account.remaining_shares = shares; // Initially, all shares are remaining
+        position_account.total_sold_shares = 0;
+        position_account.average_sell_price = 0;
         position_account.status = PositionStatus::Active;
         position_account.opened_at = clock.unix_timestamp;
         position_account.closed_at = 0;
@@ -207,6 +216,210 @@ pub mod polymarket_paper {
             price_per_share,
             shares,
             timestamp: clock.unix_timestamp,
+        });
+
+        Ok(())
+    }
+
+    /// Sell YES shares from an existing position
+    pub fn sell_yes(
+        ctx: Context<SellShares>,
+        shares_to_sell: u64,      // Number of shares to sell (6 decimals)
+        current_price: u64,       // Current market price from Polymarket API (6 decimals)
+    ) -> Result<()> {
+        let user_account = &mut ctx.accounts.user_account;
+        let position_account = &mut ctx.accounts.position_account;
+
+        // Validate position is active or partially sold
+        require!(
+            position_account.status == PositionStatus::Active || position_account.status == PositionStatus::PartiallySold,
+            ErrorCode::PositionNotActive
+        );
+
+        // Validate ownership
+        require!(
+            position_account.owner == ctx.accounts.user.key(),
+            ErrorCode::Unauthorized
+        );
+
+        // Validate prediction type matches
+        require!(
+            position_account.prediction_type == PredictionType::Yes,
+            ErrorCode::WrongPredictionType
+        );
+
+        // Validate price
+        require!(
+            current_price > 0 && current_price <= 1_000_000,
+            ErrorCode::InvalidPrice
+        );
+
+        // Validate sufficient shares
+        require!(
+            shares_to_sell > 0 && shares_to_sell <= position_account.remaining_shares,
+            ErrorCode::InsufficientShares
+        );
+
+        // Calculate payout: shares_to_sell * current_price
+        let payout = (shares_to_sell as u128)
+            .checked_mul(current_price as u128)
+            .unwrap()
+            .checked_div(1_000_000u128)
+            .unwrap() as u64;
+
+        // Update user balance with payout
+        user_account.usdc_balance = user_account
+            .usdc_balance
+            .checked_add(payout)
+            .unwrap();
+
+        // Update position - calculate weighted average sell price
+        let previous_sold_value = (position_account.total_sold_shares as u128)
+            .checked_mul(position_account.average_sell_price as u128)
+            .unwrap();
+
+        let new_sold_value = (shares_to_sell as u128)
+            .checked_mul(current_price as u128)
+            .unwrap();
+
+        let total_sold_shares = position_account.total_sold_shares
+            .checked_add(shares_to_sell)
+            .unwrap();
+
+        let new_average_sell_price = previous_sold_value
+            .checked_add(new_sold_value)
+            .unwrap()
+            .checked_div(total_sold_shares as u128)
+            .unwrap() as u64;
+
+        position_account.remaining_shares = position_account
+            .remaining_shares
+            .checked_sub(shares_to_sell)
+            .unwrap();
+        position_account.total_sold_shares = total_sold_shares;
+        position_account.average_sell_price = new_average_sell_price;
+
+        // If all shares sold, mark position as fully sold
+        if position_account.remaining_shares == 0 {
+            position_account.status = PositionStatus::FullySold;
+            let clock = Clock::get()?;
+            position_account.closed_at = clock.unix_timestamp;
+        } else {
+            position_account.status = PositionStatus::PartiallySold;
+        }
+
+        emit!(SharesSold {
+            user: position_account.owner,
+            market_id: position_account.market_id.clone(),
+            position_id: position_account.position_id,
+            prediction_type: PredictionType::Yes,
+            shares_sold: shares_to_sell,
+            sell_price: current_price,
+            payout,
+            remaining_shares: position_account.remaining_shares,
+            timestamp: Clock::get()?.unix_timestamp,
+        });
+
+        Ok(())
+    }
+
+    /// Sell NO shares from an existing position
+    pub fn sell_no(
+        ctx: Context<SellShares>,
+        shares_to_sell: u64,      // Number of shares to sell (6 decimals)
+        current_price: u64,       // Current market price from Polymarket API (6 decimals)
+    ) -> Result<()> {
+        let user_account = &mut ctx.accounts.user_account;
+        let position_account = &mut ctx.accounts.position_account;
+
+        // Validate position is active
+        require!(
+            position_account.status == PositionStatus::Active || position_account.status == PositionStatus::PartiallySold,
+            ErrorCode::PositionNotActive
+        );
+
+        // Validate ownership
+        require!(
+            position_account.owner == ctx.accounts.user.key(),
+            ErrorCode::Unauthorized
+        );
+
+        // Validate prediction type matches
+        require!(
+            position_account.prediction_type == PredictionType::No,
+            ErrorCode::WrongPredictionType
+        );
+
+        // Validate price
+        require!(
+            current_price > 0 && current_price <= 1_000_000,
+            ErrorCode::InvalidPrice
+        );
+
+        // Validate sufficient shares
+        require!(
+            shares_to_sell > 0 && shares_to_sell <= position_account.remaining_shares,
+            ErrorCode::InsufficientShares
+        );
+
+        // Calculate payout: shares_to_sell * current_price
+        let payout = (shares_to_sell as u128)
+            .checked_mul(current_price as u128)
+            .unwrap()
+            .checked_div(1_000_000u128)
+            .unwrap() as u64;
+
+        // Update user balance with payout
+        user_account.usdc_balance = user_account
+            .usdc_balance
+            .checked_add(payout)
+            .unwrap();
+
+        // Update position - calculate weighted average sell price
+        let previous_sold_value = (position_account.total_sold_shares as u128)
+            .checked_mul(position_account.average_sell_price as u128)
+            .unwrap();
+
+        let new_sold_value = (shares_to_sell as u128)
+            .checked_mul(current_price as u128)
+            .unwrap();
+
+        let total_sold_shares = position_account.total_sold_shares
+            .checked_add(shares_to_sell)
+            .unwrap();
+
+        let new_average_sell_price = previous_sold_value
+            .checked_add(new_sold_value)
+            .unwrap()
+            .checked_div(total_sold_shares as u128)
+            .unwrap() as u64;
+
+        position_account.remaining_shares = position_account
+            .remaining_shares
+            .checked_sub(shares_to_sell)
+            .unwrap();
+        position_account.total_sold_shares = total_sold_shares;
+        position_account.average_sell_price = new_average_sell_price;
+
+        // If all shares sold, mark position as fully sold
+        if position_account.remaining_shares == 0 {
+            position_account.status = PositionStatus::FullySold;
+            let clock = Clock::get()?;
+            position_account.closed_at = clock.unix_timestamp;
+        } else {
+            position_account.status = PositionStatus::PartiallySold;
+        }
+
+        emit!(SharesSold {
+            user: position_account.owner,
+            market_id: position_account.market_id.clone(),
+            position_id: position_account.position_id,
+            prediction_type: PredictionType::No,
+            shares_sold: shares_to_sell,
+            sell_price: current_price,
+            payout,
+            remaining_shares: position_account.remaining_shares,
+            timestamp: Clock::get()?.unix_timestamp,
         });
 
         Ok(())
@@ -344,6 +557,31 @@ pub struct Trade<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(shares_to_sell: u64, current_price: u64)]
+pub struct SellShares<'info> {
+    #[account(
+        mut,
+        seeds = [b"user", user.key().as_ref()],
+        bump,
+        constraint = user_account.owner == user.key() @ ErrorCode::Unauthorized
+    )]
+    pub user_account: Account<'info, UserAccount>,
+
+    #[account(
+        mut,
+        seeds = [
+            b"position",
+            user.key().as_ref(),
+            position_account.position_id.to_le_bytes().as_ref()
+        ],
+        bump,
+    )]
+    pub position_account: Account<'info, PredictionPosition>,
+
+    pub user: Signer<'info>,
+}
+
+#[derive(Accounts)]
 pub struct ClosePosition<'info> {
     #[account(
         mut,
@@ -379,8 +617,10 @@ pub enum PredictionType {
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq, Default, InitSpace)]
 pub enum PositionStatus {
     #[default]
-    Active,
-    Closed,
+    Active,           // Position is open, shares can be sold
+    PartiallySold,   // Some shares have been sold, but not all
+    FullySold,       // All shares have been sold
+    Closed,          // Position closed via close_position (legacy)
 }
 
 // ============= EVENTS =============
@@ -419,6 +659,19 @@ pub struct PositionClosed {
     pub timestamp: i64,
 }
 
+#[event]
+pub struct SharesSold {
+    pub user: Pubkey,
+    pub market_id: String,
+    pub position_id: u64,
+    pub prediction_type: PredictionType,
+    pub shares_sold: u64,
+    pub sell_price: u64,
+    pub payout: u64,
+    pub remaining_shares: u64,
+    pub timestamp: i64,
+}
+
 // ============= ERRORS =============
 
 #[error_code]
@@ -437,4 +690,10 @@ pub enum ErrorCode {
 
     #[msg("Unauthorized access")]
     Unauthorized,
+
+    #[msg("Insufficient shares to sell")]
+    InsufficientShares,
+
+    #[msg("Wrong prediction type (trying to sell YES when position is NO or vice versa)")]
+    WrongPredictionType,
 }
