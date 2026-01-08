@@ -24,12 +24,6 @@
 		spread: number;
 	};
 
-	const MARKET_CATEGORIES = [
-		{ id: 'all', name: 'All Markets', tag: null },
-		{ id: 'trending', name: 'Trending', tag: 'trending' },
-		{ id: 'new', name: 'New', tag: 'new' }
-	];
-
 	let news: any[] = [];
 	let polyevents: PolyEvent[] = [];
 	let prices: Record<string, PriceData> = {
@@ -166,7 +160,6 @@
 			if (append) {
 				setTimeout(checkIfNeedsMore, 300);
 			}
-			filteredPolymarkets = polymarkets;
 		} catch (error) {
 			console.error('Error fetching Polymarket events:', error);
 			hasMore = false;
@@ -189,11 +182,6 @@
 			console.log('Fetching more events...');
 			fetchPolymarkets(true);
 		}
-	}
-
-	function selectCategory(categoryId: string) {
-		selectedCategory = categoryId;
-		fetchPolymarkets(categoryId);
 	}
 
 	async function fetchPythPrices() {
@@ -397,8 +385,7 @@
 		<!-- Markets Panel -->
 		<div class="panel main-panel">
 			<div class="panel-header">
-				<span>POLYMARKET PREDICTION MARKETS</span>
-				<span class="market-count">{filteredPolymarkets.length} / {polymarkets.length} markets</span>
+				POLYMARKET PREDICTION MARKETS
 			</div>
 			<div class="markets-container" on:scroll={handleScroll} bind:this={scrollContainer}>
 				{#if polymarketsLoading && !searchQuery}
@@ -431,7 +418,7 @@
 
 								<!-- First 2 Markets Preview (sorted by volume) -->
 								<div class="markets-preview">
-									{#each event.markets.sort((a, b) => (b.volume_24hr || b.volume || 0) - (a.volume_24hr || a.volume || 0)).slice(0, 2) as market}
+									{#each event.markets.sort((a: PolyMarket, b: PolyMarket) => (b.volume_24hr || b.volume || 0) - (a.volume_24hr || a.volume || 0)).slice(0, 2) as market}
 										<div class="market-preview-item">
 											<div class="market-top-row">
 												<span class="market-question-text" on:click={() => selectMarket(market, event)} role="button" tabindex="0" on:keydown={(e) => e.key === 'Enter' && selectMarket(market, event)}>
@@ -990,12 +977,6 @@
 
 	@media (max-width: 1400px) {
 		.events-grid {
-			grid-template-columns: repeat(3, 1fr);
-		}
-	}
-
-	@media (max-width: 1400px) {
-		.markets-grid {
 			grid-template-columns: repeat(3, 1fr);
 		}
 	}
