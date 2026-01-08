@@ -8,6 +8,7 @@ import {
 	createDelegateInstruction,
 	createUndelegateInstruction,
 } from '@magicblock-labs/ephemeral-rollups-sdk';
+import { PUBLIC_SOLANA_PROGRAM_ID } from '$env/static/public';
 
 // RPC Endpoints
 const MAGICBLOCK_MAINNET_RPC = 'https://rpc.magicblock.app/devnet/';
@@ -73,7 +74,7 @@ export class EphemeralRollupsService {
 			const delegateIx = createDelegateInstruction({
 				payer,
 				delegatedAccount: accountPDA,
-				ownerProgram: new PublicKey(process.env.PUBLIC_SOLANA_PROGRAM_ID || ''),
+				ownerProgram: new PublicKey(PUBLIC_SOLANA_PROGRAM_ID),
 				commitmentLevel,
 			});
 
@@ -124,7 +125,7 @@ export class EphemeralRollupsService {
 			const undelegateIx = createUndelegateInstruction({
 				payer,
 				delegatedAccount: accountPDA,
-				ownerProgram: new PublicKey(process.env.PUBLIC_SOLANA_PROGRAM_ID || ''),
+				ownerProgram: new PublicKey(PUBLIC_SOLANA_PROGRAM_ID),
 			});
 
 			// Create transaction

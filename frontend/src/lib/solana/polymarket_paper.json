@@ -1,5 +1,5 @@
 {
-  "address": "AmuwGa8LXKW63ZHzGm1TkqSugbJ8fMVXr6HKksYkwUNT",
+  "address": "cWcQsqrGLagy6KfjKkFjeNWm651s85b7q2ehKp7zSmL",
   "metadata": {
     "name": "polymarket_paper",
     "version": "0.1.0",
@@ -349,7 +349,7 @@
     {
       "name": "initialize_config",
       "docs": [
-        "Initialize the program configuration (only once at deployment)"
+        "Initialize the program configuration"
       ],
       "discriminator": [
         208,
@@ -395,6 +395,172 @@
         {
           "name": "treasury",
           "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "sell_no",
+      "docs": [
+        "Sell NO shares from an existing position"
+      ],
+      "discriminator": [
+        189,
+        194,
+        132,
+        42,
+        80,
+        249,
+        154,
+        103
+      ],
+      "accounts": [
+        {
+          "name": "user_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "position_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              },
+              {
+                "kind": "account",
+                "path": "position_account.position_id",
+                "account": "PredictionPosition"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "shares_to_sell",
+          "type": "u64"
+        },
+        {
+          "name": "current_price",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "sell_yes",
+      "docs": [
+        "Sell YES shares from an existing position"
+      ],
+      "discriminator": [
+        128,
+        214,
+        65,
+        190,
+        69,
+        69,
+        53,
+        8
+      ],
+      "accounts": [
+        {
+          "name": "user_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "position_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              },
+              {
+                "kind": "account",
+                "path": "position_account.position_id",
+                "account": "PredictionPosition"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "shares_to_sell",
+          "type": "u64"
+        },
+        {
+          "name": "current_price",
+          "type": "u64"
         }
       ]
     }
@@ -492,6 +658,19 @@
         115,
         157
       ]
+    },
+    {
+      "name": "SharesSold",
+      "discriminator": [
+        35,
+        231,
+        5,
+        53,
+        228,
+        158,
+        113,
+        251
+      ]
     }
   ],
   "errors": [
@@ -519,6 +698,16 @@
       "code": 6004,
       "name": "Unauthorized",
       "msg": "Unauthorized access"
+    },
+    {
+      "code": 6005,
+      "name": "InsufficientShares",
+      "msg": "Insufficient shares to sell"
+    },
+    {
+      "code": 6006,
+      "name": "WrongPredictionType",
+      "msg": "Wrong prediction type (trying to sell YES when position is NO or vice versa)"
     }
   ],
   "types": [
@@ -597,6 +786,12 @@
         "variants": [
           {
             "name": "Active"
+          },
+          {
+            "name": "PartiallySold"
+          },
+          {
+            "name": "FullySold"
           },
           {
             "name": "Closed"
@@ -685,6 +880,18 @@
             "type": "u64"
           },
           {
+            "name": "remaining_shares",
+            "type": "u64"
+          },
+          {
+            "name": "total_sold_shares",
+            "type": "u64"
+          },
+          {
+            "name": "average_sell_price",
+            "type": "u64"
+          },
+          {
             "name": "status",
             "type": {
               "defined": {
@@ -736,6 +943,54 @@
           {
             "name": "bump",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SharesSold",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "market_id",
+            "type": "string"
+          },
+          {
+            "name": "position_id",
+            "type": "u64"
+          },
+          {
+            "name": "prediction_type",
+            "type": {
+              "defined": {
+                "name": "PredictionType"
+              }
+            }
+          },
+          {
+            "name": "shares_sold",
+            "type": "u64"
+          },
+          {
+            "name": "sell_price",
+            "type": "u64"
+          },
+          {
+            "name": "payout",
+            "type": "u64"
+          },
+          {
+            "name": "remaining_shares",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
           }
         ]
       }

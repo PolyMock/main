@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-polymarket_paper = "AmuwGa8LXKW63ZHzGm1TkqSugbJ8fMVXr6HKksYkwUNT"
+polymarket_paper = "cWcQsqrGLagy6KfjKkFjeNWm651s85b7q2ehKp7zSmL"
 
 [programs."https://rpc.magicblock.app/devnet/"]
 polymarket_paper = "J7AUjePzLNxCVc2rgDkp2P5xbwzaegEJyThB56QhH65F"

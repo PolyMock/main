@@ -1,5 +1,38 @@
 import axios from 'axios';
 
+export interface PolyEvent {
+  id: string;
+  slug: string;
+  title: string;
+  subtitle?: string;
+  description?: string;
+  ticker?: string;
+  image?: string;
+  icon?: string;
+  active: boolean;
+  closed: boolean;
+  archived: boolean;
+  new?: boolean;
+  featured?: boolean;
+  restricted?: boolean;
+  liquidity?: number;
+  volume?: number;
+  openInterest?: number;
+  commentCount?: number;
+  startDate?: string;
+  endDate?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  resolutionSource?: string;
+  // Nested markets array - this is the key structure
+  markets: PolyMarket[];
+  // Optional grouping data
+  series?: any;
+  categories?: string[];
+  tags?: string[];
+  collections?: any[];
+}
+
 export interface PolyMarket {
   id: string;
   question: string;
@@ -85,6 +118,64 @@ export class PolymarketClient {
     this.baseURL = '/api';
   }
 
+  /**
+   * Fetches events from Polymarket (replaces fetchMarkets for better organization)
+   * Each event contains one or more markets
+   * @param limit - Maximum number of events to fetch
+   * @param fetchPrices - Whether to fetch real-time prices (default: false for performance)
+   * @param offset - Offset for pagination (default: 0)
+   * @returns Array of PolyEvent objects with nested markets
+   */
+  async fetchEvents(limit: number = 10, fetchPrices: boolean = false, offset: number = 0): Promise<PolyEvent[]> {
+    try {
+      const response = await axios.get(`${this.baseURL}/events`, {
+        params: {
+          limit: limit * 2, // Fetch more to filter
+          offset,
+          active: true,
+          closed: false
+        }
+      });
+
+      if (response.data && Array.isArray(response.data)) {
+        // Filter events that have markets with enableOrderBook = true
+        const tradableEvents = response.data.filter((event: PolyEvent) => {
+          // Keep events that have at least one tradable market
+          return event.markets && event.markets.some(market => market.enableOrderBook || market.enable_order_book);
+        }).slice(0, limit);
+
+        // Only enrich with prices if requested (for performance)
+        if (fetchPrices) {
+          for (const event of tradableEvents) {
+            for (const market of event.markets) {
+              // Process market tokens
+              this.processMarketTokens(market);
+              // Fetch real-time prices
+              await this.enrichMarketWithCLOBPrices(market);
+            }
+          }
+        } else {
+          // Just process the basic market tokens from outcomePrices
+          for (const event of tradableEvents) {
+            for (const market of event.markets) {
+              this.processMarketTokens(market);
+            }
+          }
+        }
+
+        return tradableEvents;
+      }
+      return [];
+    } catch (error) {
+      console.error('Error fetching Polymarket events:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Legacy method - now fetches markets via events for better organization
+   * @deprecated Use fetchEvents() instead for better event grouping
+   */
   async fetchMarkets(limit: number = 10): Promise<PolyMarket[]> {
     try {
       const response = await axios.get(`${this.baseURL}/markets`, {
@@ -290,6 +381,119 @@ export class PolymarketClient {
       }
       console.error(`Error fetching CLOB price for token ${tokenId}:`, error.message);
       return null;
+    }
+  }
+
+  /**
+   * Enriches a single event's markets with real-time CLOB prices
+   * @param event - The event to enrich with prices
+   */
+  async enrichEventWithPrices(event: PolyEvent): Promise<void> {
+    if (!event.markets || event.markets.length === 0) return;
+
+    for (const market of event.markets) {
+      await this.enrichMarketWithCLOBPrices(market);
+    }
+  }
+
+  /**
+   * Finds the event slug for a given market ID
+   * @param marketId - The market ID to search for
+   * @returns The event slug, or null if not found
+   */
+  async getEventSlugForMarket(marketId: string): Promise<string | null> {
+    try {
+      // Search through both active and closed events
+      const searchConfigs = [
+        { active: true, closed: false },   // Active events
+        { active: false, closed: true },   // Closed events
+        { active: true, closed: true }     // All events
+      ];
+
+      for (const config of searchConfigs) {
+        const response = await axios.get(`${this.baseURL}/events`, {
+          params: {
+            limit: 100,
+            offset: 0,
+            active: config.active,
+            closed: config.closed
+          }
+        });
+
+        if (response.data && Array.isArray(response.data)) {
+          for (const event of response.data) {
+            // Check if any of the event's markets match the marketId
+            if (event.markets && Array.isArray(event.markets)) {
+              const hasMarket = event.markets.some((market: PolyMarket) => market.id === marketId);
+              if (hasMarket) {
+                console.log(`Found market ${marketId} in event ${event.slug}`);
+                return event.slug;
+              }
+            }
+          }
+        }
+      }
+
+      console.warn(`Market ${marketId} not found in any events`);
+      return null;
+    } catch (error) {
+      console.error('Error finding event for market:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Searches for events across all categories (active, closed, archived)
+   * Used for comprehensive search functionality
+   * @param limit - Maximum number of events per category
+   * @returns Array of all matching events
+   */
+  async searchAllEvents(limit: number = 200): Promise<PolyEvent[]> {
+    try {
+      // Fetch from multiple configurations in parallel
+      const fetchConfigs = [
+        { active: true, closed: false },   // Active/Open markets
+        { active: false, closed: true },   // Closed markets
+        { active: true, closed: true },    // All markets
+      ];
+
+      const fetchPromises = fetchConfigs.map(config =>
+        axios.get(`${this.baseURL}/events`, {
+          params: {
+            limit,
+            offset: 0,
+            active: config.active,
+            closed: config.closed
+          }
+        }).catch(err => {
+          console.error('Error fetching events with config:', config, err);
+          return { data: [] };
+        })
+      );
+
+      const results = await Promise.all(fetchPromises);
+
+      // Combine all results and remove duplicates by ID
+      const allEventsMap = new Map<string, PolyEvent>();
+
+      results.forEach(response => {
+        if (response.data && Array.isArray(response.data)) {
+          response.data.forEach((event: PolyEvent) => {
+            if (!allEventsMap.has(event.id)) {
+              // Process market tokens for each event
+              if (event.markets) {
+                event.markets.forEach(market => this.processMarketTokens(market));
+              }
+              allEventsMap.set(event.id, event);
+            }
+          });
+        }
+      });
+
+      return Array.from(allEventsMap.values());
+    } catch (error) {
+      console.error('Error searching all events:', error);
+      return [];
     }
   }
 
