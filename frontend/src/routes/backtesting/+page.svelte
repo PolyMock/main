@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
+	import { page } from '$app/stores';
 	import { fade } from 'svelte/transition';
 	import { walletStore } from '$lib/wallet/stores';
 	import { polymarketService } from '$lib/solana/polymarket-service';
@@ -9,8 +10,18 @@
 	import type { StrategyConfig, BacktestResult } from '$lib/backtesting/types';
 	import EquityCurveChart from '$lib/components/EquityCurveChart.svelte';
 
-	// Main tab state
+	// Main tab state - set based on URL parameter
 	let activeMainTab: 'summary' | 'strategies' = 'summary';
+
+	// Update tab based on URL parameter
+	$: if (browser) {
+		const tab = $page.url.searchParams.get('tab');
+		if (tab === 'strategy') {
+			activeMainTab = 'strategies';
+		} else {
+			activeMainTab = 'summary';
+		}
+	}
 
 	// ============= TRADE SUMMARY TAB (Original Code) =============
 	interface Position {
@@ -22,10 +33,12 @@
 		shares: number;
 		pricePerShare: number;
 		currentPrice: number;
+		closedPrice?: number; // Price when position was closed
 		pnl: number;
 		pnlPercentage: number;
 		status: 'Active' | 'Closed';
 		openedAt: Date;
+		closedAt?: Date; // When position was closed
 	}
 
 	interface PerformanceMetrics {
@@ -115,6 +128,12 @@
 				const amountUsdc = pos.amountUsdc.toNumber() / 1_000_000;
 				const shares = pos.shares.toNumber() / 1_000_000;
 				const pricePerShare = pos.pricePerShare.toNumber() / 1_000_000;
+				const isClosed = !('active' in pos.status);
+
+				// For closed positions, use averageSellPrice as the closed price
+				const closedPrice = isClosed && pos.averageSellPrice
+					? pos.averageSellPrice.toNumber() / 1_000_000
+					: undefined;
 
 				return {
 					id: pos.positionId.toString(),
@@ -125,30 +144,41 @@
 					shares,
 					pricePerShare,
 					currentPrice: pricePerShare,
+					closedPrice,
 					pnl: 0,
 					pnlPercentage: 0,
-					status: ('active' in pos.status ? 'Active' : 'Closed') as 'Active' | 'Closed',
-					openedAt: new Date(pos.openedAt.toNumber() * 1000)
+					status: (isClosed ? 'Closed' : 'Active') as 'Active' | 'Closed',
+					openedAt: new Date(pos.openedAt.toNumber() * 1000),
+					closedAt: isClosed ? new Date(pos.closedAt.toNumber() * 1000) : undefined
 				};
 			});
 
 			await Promise.all(
 				initialPositions.map(async (pos) => {
 					try {
-						const market = await polymarketClient.getMarketById(pos.marketId);
-						if (market) {
-							const currentPrice =
-								pos.predictionType === 'Yes'
-									? market.yesPrice || pos.pricePerShare
-									: market.noPrice || pos.pricePerShare;
-
-							pos.currentPrice = currentPrice;
-							const currentValue = pos.shares * currentPrice;
-							pos.pnl = currentValue - pos.amountUsdc;
+						// For closed positions, use closedPrice instead of fetching current price
+						if (pos.status === 'Closed' && pos.closedPrice !== undefined) {
+							const closedValue = pos.shares * pos.closedPrice;
+							pos.currentPrice = pos.closedPrice; // Set current price to closed price for display
+							pos.pnl = closedValue - pos.amountUsdc;
 							pos.pnlPercentage = (pos.pnl / pos.amountUsdc) * 100;
+						} else {
+							// For active positions, fetch current market price
+							const market = await polymarketClient.getMarketById(pos.marketId);
+							if (market) {
+								const currentPrice =
+									pos.predictionType === 'Yes'
+										? market.yesPrice || pos.pricePerShare
+										: market.noPrice || pos.pricePerShare;
+
+								pos.currentPrice = currentPrice;
+								const currentValue = pos.shares * currentPrice;
+								pos.pnl = currentValue - pos.amountUsdc;
+								pos.pnlPercentage = (pos.pnl / pos.amountUsdc) * 100;
+							}
 						}
 					} catch (error) {
-						console.error(`Error fetching current price for market ${pos.marketId}:`, error);
+						console.error(`Error calculating PnL for position ${pos.id}:`, error);
 						const currentValue = pos.shares * pos.pricePerShare;
 						pos.pnl = currentValue - pos.amountUsdc;
 						pos.pnlPercentage = (pos.pnl / pos.amountUsdc) * 100;
@@ -231,12 +261,12 @@
 	}
 
 	$: bestTrades = [...positions]
-		.filter((p) => p.status === 'Closed')
+		.filter((p) => p.status === 'Closed' && p.pnl > 0)
 		.sort((a, b) => b.pnlPercentage - a.pnlPercentage)
 		.slice(0, 5);
 
 	$: worstTrades = [...positions]
-		.filter((p) => p.status === 'Closed')
+		.filter((p) => p.status === 'Closed' && p.pnl < 0)
 		.sort((a, b) => a.pnlPercentage - b.pnlPercentage)
 		.slice(0, 5);
 
@@ -367,10 +397,12 @@
 	const totalSteps = 5; // Markets (with date range & filters), Capital, Entry, Exit, Position Sizing
 
 	// Market browser state
+	let marketSelectionPhase: 1 | 2 = 1; // 1 = select market, 2 = select date range within market
 	let marketStatus: 'closed' | 'open' = 'closed'; // closed = past, open = active
 	let availableMarkets: any[] = [];
 	let loadingMarkets = false;
 	let marketSearchQuery = '';
+	let selectedMarket: any | null = null; // Store the full selected market object
 
 	// Advanced filters
 	let minVolume: number | null = null;
@@ -386,6 +418,34 @@
 	let showAdvancedFilters = false;
 	let selectedAdvancedFilter = 'None';
 
+	// Event grouping
+	let expandedEvents: Set<string> = new Set();
+	let eventSortColumn: 'volume' | 'ends' | null = null;
+	let eventSortDirection: 'asc' | 'desc' = 'desc';
+	let eventsCurrentPage = 0;
+	let eventsPerPage = 20;
+
+	interface GroupedEvent {
+		eventTitle: string;
+		eventSlug: string;
+		icon?: string;
+		totalVolume: number;
+		startDate: number;
+		endDate: number;
+		tags: string[];
+		markets: any[];
+	}
+
+	// Sort events
+	function sortEvents(column: 'volume' | 'ends') {
+		if (eventSortColumn === column) {
+			eventSortDirection = eventSortDirection === 'asc' ? 'desc' : 'asc';
+		} else {
+			eventSortColumn = column;
+			eventSortDirection = 'desc';
+		}
+	}
+
 	const availableTags = [
 		'All',
 		'crypto',
@@ -400,10 +460,8 @@
 		'world'
 	];
 
-	// Fetch available markets for selection (auto-fetches when dates change)
+	// Fetch available markets for selection
 	async function fetchMarkets() {
-		if (!config.startDate || !config.endDate) return;
-
 		loadingMarkets = true;
 		availableMarkets = []; // Clear previous results
 		selectedMarketId = null; // Clear selection
@@ -413,14 +471,11 @@
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					startDate: config.startDate,
-					endDate: config.endDate,
-					status: marketStatus,
+					fetchMode: 'list', // Just get closed markets list
+					status: 'closed',
 					tag: selectedTag !== 'All' ? selectedTag : undefined,
 					minVolume,
-					maxVolume,
-					marketStartDate,
-					marketEndDate
+					maxVolume
 				})
 			});
 
@@ -439,23 +494,15 @@
 	}
 
 	// Track previous values to detect actual changes
-	let prevStartDate: string | undefined;
-	let prevEndDate: string | undefined;
 	let prevTag: string = '';
 	let hasLoadedMarkets = false;
 
-	// Auto-fetch markets only when dates or tag actually change (client-side only)
-	$: if (browser && config.startDate && config.endDate && currentStep === 0) {
-		const startDateStr = typeof config.startDate === 'string' ? config.startDate : config.startDate.toISOString().split('T')[0];
-		const endDateStr = typeof config.endDate === 'string' ? config.endDate : config.endDate.toISOString().split('T')[0];
-
-		const datesChanged = prevStartDate !== startDateStr || prevEndDate !== endDateStr;
+	// Auto-fetch markets when entering step 0 or tag changes (client-side only)
+	$: if (browser && currentStep === 0 && marketSelectionPhase === 1) {
 		const tagChanged = prevTag !== selectedTag;
 
-		// Only fetch if dates/tag changed or this is the first load
-		if (!hasLoadedMarkets || datesChanged || tagChanged) {
-			prevStartDate = startDateStr;
-			prevEndDate = endDateStr;
+		// Only fetch if tag changed or this is the first load
+		if (!hasLoadedMarkets || tagChanged) {
 			prevTag = selectedTag;
 			hasLoadedMarkets = true;
 			fetchMarkets();
@@ -503,6 +550,9 @@
 				if (sortColumn === 'volume') {
 					aVal = a.volume_total || a.volume || a.volume_24h || a.total_volume || 0;
 					bVal = b.volume_total || b.volume || b.volume_24h || b.total_volume || 0;
+				} else if (sortColumn === 'starts') {
+					aVal = a.start_time || 0;
+					bVal = b.start_time || 0;
 				} else {
 					aVal = a.end_time || a.close_time || 0;
 					bVal = b.end_time || b.close_time || 0;
@@ -525,16 +575,131 @@
 	// Select a market
 	function selectMarket(market: any) {
 		selectedMarketId = market.condition_id;
+		selectedMarket = market;
 		if (!config.specificMarket) {
 			config.specificMarket = {};
 		}
 		config.specificMarket.conditionId = market.condition_id;
 		config.specificMarket.marketSlug = market.market_slug;
+
+		// Set initial date range to market's full lifetime
+		const marketStartTime = market.start_time ? new Date(market.start_time * 1000) : null;
+		const marketEndTime = market.end_time
+			? new Date(market.end_time * 1000)
+			: (market.close_time ? new Date(market.close_time * 1000) : null);
+
+		if (marketStartTime && marketEndTime) {
+			startDateStr = formatDateForInput(marketStartTime);
+			endDateStr = formatDateForInput(marketEndTime);
+			config.startDate = marketStartTime;
+			config.endDate = marketEndTime;
+		}
+
+		// Move to phase 2
+		marketSelectionPhase = 2;
+	}
+
+	// Toggle event expansion
+	function toggleEvent(eventSlug: string) {
+		expandedEvents = new Set(expandedEvents);
+		if (expandedEvents.has(eventSlug)) {
+			expandedEvents.delete(eventSlug);
+		} else {
+			expandedEvents.add(eventSlug);
+		}
+	}
+
+	// Group markets by event
+	$: groupedEvents = (() => {
+		const eventMap = new Map<string, GroupedEvent>();
+
+		filteredMarkets.forEach(market => {
+			// Determine event identifier (prefer group_item_title, then event_slug, then title)
+			const eventTitle = market.group_item_title || market.event_slug || market.title || 'Untitled Event';
+			const eventSlug = market.event_slug || market.group_item_title?.toLowerCase().replace(/\s+/g, '-') || market.condition_id;
+
+			if (!eventMap.has(eventSlug)) {
+				eventMap.set(eventSlug, {
+					eventTitle,
+					eventSlug,
+					icon: market.icon || market.image,
+					totalVolume: 0,
+					startDate: market.start_time || 0,
+					endDate: market.end_time || market.close_time || 0,
+					tags: market.tags || [],
+					markets: []
+				});
+			}
+
+			const event = eventMap.get(eventSlug)!;
+			event.markets.push(market);
+
+			// Aggregate volume
+			const marketVolume = market.volume_total || market.volume || market.volume_24h || market.total_volume || 0;
+			event.totalVolume += marketVolume;
+
+			// Update start date (earliest)
+			if (market.start_time && (event.startDate === 0 || market.start_time < event.startDate)) {
+				event.startDate = market.start_time;
+			}
+
+			// Update end date (latest)
+			const endTime = market.end_time || market.close_time || 0;
+			if (endTime && endTime > event.endDate) {
+				event.endDate = endTime;
+			}
+
+			// Merge tags (unique)
+			if (market.tags) {
+				market.tags.forEach((tag: string) => {
+					if (!event.tags.includes(tag)) {
+						event.tags.push(tag);
+					}
+				});
+			}
+		});
+
+		// Get events array
+		let events = Array.from(eventMap.values());
+
+		// Apply sorting
+		if (eventSortColumn === 'volume') {
+			events.sort((a, b) => {
+				return eventSortDirection === 'asc'
+					? a.totalVolume - b.totalVolume
+					: b.totalVolume - a.totalVolume;
+			});
+		} else if (eventSortColumn === 'ends') {
+			events.sort((a, b) => {
+				return eventSortDirection === 'asc'
+					? a.endDate - b.endDate
+					: b.endDate - a.endDate;
+			});
+		} else {
+			// Default: sort by total volume (descending)
+			events.sort((a, b) => b.totalVolume - a.totalVolume);
+		}
+
+		return events;
+	})();
+
+	// Paginated events
+	$: eventsTotalPages = Math.ceil(groupedEvents.length / eventsPerPage);
+	$: paginatedEvents = groupedEvents.slice(
+		eventsCurrentPage * eventsPerPage,
+		(eventsCurrentPage + 1) * eventsPerPage
+	);
+
+	// Reset to first page when filters change
+	$: if (marketSearchQuery || selectedTag || eventSortColumn) {
+		eventsCurrentPage = 0;
 	}
 
 	// Clear market selection
 	function clearMarketSelection() {
 		selectedMarketId = null;
+		selectedMarket = null;
+		marketSelectionPhase = 1;
 		if (config.specificMarket) {
 			config.specificMarket.conditionId = undefined;
 			config.specificMarket.marketSlug = undefined;
@@ -552,10 +717,10 @@
 	}
 
 	// Table sorting
-	let sortColumn: 'volume' | 'ends' | null = null;
+	let sortColumn: 'volume' | 'starts' | 'ends' | null = null;
 	let sortDirection: 'asc' | 'desc' = 'desc';
 
-	function sortMarkets(column: 'volume' | 'ends') {
+	function sortMarkets(column: 'volume' | 'starts' | 'ends') {
 		if (sortColumn === column) {
 			sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
 		} else {
@@ -713,29 +878,6 @@
 </script>
 
 <div class="backtesting-container">
-	<div class="page-header">
-		<h1>Backtesting Hub</h1>
-		<p class="subtitle">Analyze performance and test strategies on historical market data</p>
-	</div>
-
-	<!-- Main Tabs -->
-	<div class="main-tabs">
-		<button
-			class="main-tab"
-			class:active={activeMainTab === 'summary'}
-			on:click={() => (activeMainTab = 'summary')}
-		>
-			Trade Summary
-		</button>
-		<button
-			class="main-tab"
-			class:active={activeMainTab === 'strategies'}
-			on:click={() => (activeMainTab = 'strategies')}
-		>
-			Backtesting Strategies
-		</button>
-	</div>
-
 	<!-- TRADE SUMMARY TAB -->
 	{#if activeMainTab === 'summary'}
 		{#if loading}
@@ -745,7 +887,6 @@
 			</div>
 		{:else if !walletState.connected}
 			<div class="empty-state">
-				<div class="empty-icon">🔗</div>
 				<h3>Wallet Not Connected</h3>
 				<p>Please connect your wallet to view trade summary</p>
 			</div>
@@ -1048,117 +1189,280 @@
 			
 					<!-- Wizard Steps -->
 					<div class="wizard-content">
-						<!-- STEP 1: Market Selection with Advanced Filters -->
+						<!-- STEP 1: Market Selection (Two Phases) -->
 						{#if currentStep === 0}
 							<div class="wizard-step" transition:fade>
-								<div class="step-header">
-									<h2>Market Selection</h2>
-									<p>Filter and select markets for backtesting</p>
-								</div>
+								{#if marketSelectionPhase === 1}
+									<!-- Phase 1: Select a Closed Market -->
+									<div class="step-header">
+										<h2>Select a Past Market</h2>
+										<p>Choose a closed market to backtest your strategy</p>
+									</div>
 
-								<div class="step-body">
-									<!-- Filters Grid - All Same Size -->
-									{#if !selectedMarketId}
-										<div class="filters-grid">
-											<!-- Date Range -->
-											<div class="filter-item">
-												<label>Start Date</label>
-												<input
-													type="date"
-													bind:value={startDateStr}
-													max={endDateStr || new Date().toISOString().split('T')[0]}
-													class="filter-input-uniform"
-												/>
-											</div>
-
-											<div class="filter-item">
-												<label>End Date</label>
-												<input
-													type="date"
-													bind:value={endDateStr}
-													min={startDateStr}
-													max={new Date().toISOString().split('T')[0]}
-													class="filter-input-uniform"
-												/>
-											</div>
-
-											<!-- Duration Display -->
-											<div class="filter-item">
-												<label>Duration</label>
-												<div class="duration-display">
-													{#if config.startDate && config.endDate}
-														{Math.floor((config.endDate.getTime() - config.startDate.getTime()) / (1000 * 60 * 60 * 24))} days
-													{:else}
-														-
-													{/if}
-												</div>
-											</div>
-
+									<div class="step-body market-selection-body">
+										<!-- Search and Filters -->
+										<div class="search-filters-section">
 											<!-- Search Bar -->
-											<div class="filter-item filter-item-full">
-												<label>Search Markets</label>
+											<div class="search-container">
 												<input
 													type="text"
 													bind:value={marketSearchQuery}
-													placeholder="Search by title, category, or tags..."
-													class="filter-input-uniform"
+													placeholder="Search markets..."
+													class="search-input"
 												/>
 											</div>
 
-											<!-- Tag Filter Dropdown -->
-											<div class="filter-item">
-												<label>Tag</label>
-												<select bind:value={selectedTag} class="filter-input-uniform">
-													{#each availableTags as tag}
-														<option value={tag}>{tag.charAt(0).toUpperCase() + tag.slice(1)}</option>
-													{/each}
-												</select>
-											</div>
+											<!-- Filters Toggle Button -->
+											<button class="filters-toggle-btn" on:click={() => showAdvancedFilters = !showAdvancedFilters}>
+												<span>Advanced Filters</span>
+												<span class="dropdown-arrow">{showAdvancedFilters ? '▼' : '▶'}</span>
+											</button>
 
-											<!-- Advanced Filters Dropdown -->
-											<div class="filter-item">
-												<label>Advanced Filters</label>
-												<select bind:value={selectedAdvancedFilter} class="filter-input-uniform" on:change={() => showAdvancedFilters = selectedAdvancedFilter !== 'None'}>
-													<option value="None">None</option>
-													<option value="Volume">Volume</option>
-												</select>
-											</div>
+											<!-- Filters Panel (Below Search) -->
+											{#if showAdvancedFilters}
+												<div class="filters-panel">
+													<!-- Category Filter -->
+													<div class="filter-group">
+														<label class="filter-group-label">Category</label>
+														<select bind:value={selectedTag} class="filter-select">
+															{#each availableTags as tag}
+																<option value={tag}>
+																	{tag === 'All' ? 'All Categories' : tag.charAt(0).toUpperCase() + tag.slice(1)}
+																</option>
+															{/each}
+														</select>
+													</div>
+
+													<!-- Volume Filter -->
+													<div class="filter-group">
+														<label class="filter-group-label">Volume Range</label>
+														<div class="volume-inputs-inline">
+															<input
+																type="number"
+																bind:value={minVolume}
+																placeholder="Min"
+																class="volume-input-small"
+																on:change={fetchMarkets}
+															/>
+															<span class="volume-separator">to</span>
+															<input
+																type="number"
+																bind:value={maxVolume}
+																placeholder="Max"
+																class="volume-input-small"
+																on:change={fetchMarkets}
+															/>
+														</div>
+													</div>
+												</div>
+											{/if}
 										</div>
 
-										<!-- Advanced Filters Panel -->
-										{#if showAdvancedFilters && selectedAdvancedFilter === 'Volume'}
-											<div class="advanced-filters-panel">
-												<div class="filters-grid">
-													<div class="filter-item">
-														<label>Min Volume ($)</label>
-														<input
-															type="number"
-															bind:value={minVolume}
-															placeholder="e.g., 50000"
-															class="filter-input-uniform"
-															on:change={fetchMarkets}
-														/>
-													</div>
-													<div class="filter-item">
-														<label>Max Volume ($)</label>
-														<input
-															type="number"
-															bind:value={maxVolume}
-															placeholder="e.g., 1000000"
-															class="filter-input-uniform"
-															on:change={fetchMarkets}
-														/>
+										<!-- Markets Table -->
+										{#if loadingMarkets}
+											<div class="loading-state">
+												<span class="spinner"></span>
+												<p>Loading closed markets...</p>
+											</div>
+										{:else if availableMarkets.length === 0}
+											<div class="empty-state">
+												<p>No closed markets found matching your criteria</p>
+												<small>Try adjusting your filters</small>
+											</div>
+										{:else}
+											<div class="events-table-container">
+												<div class="results-info">
+													<span>{groupedEvents.length} events found ({filteredMarkets.length} markets total)</span>
+													<span>Page {eventsCurrentPage + 1} of {eventsTotalPages || 1}</span>
+												</div>
+
+												<table class="events-table">
+													<thead>
+														<tr>
+															<th class="event-header">Event</th>
+															<th class="volume-header sortable-header" on:click={() => sortEvents('volume')}>
+																<div class="sort-header-content">
+																	<span>Volume</span>
+																	<span class="sort-indicator" class:active={eventSortColumn === 'volume'}>
+																		{#if eventSortColumn === 'volume'}
+																			{eventSortDirection === 'asc' ? '↑' : '↓'}
+																		{:else}
+																			⇅
+																		{/if}
+																	</span>
+																</div>
+															</th>
+															<th class="starts-header">Starts</th>
+															<th class="ends-header sortable-header" on:click={() => sortEvents('ends')}>
+																<div class="sort-header-content">
+																	<span>Ends</span>
+																	<span class="sort-indicator" class:active={eventSortColumn === 'ends'}>
+																		{#if eventSortColumn === 'ends'}
+																			{eventSortDirection === 'asc' ? '↑' : '↓'}
+																		{:else}
+																			⇅
+																		{/if}
+																	</span>
+																</div>
+															</th>
+															<th class="tags-header">Tags</th>
+														</tr>
+													</thead>
+													<tbody>
+														{#each paginatedEvents as event}
+															<!-- Event Row -->
+															<tr class="event-row" on:click={() => event.markets.length > 1 ? toggleEvent(event.eventSlug) : selectMarket(event.markets[0])}>
+																<td class="event-cell">
+																	<div class="event-content">
+																		{#if event.markets.length > 1}
+																			<button class="expand-icon" class:expanded={expandedEvents.has(event.eventSlug)}>
+																				{expandedEvents.has(event.eventSlug) ? '▼' : '▶'}
+																			</button>
+																		{/if}
+																		{#if event.icon}
+																			<img src={event.icon} alt={event.eventTitle} class="event-icon" />
+																		{/if}
+																		<div class="event-info">
+																			<div class="event-title">{event.eventTitle}</div>
+																			{#if event.markets.length > 1}
+																				<div class="event-markets-count">({event.markets.length} markets)</div>
+																			{/if}
+																		</div>
+																	</div>
+																</td>
+																<td class="volume-cell">
+																	${(event.totalVolume / 1000000).toFixed(1)}M
+																</td>
+																<td class="starts-cell">
+																	{#if event.startDate}
+																		{formatMarketDate(event.startDate)}
+																	{:else}
+																		N/A
+																	{/if}
+																</td>
+																<td class="ends-cell">
+																	{#if event.endDate}
+																		{formatMarketDate(event.endDate)}
+																	{:else}
+																		N/A
+																	{/if}
+																</td>
+																<td class="tags-cell">
+																	<div class="tags-container">
+																		{#if event.tags && event.tags.length > 0}
+																			{#each event.tags.slice(0, 2) as tag}
+																				<span class="tag-badge">{tag}</span>
+																			{/each}
+																			{#if event.tags.length > 2}
+																				<span class="tag-more">+{event.tags.length - 2}</span>
+																			{/if}
+																		{:else}
+																			<span class="tag-badge">Other</span>
+																		{/if}
+																	</div>
+																</td>
+															</tr>
+
+															<!-- Expanded Markets (Nested Table) -->
+															{#if expandedEvents.has(event.eventSlug) && event.markets.length > 1}
+																<tr class="markets-expanded-row">
+																	<td colspan="5" class="markets-expanded-cell">
+																		<div class="nested-markets-container">
+																			<table class="nested-markets-table">
+																				<thead>
+																					<tr>
+																						<th>Question</th>
+																						<th>Volume</th>
+																						<th>Ends</th>
+																					</tr>
+																				</thead>
+																				<tbody>
+																					{#each event.markets as market}
+																						{@const marketVolume = market.volume_total || market.volume || market.volume_24h || market.total_volume || 0}
+																						<tr class:selected={selectedMarketId === market.condition_id} on:click|stopPropagation={() => selectMarket(market)}>
+																							<td class="market-question-cell">
+																								{market.title || market.question || 'Untitled'}
+																							</td>
+																							<td class="market-volume-cell">
+																								{#if marketVolume > 0}
+																									${(marketVolume / 1000000).toFixed(1)}M
+																								{:else}
+																									$0.0M
+																								{/if}
+																							</td>
+																							<td class="market-ends-cell">
+																								{#if market.end_time || market.close_time}
+																									{formatMarketDate(market.end_time || market.close_time)}
+																								{:else}
+																									N/A
+																								{/if}
+																							</td>
+																						</tr>
+																					{/each}
+																				</tbody>
+																			</table>
+																		</div>
+																	</td>
+																</tr>
+															{/if}
+														{/each}
+													</tbody>
+												</table>
+
+												<!-- Pagination Controls -->
+												<div class="pagination-controls">
+													<div class="pagination-buttons">
+														<button
+															class="pagination-btn"
+															on:click={() => eventsCurrentPage = 0}
+															disabled={eventsCurrentPage === 0}
+														>
+															First
+														</button>
+														<button
+															class="pagination-btn"
+															on:click={() => eventsCurrentPage--}
+															disabled={eventsCurrentPage === 0}
+														>
+															Previous
+														</button>
+														<span class="page-info">
+															Page {eventsCurrentPage + 1} of {eventsTotalPages || 1}
+														</span>
+														<button
+															class="pagination-btn"
+															on:click={() => eventsCurrentPage++}
+															disabled={eventsCurrentPage >= eventsTotalPages - 1}
+														>
+															Next
+														</button>
+														<button
+															class="pagination-btn"
+															on:click={() => eventsCurrentPage = eventsTotalPages - 1}
+															disabled={eventsCurrentPage >= eventsTotalPages - 1}
+														>
+															Last
+														</button>
 													</div>
 												</div>
 											</div>
 										{/if}
-									{/if}
+									</div>
 
-									<!-- Selected Market Display -->
-									{#if selectedMarketId}
-										{@const selectedMarket = availableMarkets.find(m => m.condition_id === selectedMarketId)}
+								{:else}
+									<!-- Phase 2: Select Date Range within Market -->
+									<div class="step-header">
+										<h2>Select Date Range</h2>
+										<p>Choose the timeframe for backtesting within this market</p>
+									</div>
+
+									<div class="step-body">
+										<!-- Selected Market Display -->
 										{#if selectedMarket}
 											{@const selectedVolume = selectedMarket.volume_total || selectedMarket.volume || selectedMarket.volume_24h || selectedMarket.total_volume || 0}
+											{@const marketStartTime = selectedMarket.start_time ? new Date(selectedMarket.start_time * 1000) : null}
+											{@const marketEndTime = selectedMarket.end_time ? new Date(selectedMarket.end_time * 1000) : (selectedMarket.close_time ? new Date(selectedMarket.close_time * 1000) : null)}
+
 											<div class="selected-market-display">
 												<div class="selected-market-info">
 													<div class="selected-label">Selected Market:</div>
@@ -1171,161 +1475,93 @@
 													Change Market
 												</button>
 											</div>
-										{/if}
-									{/if}
 
-									<!-- Markets Table -->
-									{#if config.startDate && config.endDate && !selectedMarketId}
-										{#if loadingMarkets}
-											<div class="loading-state">
-												<span class="spinner"></span>
-												<p>Loading markets...</p>
-											</div>
-										{:else if availableMarkets.length === 0}
-											<div class="empty-state">
-												<p>No markets found matching your criteria</p>
-												<small>Try adjusting your filters or date range</small>
-											</div>
-										{:else}
-											<div class="markets-table-container">
-												<div class="results-info">
-													<span>{filteredMarkets.length} markets found</span>
-													<span>Showing {currentPage * rowsPerPage + 1}-{Math.min((currentPage + 1) * rowsPerPage, filteredMarkets.length)} of {filteredMarkets.length}</span>
-												</div>
-
-												<table class="markets-table">
-													<thead>
-														<tr>
-															<th class="event-header">Event</th>
-															<th class="sortable-header" on:click={() => sortMarkets('volume')}>
-																<div class="sort-header-content">
-																	<span>Volume</span>
-																	<span class="sort-indicator" class:active={sortColumn === 'volume'}>
-																		{#if sortColumn === 'volume'}
-																			{sortDirection === 'asc' ? '↑' : '↓'}
-																		{:else}
-																			<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
-																				<path d="M3 4.5L6 1.5L9 4.5M3 7.5L6 10.5L9 7.5"/>
-																			</svg>
-																		{/if}
-																	</span>
-																</div>
-															</th>
-															<th class="sortable-header" on:click={() => sortMarkets('ends')}>
-																<div class="sort-header-content">
-																	<span>Ends</span>
-																	<span class="sort-indicator" class:active={sortColumn === 'ends'}>
-																		{#if sortColumn === 'ends'}
-																			{sortDirection === 'asc' ? '↑' : '↓'}
-																		{:else}
-																			<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
-																				<path d="M3 4.5L6 1.5L9 4.5M3 7.5L6 10.5L9 7.5"/>
-																			</svg>
-																		{/if}
-																	</span>
-																</div>
-															</th>
-															<th>Tags</th>
-														</tr>
-													</thead>
-													<tbody>
-														{#each paginatedMarkets as market}
-															{@const marketVolume = market.volume_total || market.volume || market.volume_24h || market.total_volume || 0}
-															<tr class:selected={selectedMarketId === market.condition_id} on:click={() => selectMarket(market)}>
-																<td class="event-cell">
-																	<div class="event-content">
-																		<div class="event-info">
-																			<div class="event-title">{market.title || market.question || 'Untitled'}</div>
-																		</div>
-																	</div>
-																</td>
-																<td class="volume-cell">
-																	{#if marketVolume > 0}
-																		${(marketVolume / 1000000).toFixed(1)}M
-																	{:else}
-																		$0.0M
-																	{/if}
-																</td>
-																<td class="ends-cell">
-																	{#if market.end_time || market.close_time}
-																		{formatMarketDate(market.end_time || market.close_time)}
-																	{:else}
-																		N/A
-																	{/if}
-																</td>
-																<td class="tags-cell">
-																	<div class="tags-container">
-																		{#if market.tags && market.tags.length > 0}
-																			{#each market.tags.slice(0, 2) as tag}
-																				<span class="tag-badge">{tag}</span>
-																			{/each}
-																			{#if market.tags.length > 2}
-																				<span class="tag-more">+{market.tags.length - 2}</span>
-																			{/if}
-																		{:else if market.category}
-																			<span class="tag-badge">{market.category}</span>
-																		{:else}
-																			<span class="tag-badge">Other</span>
-																		{/if}
-																	</div>
-																</td>
-															</tr>
-														{/each}
-													</tbody>
-												</table>
-
-												<!-- Pagination Controls -->
-												<div class="pagination-controls">
-													<div class="pagination-buttons">
-														<button
-															class="pagination-btn"
-															on:click={() => currentPage = 0}
-															disabled={currentPage === 0}
-														>
-															First
-														</button>
-														<button
-															class="pagination-btn"
-															on:click={() => currentPage--}
-															disabled={currentPage === 0}
-														>
-															Previous
-														</button>
-														<span class="page-info">
-															Page {currentPage + 1} of {totalPages || 1}
+											<!-- Market Timeline -->
+											<div class="market-timeline">
+												<h3>Market Timeline</h3>
+												<div class="timeline-info">
+													<div class="timeline-item">
+														<span class="timeline-label">Created:</span>
+														<span class="timeline-value">
+															{#if marketStartTime}
+																{marketStartTime.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+																at {marketStartTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+															{:else}
+																N/A
+															{/if}
 														</span>
-														<button
-															class="pagination-btn"
-															on:click={() => currentPage++}
-															disabled={currentPage >= totalPages - 1}
-														>
-															Next
-														</button>
-														<button
-															class="pagination-btn"
-															on:click={() => currentPage = totalPages - 1}
-															disabled={currentPage >= totalPages - 1}
-														>
-															Last
-														</button>
 													</div>
-													<div class="rows-per-page">
-														<label>Rows per page:</label>
-														<select bind:value={rowsPerPage} on:change={() => currentPage = 0}>
-															<option value={10}>10</option>
-															<option value={20}>20</option>
-															<option value={50}>50</option>
-															<option value={100}>100</option>
-														</select>
+													<div class="timeline-item">
+														<span class="timeline-label">Finished:</span>
+														<span class="timeline-value">
+															{#if marketEndTime}
+																{marketEndTime.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+																at {marketEndTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+															{:else}
+																N/A
+															{/if}
+														</span>
+													</div>
+													<div class="timeline-item">
+														<span class="timeline-label">Duration:</span>
+														<span class="timeline-value">
+															{#if marketStartTime && marketEndTime}
+																{Math.floor((marketEndTime.getTime() - marketStartTime.getTime()) / (1000 * 60 * 60 * 24))} days
+															{:else}
+																N/A
+															{/if}
+														</span>
+													</div>
+												</div>
+											</div>
+
+											<!-- Date Range Selector -->
+											<div class="date-range-selector">
+												<h3>Select Backtest Date Range</h3>
+												<p class="date-range-description">
+													Choose a date range within the market's lifetime to backtest your strategy
+												</p>
+												<div class="filters-grid">
+													<div class="filter-item">
+														<label>Start Date</label>
+														<input
+															type="date"
+															bind:value={startDateStr}
+															min={marketStartTime ? formatDateForInput(marketStartTime) : ''}
+															max={endDateStr}
+															class="filter-input-uniform"
+														/>
+													</div>
+
+													<div class="filter-item">
+														<label>End Date</label>
+														<input
+															type="date"
+															bind:value={endDateStr}
+															min={startDateStr}
+															max={marketEndTime ? formatDateForInput(marketEndTime) : ''}
+															class="filter-input-uniform"
+														/>
+													</div>
+
+													<div class="filter-item">
+														<label>Backtest Duration</label>
+														<div class="duration-display">
+															{#if config.startDate && config.endDate}
+																{Math.floor((config.endDate.getTime() - config.startDate.getTime()) / (1000 * 60 * 60 * 24))} days
+															{:else}
+																-
+															{/if}
+														</div>
 													</div>
 												</div>
 											</div>
 										{/if}
-									{/if}
-								</div>
+									</div>
+								{/if}
 							</div>
 						{/if}
-			
+
 						<!-- STEP 2: Initial Capital -->
 						{#if currentStep === 1}
 							<div class="wizard-step" transition:fade>
@@ -1994,6 +2230,14 @@
 		padding: 40px 20px;
 		max-width: 1600px;
 		margin: 0 auto;
+	}
+
+	/* Strategy Backtesting - Full Width */
+	.strategy-backtesting {
+		width: 100%;
+		max-width: 100%;
+		margin: 0 -20px;
+		padding: 0 20px;
 	}
 
 	:global(.light-mode) .backtesting-container {
@@ -2744,7 +2988,7 @@
 
 	.progress-fill {
 		height: 100%;
-		background: linear-gradient(90deg, #00b4ff 0%, #00d084 100%);
+		background: #3b82f6;
 		transition: width 0.3s ease;
 	}
 
@@ -3147,8 +3391,10 @@
 	background: #141824;
 	border-radius: 12px;
 	padding: 32px;
-	max-width: 900px;
-	margin: 0 auto;
+	max-width: 100%;
+	margin: 0;
+	width: 100%;
+	box-sizing: border-box;
 }
 
 .wizard-progress {
@@ -3165,7 +3411,7 @@
 
 .progress-fill {
 	height: 100%;
-	background: linear-gradient(90deg, #3b82f6, #6366f1);
+	background: #3b82f6;
 	transition: width 0.3s ease;
 }
 
@@ -3238,6 +3484,12 @@
 .step-body {
 	max-width: 700px;
 	margin: 0 auto;
+}
+
+/* Override for market selection - full width */
+.market-selection-body {
+	max-width: 100% !important;
+	margin: 0 !important;
 }
 
 /* Date Range Step */
@@ -3696,8 +3948,8 @@
 	color: #64748b;
 }
 
-/* Markets Table */
-.markets-table-container {
+/* Events Table */
+.events-table-container {
 	margin-top: 20px;
 }
 
@@ -3710,7 +3962,7 @@
 	color: #8b92ab;
 }
 
-.markets-table {
+.events-table {
 	width: 100%;
 	border-collapse: collapse;
 	background: transparent;
@@ -3718,11 +3970,11 @@
 	overflow: hidden;
 }
 
-.markets-table thead {
-	background: transparent;
+.events-table thead {
+	background: rgba(20, 24, 36, 0.5);
 }
 
-.markets-table th {
+.events-table th {
 	padding: 16px;
 	text-align: left;
 	font-size: 12px;
@@ -3750,7 +4002,6 @@
 .sort-header-content {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
 	gap: 8px;
 }
 
@@ -3758,11 +4009,9 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: 16px;
-	height: 16px;
 	color: #64748b;
 	transition: all 0.2s;
-	font-size: 14px;
+	font-size: 12px;
 	font-weight: 600;
 }
 
@@ -3770,41 +4019,19 @@
 	color: #3b82f6;
 }
 
-.sort-indicator svg {
-	width: 12px;
-	height: 12px;
-	opacity: 0.5;
-	transition: opacity 0.2s;
-}
-
-.sortable-header:hover .sort-indicator svg {
-	opacity: 1;
-}
-
-.sort-indicator.active svg {
-	opacity: 0;
-}
-
-.markets-table tbody tr {
+/* Event Row Styling */
+.event-row {
 	border-bottom: 1px solid #2a2f45;
 	transition: background 0.2s;
 	cursor: pointer;
+	background: rgba(20, 24, 36, 0.3);
 }
 
-.markets-table tbody tr:last-child {
-	border-bottom: none;
+.event-row:hover {
+	background: rgba(59, 130, 246, 0.08);
 }
 
-.markets-table tbody tr:hover {
-	background: rgba(59, 130, 246, 0.05);
-}
-
-.markets-table tbody tr.selected {
-	background: rgba(59, 130, 246, 0.1);
-	border-left: 3px solid #3b82f6;
-}
-
-.markets-table td {
+.event-row td {
 	padding: 16px;
 	font-size: 14px;
 	color: white;
@@ -3812,12 +4039,44 @@
 }
 
 .event-cell {
-	max-width: 400px;
+	max-width: 500px;
 }
 
 .event-content {
 	display: flex;
 	align-items: center;
+	gap: 12px;
+}
+
+.expand-icon {
+	background: none;
+	border: none;
+	color: #3b82f6;
+	font-size: 14px;
+	cursor: pointer;
+	padding: 4px 8px;
+	border-radius: 4px;
+	transition: all 0.2s;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 24px;
+}
+
+.expand-icon:hover {
+	background: rgba(59, 130, 246, 0.1);
+}
+
+.expand-icon.expanded {
+	color: #10b981;
+}
+
+.event-icon {
+	width: 36px;
+	height: 36px;
+	border-radius: 50%;
+	object-fit: cover;
+	border: 2px solid #2a2f45;
 }
 
 .event-info {
@@ -3826,15 +4085,26 @@
 }
 
 .event-title {
-	font-weight: 500;
+	font-weight: 600;
 	line-height: 1.4;
 	color: #e8e8e8;
-	font-size: 14px;
+	font-size: 15px;
+}
+
+.event-markets-count {
+	font-size: 12px;
+	color: #64748b;
+	margin-top: 2px;
 }
 
 .volume-cell {
 	font-weight: 600;
 	color: #10b981;
+	font-size: 14px;
+}
+
+.starts-cell {
+	color: #8b92ab;
 	font-size: 14px;
 }
 
@@ -3869,6 +4139,89 @@
 	color: #64748b;
 	font-size: 12px;
 	font-weight: 500;
+}
+
+/* Nested Markets Table (Expanded Events) */
+.markets-expanded-row {
+	background: rgba(10, 14, 27, 0.5);
+	border-bottom: 1px solid #2a2f45;
+}
+
+.markets-expanded-cell {
+	padding: 0 !important;
+}
+
+.nested-markets-container {
+	padding: 16px 16px 16px 56px; /* Extra left padding for indentation */
+	background: rgba(20, 24, 36, 0.3);
+}
+
+.nested-markets-table {
+	width: 100%;
+	border-collapse: collapse;
+	background: rgba(30, 37, 55, 0.5);
+	border-radius: 6px;
+	overflow: hidden;
+}
+
+.nested-markets-table thead {
+	background: rgba(20, 24, 36, 0.8);
+}
+
+.nested-markets-table th {
+	padding: 12px 16px;
+	text-align: left;
+	font-size: 11px;
+	font-weight: 600;
+	color: #64748b;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	border-bottom: 1px solid #2a2f45;
+}
+
+.nested-markets-table tbody tr {
+	border-bottom: 1px solid rgba(42, 47, 69, 0.5);
+	transition: background 0.2s;
+	cursor: pointer;
+}
+
+.nested-markets-table tbody tr:last-child {
+	border-bottom: none;
+}
+
+.nested-markets-table tbody tr:hover {
+	background: rgba(59, 130, 246, 0.08);
+}
+
+.nested-markets-table tbody tr.selected {
+	background: rgba(59, 130, 246, 0.15);
+	border-left: 3px solid #3b82f6;
+}
+
+.nested-markets-table td {
+	padding: 12px 16px;
+	font-size: 13px;
+	color: #e8e8e8;
+	vertical-align: middle;
+}
+
+.market-question-cell {
+	max-width: 400px;
+	font-weight: 400;
+	color: #d1d5db;
+}
+
+.market-volume-cell {
+	font-weight: 500;
+	color: #10b981;
+	font-size: 13px;
+	min-width: 100px;
+}
+
+.market-ends-cell {
+	color: #8b92ab;
+	font-size: 13px;
+	min-width: 120px;
 }
 
 /* Pagination */
@@ -4186,5 +4539,255 @@
 
 .nav-next {
 	margin-left: auto;
+}
+
+/* Market Timeline Styles */
+.market-timeline {
+	background: #1a1f2e;
+	border: 1px solid #2d3748;
+	border-radius: 8px;
+	padding: 24px;
+	margin: 24px 0;
+}
+
+.market-timeline h3 {
+	font-size: 18px;
+	font-weight: 600;
+	color: #e2e8f0;
+	margin: 0 0 16px 0;
+}
+
+.timeline-info {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.timeline-item {
+	display: flex;
+	align-items: center;
+	padding: 12px;
+	background: #0f1419;
+	border-radius: 6px;
+	border: 1px solid #2d3748;
+}
+
+.timeline-label {
+	font-weight: 600;
+	color: #94a3b8;
+	min-width: 100px;
+	font-size: 14px;
+}
+
+.timeline-value {
+	color: #e2e8f0;
+	font-size: 14px;
+	flex: 1;
+}
+
+/* Date Range Selector Styles */
+.date-range-selector {
+	background: #1a1f2e;
+	border: 1px solid #2d3748;
+	border-radius: 8px;
+	padding: 24px;
+	margin: 24px 0;
+}
+
+.date-range-selector h3 {
+	font-size: 18px;
+	font-weight: 600;
+	color: #e2e8f0;
+	margin: 0 0 8px 0;
+}
+
+.date-range-description {
+	font-size: 14px;
+	color: #94a3b8;
+	margin: 0 0 20px 0;
+}
+
+/* Search and Filters Section */
+.search-filters-section {
+	margin-bottom: 24px;
+}
+
+.search-container {
+	margin-bottom: 16px;
+}
+
+.search-input {
+	width: 100%;
+	padding: 14px 20px;
+	background: #1a1f2e;
+	border: 2px solid #2d3748;
+	border-radius: 12px;
+	color: #e2e8f0;
+	font-size: 16px;
+	transition: all 0.2s ease;
+	box-sizing: border-box;
+}
+
+.search-input:focus {
+	outline: none;
+	border-color: #3b82f6;
+	background: #0f1419;
+}
+
+.search-input::placeholder {
+	color: #64748b;
+}
+
+/* Filters Toggle Button */
+.filters-toggle-btn {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 12px 20px;
+	background: #1a1f2e;
+	border: 2px solid #2d3748;
+	border-radius: 12px;
+	color: #e2e8f0;
+	font-size: 14px;
+	font-weight: 500;
+	cursor: pointer;
+	transition: all 0.2s ease;
+	margin-bottom: 16px;
+	box-sizing: border-box;
+}
+
+.filters-toggle-btn:hover {
+	border-color: #3b82f6;
+	background: #0f1419;
+}
+
+.dropdown-arrow {
+	color: #64748b;
+	font-size: 12px;
+}
+
+/* Filters Panel (Below) */
+.filters-panel {
+	background: #1a1f2e;
+	border: 2px solid #2d3748;
+	border-radius: 12px;
+	padding: 20px;
+	margin-bottom: 16px;
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+	gap: 20px;
+	box-sizing: border-box;
+}
+
+.filter-group {
+	display: flex;
+	flex-direction: column;
+}
+
+.filter-group-label {
+	display: block;
+	font-size: 12px;
+	font-weight: 600;
+	color: #8b92ab;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	margin-bottom: 8px;
+}
+
+.filter-select {
+	width: 100%;
+	padding: 10px 14px;
+	background: #0f1419;
+	border: 1px solid #2d3748;
+	border-radius: 8px;
+	color: #e2e8f0;
+	font-size: 14px;
+	cursor: pointer;
+	transition: all 0.2s;
+	box-sizing: border-box;
+}
+
+.filter-select:focus {
+	outline: none;
+	border-color: #3b82f6;
+}
+
+.volume-inputs-inline {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.volume-input-small {
+	flex: 1;
+	padding: 10px 14px;
+	background: #0f1419;
+	border: 1px solid #2d3748;
+	border-radius: 8px;
+	color: #e2e8f0;
+	font-size: 14px;
+	transition: all 0.2s;
+	box-sizing: border-box;
+}
+
+.volume-input-small:focus {
+	outline: none;
+	border-color: #3b82f6;
+}
+
+.volume-input-small::placeholder {
+	color: #64748b;
+}
+
+.volume-separator {
+	color: #64748b;
+	font-size: 13px;
+}
+
+.filter-icon {
+	font-size: 12px;
+	transition: transform 0.2s ease;
+}
+
+.volume-inputs {
+	display: flex;
+	gap: 16px;
+	margin-top: 12px;
+	padding: 16px;
+	background: #0f1419;
+	border: 1px solid #2d3748;
+	border-radius: 8px;
+}
+
+.volume-input-group {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.volume-input-group label {
+	font-size: 13px;
+	color: #94a3b8;
+	font-weight: 500;
+}
+
+.volume-input {
+	padding: 10px 14px;
+	background: #1a1f2e;
+	border: 1px solid #2d3748;
+	border-radius: 6px;
+	color: #e2e8f0;
+	font-size: 14px;
+	transition: all 0.2s ease;
+}
+
+.volume-input:focus {
+	outline: none;
+	border-color: #3b82f6;
+}
+
+.volume-input::placeholder {
+	color: #64748b;
 }
 </style>

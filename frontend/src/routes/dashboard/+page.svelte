@@ -15,10 +15,12 @@
 		shares: number;
 		pricePerShare: number;
 		currentPrice: number;
+		closedPrice?: number; // Price when position was closed
 		pnl: number;
 		pnlPercentage: number;
 		status: 'Active' | 'Closed';
 		openedAt: Date;
+		closedAt?: Date; // When position was closed
 	}
 
 	let positions: Position[] = [];
@@ -77,32 +79,75 @@
 				const shares = pos.shares.toNumber() / 1_000_000;
 				const pricePerShare = pos.pricePerShare.toNumber() / 1_000_000;
 				const predictionType: 'Yes' | 'No' = isYes ? 'Yes' : 'No';
+				const isClosed = !('active' in pos.status);
+
+				// For closed positions, use averageSellPrice as the closed price
+				let closedPrice: number | undefined = undefined;
+				if (isClosed) {
+					if (pos.averageSellPrice && pos.averageSellPrice.toNumber() > 0) {
+						closedPrice = pos.averageSellPrice.toNumber() / 1_000_000;
+					} else {
+						// Fallback: use current market price if averageSellPrice is 0 or missing
+						console.warn(`Position ${pos.positionId} closed but averageSellPrice is ${pos.averageSellPrice?.toNumber() || 0}, fetching current price as fallback`);
+					}
+				}
 
 				// Fetch market details to get the actual market name
 				let marketName = `Market ${pos.marketId.slice(0, 10)}...`; // Fallback
 				let currentPrice = pricePerShare; // Fallback to entry price
-				try {
-					const market = await polymarketClient.getMarketById(pos.marketId);
-					if (market) {
-						marketName = market.question || market.title || marketName;
 
-						// Also fetch current price
-						const fetchedPrice = await polymarketClient.getPositionCurrentPrice(
-							pos.marketId,
-							predictionType
-						);
-						if (fetchedPrice !== null) {
-							currentPrice = fetchedPrice;
+				// Only fetch current price for active positions
+				if (!isClosed) {
+					try {
+						const market = await polymarketClient.getMarketById(pos.marketId);
+						if (market) {
+							marketName = market.question || market.title || marketName;
+
+							// Also fetch current price
+							const fetchedPrice = await polymarketClient.getPositionCurrentPrice(
+								pos.marketId,
+								predictionType
+							);
+							console.log(`Fetched price for ${marketName} (${predictionType}): ${fetchedPrice}, Entry price: ${pricePerShare}`);
+							if (fetchedPrice !== null && fetchedPrice > 0) {
+								currentPrice = fetchedPrice;
+							} else {
+								console.warn(`No valid price fetched for ${marketName}, using entry price ${pricePerShare}`);
+							}
 						}
+					} catch (error) {
+						console.error(`Error fetching market data for position ${pos.positionId}:`, error);
 					}
-				} catch (error) {
-					console.error(`Error fetching market data for position ${pos.positionId}:`, error);
+				} else {
+					// For closed positions, use closedPrice or fetch current price as fallback
+					try {
+						const market = await polymarketClient.getMarketById(pos.marketId);
+						if (market) {
+							marketName = market.question || market.title || marketName;
+
+							// If closedPrice is missing or 0, fetch current market price
+							if (!closedPrice || closedPrice === 0) {
+								const fetchedPrice = await polymarketClient.getPositionCurrentPrice(
+									pos.marketId,
+									predictionType
+								);
+								if (fetchedPrice !== null && fetchedPrice > 0) {
+									closedPrice = fetchedPrice;
+									console.log(`Using fetched price ${fetchedPrice} as closed price for ${marketName}`);
+								}
+							}
+						}
+					} catch (error) {
+						console.error(`Error fetching market data for position ${pos.positionId}:`, error);
+					}
+
+					currentPrice = closedPrice || pricePerShare;
 				}
 
 				const currentValue = shares * currentPrice;
 				const pnl = currentValue - amountUsdc;
 				const pnlPercentage = (pnl / amountUsdc) * 100;
-				const status: 'Active' | 'Closed' = 'active' in pos.status ? 'Active' : 'Closed';
+				const status: 'Active' | 'Closed' = isClosed ? 'Closed' : 'Active';
 
 				return {
 					id: pos.positionId.toString(),
@@ -113,10 +158,12 @@
 					shares,
 					pricePerShare,
 					currentPrice,
+					closedPrice,
 					pnl,
 					pnlPercentage,
 					status,
-					openedAt: new Date(pos.openedAt.toNumber() * 1000)
+					openedAt: new Date(pos.openedAt.toNumber() * 1000),
+					closedAt: isClosed ? new Date(pos.closedAt.toNumber() * 1000) : undefined
 				};
 			});
 
@@ -374,6 +421,7 @@
 							<th>Shares</th>
 							<th>Entry Price</th>
 							<th>Current Price</th>
+							<th>Closed Price</th>
 							<th>P&L</th>
 							<th>Status</th>
 							<th>Actions</th>
@@ -394,8 +442,21 @@
 								</td>
 								<td>{formatUSDC(position.amountUsdc)}</td>
 								<td>{position.shares.toFixed(2)}</td>
-								<td>${position.pricePerShare.toFixed(2)}</td>
-								<td>${position.currentPrice.toFixed(2)}</td>
+								<td>${position.pricePerShare.toFixed(4)}</td>
+								<td>
+									{#if position.status === 'Active'}
+										${position.currentPrice.toFixed(4)}
+									{:else}
+										<span class="text-muted">—</span>
+									{/if}
+								</td>
+								<td>
+									{#if position.status === 'Closed' && position.closedPrice !== undefined}
+										${position.closedPrice.toFixed(4)}
+									{:else}
+										<span class="text-muted">—</span>
+									{/if}
+								</td>
 								<td class:positive={position.pnl >= 0} class:negative={position.pnl < 0}>
 									{formatUSDC(position.pnl)}
 									<span class="pnl-percentage">({formatPercentage(position.pnlPercentage)})</span>
