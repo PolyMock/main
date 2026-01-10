@@ -36,6 +36,9 @@
 	let positionFilter: 'all' | 'open' | 'closed' = 'all';
 	let walletState = $walletStore;
 
+	// Cache for closed positions - once calculated, NEVER recalculate
+	let closedPositionsCache = new Map<string, Position>();
+
 	// Modal state
 	let showConfirmModal = false;
 	let showSuccessModal = false;
@@ -45,16 +48,22 @@
 	let modalDetails: any = null;
 	let pendingClose: (() => Promise<void>) | null = null;
 
+	let lastLoadedWallet: string | null = null;
+
 	// Subscribe to wallet state
 	walletStore.subscribe(value => {
 		walletState = value;
-		if (value.connected && value.publicKey) {
+		const currentWallet = value.publicKey?.toString() || null;
+		// Only reload if wallet changed, not on every wallet state update
+		if (value.connected && value.publicKey && currentWallet !== lastLoadedWallet) {
+			lastLoadedWallet = currentWallet;
 			loadPositions();
 		}
 	});
 
 	onMount(async () => {
 		if (walletState.connected && walletState.publicKey) {
+			lastLoadedWallet = walletState.publicKey.toString();
 			await loadPositions();
 		} else {
 			loading = false;
@@ -62,33 +71,44 @@
 	});
 
 	async function loadPositions() {
-		if (!walletState.publicKey) {
+		if (!walletState.publicKey || !walletState.adapter) {
 			loading = false;
 			return;
 		}
 
 		loading = true;
 		try {
+			// Initialize program if needed
+			await polymarketService.initializeProgram(walletState.adapter);
+
 			const userPublicKey = new PublicKey(walletState.publicKey.toString());
 			const blockchainPositions = await polymarketService.getUserPositions(userPublicKey);
 
 			// Convert blockchain positions to display format and fetch real-time prices
 			const positionsPromises = blockchainPositions.map(async (pos) => {
+				const positionId = pos.positionId.toString();
+				const isClosed = !('active' in pos.status);
+
+				// If position is closed and already in cache, return cached version immediately
+				if (isClosed && closedPositionsCache.has(positionId)) {
+					console.log(`Using cached data for closed position ${positionId}`);
+					return closedPositionsCache.get(positionId)!;
+				}
+
 				const isYes = 'yes' in pos.predictionType;
 				const amountUsdc = pos.amountUsdc.toNumber() / 1_000_000;
 				const shares = pos.shares.toNumber() / 1_000_000;
 				const pricePerShare = pos.pricePerShare.toNumber() / 1_000_000;
 				const predictionType: 'Yes' | 'No' = isYes ? 'Yes' : 'No';
-				const isClosed = !('active' in pos.status);
 
 				// For closed positions, use averageSellPrice as the closed price
 				let closedPrice: number | undefined = undefined;
 				if (isClosed) {
 					if (pos.averageSellPrice && pos.averageSellPrice.toNumber() > 0) {
 						closedPrice = pos.averageSellPrice.toNumber() / 1_000_000;
+						console.log(`Position ${pos.positionId} closed at price: ${closedPrice}`);
 					} else {
-						// Fallback: use current market price if averageSellPrice is 0 or missing
-						console.warn(`Position ${pos.positionId} closed but averageSellPrice is ${pos.averageSellPrice?.toNumber() || 0}, fetching current price as fallback`);
+						console.warn(`Position ${pos.positionId} closed but averageSellPrice is ${pos.averageSellPrice?.toNumber() || 0}. This should not happen.`);
 					}
 				}
 
@@ -96,68 +116,52 @@
 				let marketName = `Market ${pos.marketId.slice(0, 10)}...`; // Fallback
 				let currentPrice = pricePerShare; // Fallback to entry price
 
-				// Only fetch current price for active positions
-				if (!isClosed) {
-					try {
-						const market = await polymarketClient.getMarketById(pos.marketId);
-						if (market) {
-							marketName = market.question || market.title || marketName;
-
-							// Also fetch current price
-							const fetchedPrice = await polymarketClient.getPositionCurrentPrice(
-								pos.marketId,
-								predictionType
-							);
-							console.log(`Fetched price for ${marketName} (${predictionType}): ${fetchedPrice}, Entry price: ${pricePerShare}`);
-							if (fetchedPrice !== null && fetchedPrice > 0) {
-								currentPrice = fetchedPrice;
-							} else {
-								console.warn(`No valid price fetched for ${marketName}, using entry price ${pricePerShare}`);
-							}
-						}
-					} catch (error) {
-						console.error(`Error fetching market data for position ${pos.positionId}:`, error);
-					}
-				} else {
-					// For closed positions, use closedPrice or fetch current price as fallback
-					try {
-						const market = await polymarketClient.getMarketById(pos.marketId);
-						if (market) {
-							marketName = market.question || market.title || marketName;
-
-							// If closedPrice is missing or 0, fetch current market price
-							if (!closedPrice || closedPrice === 0) {
-								const fetchedPrice = await polymarketClient.getPositionCurrentPrice(
-									pos.marketId,
-									predictionType
-								);
-								if (fetchedPrice !== null && fetchedPrice > 0) {
-									closedPrice = fetchedPrice;
-									console.log(`Using fetched price ${fetchedPrice} as closed price for ${marketName}`);
-								}
-							}
-						}
-					} catch (error) {
-						console.error(`Error fetching market data for position ${pos.positionId}:`, error);
+				// Fetch market name and current price (only for active positions)
+				try {
+					const market = await polymarketClient.getMarketById(pos.marketId);
+					if (market) {
+						marketName = market.question || market.title || marketName;
 					}
 
-					currentPrice = closedPrice || pricePerShare;
+					// Only fetch current price for active positions
+					if (!isClosed) {
+						const fetchedPrice = await polymarketClient.getPositionCurrentPrice(
+							pos.marketId,
+							predictionType
+						);
+						console.log(`Fetched price for ${marketName} (${predictionType}): ${fetchedPrice}, Entry price: ${pricePerShare}`);
+						if (fetchedPrice !== null && fetchedPrice > 0) {
+							currentPrice = fetchedPrice;
+						} else {
+							console.warn(`No valid price fetched for ${marketName}, using entry price ${pricePerShare}`);
+						}
+					} else {
+						// For closed positions, use the closedPrice
+						currentPrice = closedPrice || pricePerShare;
+					}
+				} catch (error) {
+					console.error(`Error fetching market data for position ${pos.positionId}:`, error);
 				}
 
-				const currentValue = shares * currentPrice;
+				// Calculate PnL based on the appropriate price
+				const priceForPnL = isClosed ? (closedPrice || currentPrice) : currentPrice;
+				const currentValue = shares * priceForPnL;
 				const pnl = currentValue - amountUsdc;
 				const pnlPercentage = (pnl / amountUsdc) * 100;
 				const status: 'Active' | 'Closed' = isClosed ? 'Closed' : 'Active';
 
-				return {
-					id: pos.positionId.toString(),
+				console.log(`Position ${marketName} (${status}): Entry=${pricePerShare}, Price for PnL=${priceForPnL}, Shares=${shares}, PnL=${pnl}`);
+
+				const position: Position = {
+					id: positionId,
 					marketId: pos.marketId,
 					marketName,
 					predictionType,
 					amountUsdc,
 					shares,
 					pricePerShare,
-					currentPrice,
+					// For closed positions, currentPrice should be the closedPrice for display consistency
+					currentPrice: isClosed ? (closedPrice || currentPrice) : currentPrice,
 					closedPrice,
 					pnl,
 					pnlPercentage,
@@ -165,6 +169,14 @@
 					openedAt: new Date(pos.openedAt.toNumber() * 1000),
 					closedAt: isClosed ? new Date(pos.closedAt.toNumber() * 1000) : undefined
 				};
+
+				// Cache closed positions so they NEVER get recalculated
+				if (isClosed) {
+					closedPositionsCache.set(positionId, position);
+					console.log(`Cached closed position ${positionId} with PnL: $${pnl.toFixed(2)}`);
+				}
+
+				return position;
 			});
 
 			positions = await Promise.all(positionsPromises);
@@ -189,10 +201,18 @@
 		closedPositionsPnl = closedPositions.reduce((sum, pos) => sum + pos.pnl, 0);
 
 		openPositionsValue = openPositions.reduce((sum, pos) => sum + (pos.shares * pos.currentPrice), 0);
-		closedPositionsValue = closedPositions.reduce((sum, pos) => sum + (pos.shares * pos.currentPrice), 0);
+		// For closed positions, use closedPrice if available, otherwise currentPrice
+		closedPositionsValue = closedPositions.reduce((sum, pos) => {
+			const price = pos.closedPrice || pos.currentPrice;
+			return sum + (pos.shares * price);
+		}, 0);
 
 		totalPnl = positions.reduce((sum, pos) => sum + pos.pnl, 0);
-		totalValue = positions.reduce((sum, pos) => sum + (pos.shares * pos.currentPrice), 0);
+		// Use closedPrice for closed positions, currentPrice for active
+		totalValue = positions.reduce((sum, pos) => {
+			const price = pos.status === 'Closed' ? (pos.closedPrice || pos.currentPrice) : pos.currentPrice;
+			return sum + (pos.shares * price);
+		}, 0);
 	}
 
 	$: filteredPositions = positions.filter(pos => {
@@ -267,6 +287,19 @@
 					parseInt(positionId),
 					currentPrice
 				);
+
+				// Immediately cache the closed position with the current price
+				const closedPosition: Position = {
+					...position,
+					status: 'Closed',
+					closedPrice: currentPrice,
+					currentPrice: currentPrice,
+					pnl: (position.shares * currentPrice) - position.amountUsdc,
+					pnlPercentage: (((position.shares * currentPrice) - position.amountUsdc) / position.amountUsdc) * 100,
+					closedAt: new Date()
+				};
+				closedPositionsCache.set(positionId, closedPosition);
+				console.log(`Manually cached closed position ${positionId} with closing price: $${currentPrice.toFixed(4)}`);
 
 				// Show success modal
 				modalTitle = 'Position Closed!';

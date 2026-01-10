@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { walletStore, refreshUserBalance } from '$lib/wallet/stores';
 	import { polymarketService } from '$lib/solana/polymarket-service';
+	import { polymarketClient } from '$lib/polymarket';
 	import { authStore } from '$lib/auth/auth-store';
 	import { PublicKey } from '@solana/web3.js';
 
@@ -9,6 +10,9 @@
 	let loading = true;
 	let positionsValue = 0;
 	let biggestWin = 0;
+	let biggestLoss = 0;
+	let bestTradeMarket = '';
+	let worstTradeMarket = '';
 	let totalPredictions = 0;
 	let profitLoss = 0;
 	let timeFilter: '1D' | '1W' | '1M' | 'ALL' = 'ALL';
@@ -16,17 +20,22 @@
 	let fileInput: HTMLInputElement;
 	let previewUrl: string | null = null;
 	let uploading = false;
+	let lastLoadedWallet: string | null = null;
 
 	// Subscribe to wallet state
 	walletStore.subscribe(value => {
 		walletState = value;
-		if (value.connected && value.publicKey) {
+		const currentWallet = value.publicKey?.toString() || null;
+		// Only reload if wallet changed, not on every wallet state update
+		if (value.connected && value.publicKey && currentWallet !== lastLoadedWallet) {
+			lastLoadedWallet = currentWallet;
 			loadProfileData();
 		}
 	});
 
 	onMount(async () => {
 		if (walletState.connected && walletState.publicKey) {
+			lastLoadedWallet = walletState.publicKey.toString();
 			await loadProfileData();
 		} else {
 			loading = false;
@@ -42,35 +51,92 @@
 		loading = true;
 		try {
 			const userPublicKey = new PublicKey(walletState.publicKey.toString());
-			const positions = await polymarketService.getUserPositions(userPublicKey);
+			const blockchainPositions = await polymarketService.getUserPositions(userPublicKey);
 
-			// Calculate stats
-			totalPredictions = positions.length;
+			// Calculate stats - same logic as dashboard
+			totalPredictions = blockchainPositions.length;
 
 			let maxWin = 0;
+			let maxLoss = 0;
+			let bestMarket = '';
+			let worstMarket = '';
 			let totalValue = 0;
 			let totalPnL = 0;
 
-			for (const pos of positions) {
+			// Process positions with same logic as dashboard
+			const positionsPromises = blockchainPositions.map(async (pos) => {
+				const isYes = 'yes' in pos.predictionType;
 				const amountUsdc = pos.amountUsdc.toNumber() / 1_000_000;
 				const shares = pos.shares.toNumber() / 1_000_000;
 				const pricePerShare = pos.pricePerShare.toNumber() / 1_000_000;
+				const predictionType: 'Yes' | 'No' = isYes ? 'Yes' : 'No';
+				const isClosed = !('active' in pos.status);
 
-				// Use current price if available, otherwise use entry price
-				const currentPrice = pricePerShare; // In production, fetch from API
-				const currentValue = shares * currentPrice;
+				// For closed positions, use averageSellPrice as the closed price
+				let closedPrice: number | undefined = undefined;
+				if (isClosed) {
+					if (pos.averageSellPrice && pos.averageSellPrice.toNumber() > 0) {
+						closedPrice = pos.averageSellPrice.toNumber() / 1_000_000;
+					}
+				}
+
+				// Fetch market details
+				let marketName = `Market ${pos.marketId.slice(0, 10)}...`;
+				let currentPrice = pricePerShare;
+
+				try {
+					const market = await polymarketClient.getMarketById(pos.marketId);
+					if (market) {
+						marketName = market.question || market.title || marketName;
+					}
+
+					// Only fetch current price for active positions
+					if (!isClosed) {
+						const fetchedPrice = await polymarketClient.getPositionCurrentPrice(
+							pos.marketId,
+							predictionType
+						);
+						if (fetchedPrice !== null && fetchedPrice > 0) {
+							currentPrice = fetchedPrice;
+						}
+					} else {
+						// For closed positions, use the closedPrice
+						currentPrice = closedPrice || pricePerShare;
+					}
+				} catch (error) {
+					console.error(`Error fetching market data for position ${pos.positionId}:`, error);
+				}
+
+				// Calculate PnL based on the appropriate price
+				const priceForPnL = isClosed ? (closedPrice || currentPrice) : currentPrice;
+				const currentValue = shares * priceForPnL;
 				const pnl = currentValue - amountUsdc;
 
-				totalValue += currentValue;
-				totalPnL += pnl;
+				return { pnl, currentValue, marketName };
+			});
 
-				if (pnl > maxWin) {
-					maxWin = pnl;
+			const processedPositions = await Promise.all(positionsPromises);
+
+			// Calculate totals and find best/worst trades
+			for (const pos of processedPositions) {
+				totalValue += pos.currentValue;
+				totalPnL += pos.pnl;
+
+				if (pos.pnl > maxWin) {
+					maxWin = pos.pnl;
+					bestMarket = pos.marketName;
+				}
+				if (pos.pnl < maxLoss) {
+					maxLoss = pos.pnl;
+					worstMarket = pos.marketName;
 				}
 			}
 
 			positionsValue = totalValue;
 			biggestWin = maxWin;
+			biggestLoss = maxLoss;
+			bestTradeMarket = bestMarket;
+			worstTradeMarket = worstMarket;
 			profitLoss = totalPnL;
 		} catch (error) {
 			console.error('Error loading profile data:', error);
@@ -248,8 +314,19 @@
 					</div>
 					<div class="stat-divider"></div>
 					<div class="stat-item">
-						<div class="stat-label">Biggest Win</div>
-						<div class="stat-value">{formatLargeNumber(biggestWin)}</div>
+						<div class="stat-label">Best Trade</div>
+						<div class="stat-value stat-positive">{formatLargeNumber(biggestWin)}</div>
+						{#if bestTradeMarket}
+							<div class="stat-subtitle">{bestTradeMarket}</div>
+						{/if}
+					</div>
+					<div class="stat-divider"></div>
+					<div class="stat-item">
+						<div class="stat-label">Worst Trade</div>
+						<div class="stat-value stat-negative">{formatLargeNumber(biggestLoss)}</div>
+						{#if worstTradeMarket}
+							<div class="stat-subtitle">{worstTradeMarket}</div>
+						{/if}
 					</div>
 					<div class="stat-divider"></div>
 					<div class="stat-item">
@@ -564,6 +641,24 @@
 		color: #E8E8E8;
 	}
 
+	.stat-value.stat-positive {
+		color: #00D68F;
+	}
+
+	.stat-value.stat-negative {
+		color: #FF6B6B;
+	}
+
+	.stat-subtitle {
+		font-size: 11px;
+		color: #8B92AB;
+		margin-top: 4px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		max-width: 200px;
+	}
+
 	.stat-divider {
 		width: 1px;
 		height: 40px;
@@ -731,12 +826,18 @@
 		color: #1A1A1A;
 	}
 
+	:global(.light-mode) .stat-value.stat-positive,
 	:global(.light-mode) .pnl-amount.positive {
 		color: #00B570;
 	}
 
+	:global(.light-mode) .stat-value.stat-negative,
 	:global(.light-mode) .pnl-amount.negative {
 		color: #FF6B6B;
+	}
+
+	:global(.light-mode) .stat-subtitle {
+		color: #666;
 	}
 
 	:global(.light-mode) .stats-row,
