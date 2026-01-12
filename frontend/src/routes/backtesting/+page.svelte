@@ -390,7 +390,7 @@
 	}
 
 	let backtestResult: BacktestResult | null = null;
-	let showProMetrics = false;
+	// Removed showProMetrics - all metrics are now always visible
 
 	// Wizard state
 	let currentStep = 0;
@@ -1897,7 +1897,21 @@
 					{#if backtestResult.metrics.totalTrades === 0}
 						<div class="warning-box">
 							<h3>No Trades Executed</h3>
-							<p>The backtest completed but no trades matched your criteria. This could be because:</p>
+							<p>The backtest completed but no trades matched your criteria.</p>
+
+							{#if backtestResult.debugInfo}
+								<div class="debug-section">
+									<h4>Debug Information:</h4>
+									<ul>
+										<li>Markets analyzed: {backtestResult.debugInfo.marketsProcessed || 0}</li>
+										<li>Markets with data: {backtestResult.debugInfo.marketsWithData || 0}</li>
+										<li>Total candlesticks fetched: {backtestResult.debugInfo.totalCandlesticks || 0}</li>
+										<li>Valid candlesticks: {backtestResult.debugInfo.validCandlesticks || 0}</li>
+									</ul>
+								</div>
+							{/if}
+
+							<p><strong>Common reasons:</strong></p>
 							<ul>
 								<li><strong>No historical data:</strong> The selected market(s) may not have candlestick data available for the date range</li>
 								<li><strong>Entry price too restrictive:</strong> Your price thresholds may be too narrow</li>
@@ -1907,10 +1921,11 @@
 							<p><strong>Suggestions:</strong></p>
 							<ul>
 								<li>Try selecting a market with higher volume (look for markets with >$0.5M volume)</li>
+								<li>Try a different date range - preferably when the market was actively traded</li>
 								<li>Widen your entry price thresholds or remove them entirely</li>
-								<li>Choose markets created before your start date</li>
-								<li>Use a longer date range (30-60 days)</li>
+								<li>Choose markets that ended recently (last 30-90 days)</li>
 								<li>Try backtesting across all markets instead of a single market</li>
+								<li>Check the browser console (F12) for detailed error messages</li>
 							</ul>
 						</div>
 					{/if}
@@ -2043,27 +2058,21 @@
 						</div>
 					</div>
 
-					<!-- Pro Metrics Section -->
-					<div class="section pro-section">
-						<div class="pro-header">
-							<h2>⭐ Professional Metrics</h2>
-							<button class="btn-unlock" on:click={() => (showProMetrics = !showProMetrics)}>
-								{showProMetrics ? '🔓 Hide' : '🔒 Show All (Free for now)'}
-							</button>
+					<!-- Advanced Metrics Section -->
+					<div class="section">
+						<h2>Advanced Metrics</h2>
+
+						<!-- Equity Curve Chart -->
+						<div class="chart-section">
+							<EquityCurveChart
+								equityCurve={backtestResult.metrics.equityCurve}
+								initialCapital={backtestResult.startingCapital}
+							/>
 						</div>
 
-						{#if showProMetrics}
-							<!-- Equity Curve Chart -->
-							<div class="chart-section">
-								<EquityCurveChart
-									equityCurve={backtestResult.metrics.equityCurve}
-									initialCapital={backtestResult.startingCapital}
-								/>
-							</div>
-
-							<!-- Pro Metrics Grid -->
-							<div class="metrics-grid">
-								<div class="metric-card pro">
+						<!-- Advanced Metrics Grid -->
+						<div class="metrics-grid">
+								<div class="metric-card">
 									<div class="metric-label">Max Drawdown</div>
 									<div class="metric-value negative">
 										{formatUSDC(backtestResult.metrics.maxDrawdown)}
@@ -2072,67 +2081,66 @@
 										{backtestResult.metrics.maxDrawdownPercentage.toFixed(2)}%
 									</div>
 								</div>
-								<div class="metric-card pro">
+								<div class="metric-card">
 									<div class="metric-label">Sharpe Ratio</div>
 									<div class="metric-value">
 										{backtestResult.metrics.sharpeRatio.toFixed(2)}
 									</div>
 								</div>
-								<div class="metric-card pro">
+								<div class="metric-card">
 									<div class="metric-label">Volatility</div>
 									<div class="metric-value">
 										{backtestResult.metrics.volatility.toFixed(2)}%
 									</div>
 								</div>
-								<div class="metric-card pro">
+								<div class="metric-card">
 									<div class="metric-label">Expectancy</div>
 									<div class="metric-value">
 										{formatUSDC(backtestResult.metrics.expectancy)}
 									</div>
 								</div>
-								<div class="metric-card pro">
+								<div class="metric-card">
 									<div class="metric-label">Median Win</div>
 									<div class="metric-value positive">
 										{formatUSDC(backtestResult.metrics.medianWin)}
 									</div>
 								</div>
-								<div class="metric-card pro">
+								<div class="metric-card">
 									<div class="metric-label">Median Loss</div>
 									<div class="metric-value negative">
 										{formatUSDC(backtestResult.metrics.medianLoss)}
 									</div>
 								</div>
-								<div class="metric-card pro">
+								<div class="metric-card">
 									<div class="metric-label">Avg Hold Time</div>
 									<div class="metric-value">
 										{backtestResult.metrics.avgHoldTime.toFixed(1)}h
 									</div>
 								</div>
-								<div class="metric-card pro">
+								<div class="metric-card">
 									<div class="metric-label">Profit Factor</div>
 									<div class="metric-value">
 										{backtestResult.metrics.profitFactor.toFixed(2)}
 									</div>
 								</div>
-								<div class="metric-card pro">
+								<div class="metric-card">
 									<div class="metric-label">Consecutive Wins</div>
 									<div class="metric-value positive">
 										{backtestResult.metrics.consecutiveWins}
 									</div>
 								</div>
-								<div class="metric-card pro">
+								<div class="metric-card">
 									<div class="metric-label">Consecutive Losses</div>
 									<div class="metric-value negative">
 										{backtestResult.metrics.consecutiveLosses}
 									</div>
 								</div>
 							</div>
-						{/if}
 					</div>
 
 					<!-- Top/Worst Trades -->
 					<div class="section">
-						<h2>🏆 Best & Worst Trades</h2>
+						<h2>Best & Worst Trades</h2>
 						<div class="trades-comparison">
 							<div class="trades-panel">
 								<h3>Top 5 Trades</h3>
@@ -2547,10 +2555,7 @@
 		padding: 20px;
 	}
 
-	.metric-card.pro {
-		border-color: #00b4ff;
-		background: rgba(0, 180, 255, 0.05);
-	}
+	/* Removed .metric-card.pro styling - all metrics use default style */
 
 	.metric-label {
 		font-size: 12px;
@@ -3062,27 +3067,7 @@
 		color: white;
 	}
 
-	.pro-section {
-		border: 2px solid #00b4ff;
-	}
-
-	.pro-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 20px;
-	}
-
-	.btn-unlock {
-		background: linear-gradient(90deg, #00b4ff 0%, #00d084 100%);
-		border: none;
-		color: white;
-		padding: 8px 16px;
-		font-size: 14px;
-		font-weight: 600;
-		border-radius: 6px;
-		cursor: pointer;
-	}
+	/* Removed pro-section, pro-header, and btn-unlock styles - no longer needed */
 
 	.chart-section {
 		margin-bottom: 24px;
@@ -3332,6 +3317,25 @@
 
 	.warning-box strong {
 		color: #fbbf24;
+	}
+
+	.warning-box .debug-section {
+		background: rgba(0, 0, 0, 0.3);
+		border-radius: 8px;
+		padding: 1rem;
+		margin: 1rem 0;
+	}
+
+	.warning-box .debug-section h4 {
+		color: #60a5fa;
+		margin: 0 0 0.75rem 0;
+		font-size: 0.95rem;
+	}
+
+	.warning-box .debug-section ul {
+		margin: 0 0 0 1.25rem;
+		font-family: 'Courier New', monospace;
+		font-size: 0.9rem;
 	}
 
 	.btn-load-markets {

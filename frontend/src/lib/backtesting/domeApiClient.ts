@@ -154,13 +154,14 @@ export class DomeApiClient {
       }
 
       // Log timestamp conversion for debugging
-      console.log(`Fetching candlesticks for ${conditionId}:`, {
-        interval,
+      console.log(`📡 API Call - Fetching candlesticks for ${conditionId}:`, {
+        interval: `${interval} (${interval === 1 ? '1min' : interval === 60 ? '1hr' : '1day'})`,
         startTime: startTime.toISOString(),
         endTime: endTime.toISOString(),
         startTimeSeconds,
         endTimeSeconds,
-        rangeDays: (endTimeSeconds - startTimeSeconds) / (24 * 60 * 60)
+        rangeDays: ((endTimeSeconds - startTimeSeconds) / (24 * 60 * 60)).toFixed(1),
+        url: `${DOME_API_BASE}/polymarket/candlesticks/${conditionId}?interval=${interval}&start_time=${startTimeSeconds}&end_time=${endTimeSeconds}`
       });
 
       const response = await axios.get(
@@ -187,9 +188,12 @@ export class DomeApiClient {
       }
 
       if (candlesticksArray.length === 0) {
-        console.warn(`Empty candlesticks array for ${conditionId}`);
+        console.warn(`⚠️  Empty candlesticks array returned from API for ${conditionId}`);
+        console.warn(`   This could mean: 1) Market has no trading data in this period, 2) Market is too new, 3) Wrong condition_id format`);
         return [];
       }
+
+      console.log(`📊 Received ${candlesticksArray.length} candlestick entries from API`);
 
       const candlesticks: Candlestick[] = [];
 

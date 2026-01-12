@@ -260,26 +260,39 @@ export class BacktestEngine {
 
       // Calculate date range and choose appropriate interval
       const rangeDays = (config.endDate.getTime() - config.startDate.getTime()) / (1000 * 60 * 60 * 24);
-      let interval: 1 | 60 | 1440 = 1440; // Default to 1 day
-      
+
       // Choose interval based on range (respecting API limits)
+      // Start with hourly data for better granularity unless range is too long
+      let interval: 1 | 60 | 1440;
+
       if (rangeDays <= 7) {
-        interval = 1; // 1 minute for up to 1 week
+        interval = 60; // Use hourly for up to 1 week (was 1 minute, but that's often too granular)
       } else if (rangeDays <= 30) {
         interval = 60; // 1 hour for up to 1 month
       } else {
-        interval = 1440; // 1 day for up to 1 year
+        interval = 1440; // 1 day for longer than 1 month
       }
 
-      console.log(`   Using interval: ${interval} (${interval === 1 ? '1 minute' : interval === 60 ? '1 hour' : '1 day'})`);
+      console.log(`   Date range: ${rangeDays.toFixed(1)} days, using interval: ${interval} (${interval === 1 ? '1 minute' : interval === 60 ? '1 hour' : '1 day'})`);
 
-      // Fetch candlestick data for this market
-      const candlesticks = await this.domeClient.getCandlesticks(
+      // Try to fetch candlestick data, with fallback to larger intervals if no data
+      let candlesticks = await this.domeClient.getCandlesticks(
         market.condition_id,
         interval,
         config.startDate,
         config.endDate
       );
+
+      // If no data with current interval and it's not daily yet, try daily
+      if (candlesticks.length === 0 && interval < 1440) {
+        console.log(`   No data with ${interval === 1 ? '1-minute' : '1-hour'} interval, trying daily interval...`);
+        candlesticks = await this.domeClient.getCandlesticks(
+          market.condition_id,
+          1440,
+          config.startDate,
+          config.endDate
+        );
+      }
 
       console.log(`   Fetched ${candlesticks.length} candlesticks`);
       this.debugInfo.totalCandlesticks += candlesticks.length;
@@ -599,9 +612,14 @@ export class BacktestEngine {
 
     position.exitTime = exitTime;
     position.exitPrice = exitPrice;
-    position.pnl = netExitValue - position.amountInvested;
+
+    // IMPORTANT: PnL must account for BOTH entry and exit fees
+    // Entry fees were already deducted from capital when opening the position
+    // So total cost = amountInvested + entryFees
+    const totalCost = position.amountInvested + position.fees; // position.fees contains entry fees
+    position.pnl = netExitValue - totalCost; // Net PnL after all fees
     position.pnlPercentage = (position.pnl / position.amountInvested) * 100;
-    position.fees += exitFees;
+    position.fees += exitFees; // Add exit fees to total fees
     position.status = 'CLOSED';
     position.exitReason = exitReason;
 
