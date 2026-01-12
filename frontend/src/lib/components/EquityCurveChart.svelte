@@ -26,7 +26,7 @@
 
 		const width = canvas.width;
 		const height = canvas.height;
-		const padding = { top: 20, right: 20, bottom: 40, left: 60 };
+		const padding = { top: 30, right: 10, bottom: 50, left: 70 };
 
 		// Clear canvas
 		ctx.fillStyle = '#0A0E1A';
@@ -41,7 +41,7 @@
 		const equityRange = maxEquity - minEquity;
 
 		// Draw grid lines
-		ctx.strokeStyle = '#2A2F45';
+		ctx.strokeStyle = '#1e2537';
 		ctx.lineWidth = 1;
 
 		// Horizontal grid lines (5 lines)
@@ -54,8 +54,8 @@
 
 			// Y-axis labels
 			const value = maxEquity - (equityRange / 5) * i;
-			ctx.fillStyle = '#8B92AB';
-			ctx.font = '11px sans-serif';
+			ctx.fillStyle = '#9ca3af';
+			ctx.font = '12px sans-serif';
 			ctx.textAlign = 'right';
 			ctx.fillText(`$${value.toFixed(0)}`, padding.left - 10, y + 4);
 		}
@@ -73,8 +73,8 @@
 		ctx.setLineDash([]);
 
 		// Draw equity curve
-		ctx.strokeStyle = '#00D68F';
-		ctx.lineWidth = 2;
+		ctx.strokeStyle = '#3b82f6';
+		ctx.lineWidth = 2.5;
 		ctx.beginPath();
 
 		equityCurve.forEach((point, i) => {
@@ -91,46 +91,10 @@
 
 		ctx.stroke();
 
-		// Draw area under curve
-		ctx.fillStyle = 'rgba(0, 214, 143, 0.1)';
-		ctx.lineTo(width - padding.right, padding.top + chartHeight);
-		ctx.lineTo(padding.left, padding.top + chartHeight);
-		ctx.closePath();
-		ctx.fill();
-
-		// Draw drawdown area
-		ctx.fillStyle = 'rgba(255, 107, 107, 0.1)';
-		ctx.beginPath();
-
-		equityCurve.forEach((point, i) => {
-			const x = padding.left + (i / (equityCurve.length - 1)) * chartWidth;
-			const equityY =
-				padding.top + chartHeight - ((point.equity - minEquity) / equityRange) * chartHeight;
-			const peak = Math.max(...equityCurve.slice(0, i + 1).map((p) => p.equity));
-			const peakY = padding.top + chartHeight - ((peak - minEquity) / equityRange) * chartHeight;
-
-			if (i === 0) {
-				ctx.moveTo(x, equityY);
-			} else {
-				ctx.lineTo(x, equityY);
-			}
-		});
-
-		// Complete drawdown area
-		for (let i = equityCurve.length - 1; i >= 0; i--) {
-			const x = padding.left + (i / (equityCurve.length - 1)) * chartWidth;
-			const peak = Math.max(...equityCurve.slice(0, i + 1).map((p) => p.equity));
-			const peakY = padding.top + chartHeight - ((peak - minEquity) / equityRange) * chartHeight;
-			ctx.lineTo(x, peakY);
-		}
-
-		ctx.closePath();
-		ctx.fill();
-
 		// X-axis labels (time)
 		const numLabels = 5;
-		ctx.fillStyle = '#8B92AB';
-		ctx.font = '11px sans-serif';
+		ctx.fillStyle = '#9ca3af';
+		ctx.font = '12px sans-serif';
 		ctx.textAlign = 'center';
 
 		for (let i = 0; i <= numLabels; i++) {
@@ -145,28 +109,28 @@
 		}
 
 		// Chart title
-		ctx.fillStyle = '#E8E8E8';
-		ctx.font = 'bold 14px sans-serif';
+		ctx.fillStyle = 'white';
+		ctx.font = '600 16px sans-serif';
 		ctx.textAlign = 'left';
 		ctx.fillText('Equity Curve', padding.left, padding.top - 5);
 	}
 </script>
 
 <div class="chart-container">
-	<canvas bind:this={canvas} width="800" height="400"></canvas>
+	<canvas bind:this={canvas} width="1000" height="400"></canvas>
 </div>
 
 <style>
 	.chart-container {
-		background: #0a0e1a;
-		border: 1px solid #2a2f45;
-		border-radius: 8px;
-		padding: 16px;
+		background: #141824;
+		border: 1px solid #2d3748;
+		border-radius: 12px;
+		padding: 20px;
 		overflow: hidden;
 	}
 
 	canvas {
-		max-width: 100%;
+		width: 100%;
 		height: auto;
 		display: block;
 	}

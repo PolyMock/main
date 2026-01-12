@@ -9,7 +9,10 @@ import type {
   BacktestMetrics,
   BacktestResult,
   Candlestick,
-  EquityPoint
+  EquityPoint,
+  DailyPnlPoint,
+  DrawdownPoint,
+  CapitalUtilizationPoint
 } from './types';
 import { DomeApiClient } from './domeApiClient';
 
@@ -19,6 +22,12 @@ export class BacktestEngine {
   private openPositions: Map<string, BacktestTrade> = new Map();
   private equityCurve: EquityPoint[] = [];
   private currentCapital: number = 0;
+  private initialBankroll: number = 0;
+
+  // Trade frequency tracking
+  private lastTradeTime: Date | null = null;
+  private tradesPerDay: Map<string, number> = new Map(); // dateString -> count
+
   private debugInfo: {
     marketsProcessed: number;
     marketsWithData: number;
@@ -50,6 +59,9 @@ export class BacktestEngine {
     this.openPositions = new Map();
     this.equityCurve = [];
     this.currentCapital = config.initialBankroll;
+    this.initialBankroll = config.initialBankroll;
+    this.lastTradeTime = null;
+    this.tradesPerDay = new Map();
     this.debugInfo = {
       marketsProcessed: 0,
       marketsWithData: 0,
@@ -264,16 +276,20 @@ export class BacktestEngine {
       // Choose interval based on range (respecting API limits)
       // Start with hourly data for better granularity unless range is too long
       let interval: 1 | 60 | 1440;
+      let intervalLabel: string;
 
       if (rangeDays <= 7) {
         interval = 60; // Use hourly for up to 1 week (was 1 minute, but that's often too granular)
+        intervalLabel = '1 hour';
       } else if (rangeDays <= 30) {
         interval = 60; // 1 hour for up to 1 month
+        intervalLabel = '1 hour';
       } else {
         interval = 1440; // 1 day for longer than 1 month
+        intervalLabel = '1 day';
       }
 
-      console.log(`   Date range: ${rangeDays.toFixed(1)} days, using interval: ${interval} (${interval === 1 ? '1 minute' : interval === 60 ? '1 hour' : '1 day'})`);
+      console.log(`   Date range: ${rangeDays.toFixed(1)} days, using interval: ${interval} (${intervalLabel})`);
 
       // Try to fetch candlestick data, with fallback to larger intervals if no data
       let candlesticks = await this.domeClient.getCandlesticks(
@@ -284,8 +300,8 @@ export class BacktestEngine {
       );
 
       // If no data with current interval and it's not daily yet, try daily
-      if (candlesticks.length === 0 && interval < 1440) {
-        console.log(`   No data with ${interval === 1 ? '1-minute' : '1-hour'} interval, trying daily interval...`);
+      if (candlesticks.length === 0 && interval !== 1440) {
+        console.log(`   No data with ${intervalLabel} interval, trying daily interval...`);
         candlesticks = await this.domeClient.getCandlesticks(
           market.condition_id,
           1440,
@@ -416,10 +432,40 @@ export class BacktestEngine {
     config: StrategyConfig
   ): void {
     const marketKey = market.market_id || market.condition_id;
-    
+
     // Don't enter if already have position in this market
     if (this.openPositions.has(marketKey)) {
       return;
+    }
+
+    // Check entry time constraints
+    if (config.entryTimeConstraints) {
+      if (config.entryTimeConstraints.earliestEntry && candle.timestamp < config.entryTimeConstraints.earliestEntry) {
+        return; // Too early to enter
+      }
+      if (config.entryTimeConstraints.latestEntry && candle.timestamp > config.entryTimeConstraints.latestEntry) {
+        return; // Too late to enter
+      }
+    }
+
+    // Check trade frequency controls
+    if (config.tradeFrequency) {
+      // Check cooldown period
+      if (config.tradeFrequency.cooldownHours && this.lastTradeTime) {
+        const hoursSinceLastTrade = (candle.timestamp.getTime() - this.lastTradeTime.getTime()) / (1000 * 60 * 60);
+        if (hoursSinceLastTrade < config.tradeFrequency.cooldownHours) {
+          return; // Still in cooldown period
+        }
+      }
+
+      // Check max trades per day
+      if (config.tradeFrequency.maxTradesPerDay) {
+        const dateKey = candle.timestamp.toISOString().split('T')[0]; // YYYY-MM-DD
+        const todayTrades = this.tradesPerDay.get(dateKey) || 0;
+        if (todayTrades >= config.tradeFrequency.maxTradesPerDay) {
+          return; // Max trades per day reached
+        }
+      }
     }
 
     // Check if we have enough capital
@@ -427,6 +473,15 @@ export class BacktestEngine {
     if (positionSize > this.currentCapital) {
       console.log(`   💰 Insufficient capital: need ${positionSize.toFixed(2)}, have ${this.currentCapital.toFixed(2)}`);
       return;
+    }
+
+    // Check max exposure
+    if (config.positionSizing.maxExposurePercent) {
+      const currentExposure = this.calculateCurrentExposure();
+      const newExposurePercent = ((currentExposure + positionSize) / this.initialBankroll) * 100;
+      if (newExposurePercent > config.positionSizing.maxExposurePercent) {
+        return; // Would exceed max exposure
+      }
     }
 
     const yesPrice = candle.close;
@@ -532,12 +587,21 @@ export class BacktestEngine {
     candle: Candlestick,
     side: 'YES' | 'NO',
     amountUsdc: number,
-    _config: StrategyConfig
+    config: StrategyConfig
   ): void {
     const marketKey = market.market_id || market.condition_id;
     const price = side === 'YES' ? candle.close : (1 - candle.close);
     const shares = amountUsdc / price;
     const fees = amountUsdc * 0.02; // 2% fee estimate
+
+    // Determine entry reason
+    const hasThreshold = config.entryPriceThreshold &&
+      ((side === 'YES' && config.entryPriceThreshold.yes) ||
+       (side === 'NO' && config.entryPriceThreshold.no));
+    const entryReason: 'PRICE_THRESHOLD' | 'MARKET_ENTRY' = hasThreshold ? 'PRICE_THRESHOLD' : 'MARKET_ENTRY';
+
+    // Calculate capital allocation percentage
+    const capitalAllocation = (amountUsdc / this.initialBankroll) * 100;
 
     const trade: BacktestTrade = {
       id: `${marketKey}-${candle.timestamp.getTime()}`,
@@ -553,11 +617,19 @@ export class BacktestEngine {
       pnl: 0,
       pnlPercentage: 0,
       fees,
-      status: 'OPEN'
+      status: 'OPEN',
+      entryReason,
+      capitalAllocation,
+      peakPnlPercentage: 0
     };
 
     this.openPositions.set(marketKey, trade);
     this.currentCapital -= (amountUsdc + fees);
+
+    // Update trade frequency tracking
+    this.lastTradeTime = candle.timestamp;
+    const dateKey = candle.timestamp.toISOString().split('T')[0];
+    this.tradesPerDay.set(dateKey, (this.tradesPerDay.get(dateKey) || 0) + 1);
 
     console.log(`   🎯 OPEN ${side} position: ${trade.marketName.substring(0, 50)}... @ ${price.toFixed(4)} (${shares.toFixed(2)} shares, $${amountUsdc.toFixed(2)} invested)`);
   }
@@ -575,14 +647,56 @@ export class BacktestEngine {
     const pnl = currentValue - position.amountInvested;
     const pnlPercentage = (pnl / position.amountInvested) * 100;
 
+    // Update peak PnL for trailing stop tracking
+    if (position.peakPnlPercentage === undefined || pnlPercentage > position.peakPnlPercentage) {
+      position.peakPnlPercentage = pnlPercentage;
+    }
+
+    // Check partial exits first (if enabled)
+    if (config.exitRules.partialExits?.enabled) {
+      const pe = config.exitRules.partialExits;
+
+      // Partial exit 1
+      if (pe.takeProfit1 && pnlPercentage >= pe.takeProfit1.percent && !position.partialExitNumber) {
+        const sharesToSell = position.shares * (pe.takeProfit1.sellPercent / 100);
+        this.partialExit(position, candle.timestamp, currentPrice, sharesToSell, 1, config);
+        return;
+      }
+
+      // Partial exit 2
+      if (pe.takeProfit2 && pnlPercentage >= pe.takeProfit2.percent && position.partialExitNumber === 1) {
+        const sharesToSell = position.shares * (pe.takeProfit2.sellPercent / 100);
+        this.partialExit(position, candle.timestamp, currentPrice, sharesToSell, 2, config);
+        return;
+      }
+    }
+
+    // Trailing stop loss (check if activated and triggered)
+    if (config.exitRules.trailingStop?.enabled &&
+        config.exitRules.trailingStop.activationPercent !== undefined &&
+        config.exitRules.trailingStop.trailPercent !== undefined) {
+      const activationPercent = config.exitRules.trailingStop.activationPercent;
+      const trailPercent = config.exitRules.trailingStop.trailPercent;
+
+      // Check if trailing stop is activated (reached activation profit)
+      if (position.peakPnlPercentage !== undefined && position.peakPnlPercentage >= activationPercent) {
+        // Check if current PnL has dropped by trail percent from peak
+        const dropFromPeak = position.peakPnlPercentage - pnlPercentage;
+        if (dropFromPeak >= trailPercent) {
+          this.closePosition(position, candle.timestamp, currentPrice, 'TRAILING_STOP');
+          return;
+        }
+      }
+    }
+
     // Stop loss
     if (config.exitRules.stopLoss && pnlPercentage <= -config.exitRules.stopLoss) {
       this.closePosition(position, candle.timestamp, currentPrice, 'STOP_LOSS');
       return;
     }
 
-    // Take profit
-    if (config.exitRules.takeProfit && pnlPercentage >= config.exitRules.takeProfit) {
+    // Take profit (only if not using partial exits)
+    if (config.exitRules.takeProfit && pnlPercentage >= config.exitRules.takeProfit && !config.exitRules.partialExits?.enabled) {
       this.closePosition(position, candle.timestamp, currentPrice, 'TAKE_PROFIT');
       return;
     }
@@ -598,13 +712,68 @@ export class BacktestEngine {
   }
 
   /**
+   * Partially exit a position
+   */
+  private partialExit(
+    position: BacktestTrade,
+    exitTime: Date,
+    exitPrice: number,
+    sharesToSell: number,
+    exitNumber: 1 | 2,
+    _config: StrategyConfig
+  ): void {
+    // Create a trade record for this partial exit
+    const exitValue = sharesToSell * exitPrice;
+    const exitFees = exitValue * 0.02;
+    const netExitValue = exitValue - exitFees;
+
+    const partialExitTrade: BacktestTrade = {
+      ...position,
+      id: `${position.id}-partial-${exitNumber}`,
+      exitTime,
+      exitPrice,
+      shares: sharesToSell,
+      originalShares: position.originalShares || position.shares,
+      partialExitNumber: exitNumber,
+      status: 'CLOSED' as const,
+      exitReason: (exitNumber === 1 ? 'PARTIAL_EXIT_1' : 'PARTIAL_EXIT_2') as any
+    };
+
+    // Calculate PnL for this partial exit
+    const proportionalInvestment = (sharesToSell / position.shares) * position.amountInvested;
+    const proportionalEntryFees = (sharesToSell / position.shares) * position.fees;
+    const totalCost = proportionalInvestment + proportionalEntryFees;
+    partialExitTrade.pnl = netExitValue - totalCost;
+    partialExitTrade.pnlPercentage = (partialExitTrade.pnl / proportionalInvestment) * 100;
+    partialExitTrade.amountInvested = proportionalInvestment;
+    partialExitTrade.fees = proportionalEntryFees + exitFees;
+
+    // Calculate holding duration
+    partialExitTrade.holdingDuration = (exitTime.getTime() - position.entryTime.getTime()) / (1000 * 60 * 60);
+
+    // Add to trades list
+    this.trades.push(partialExitTrade);
+    this.currentCapital += netExitValue;
+
+    // Update the original position (reduce shares)
+    position.shares -= sharesToSell;
+    position.status = 'PARTIAL' as const;
+    if (!position.originalShares) {
+      position.originalShares = position.shares + sharesToSell;
+    }
+    position.partialExitNumber = exitNumber;
+
+    console.log(`   💰 PARTIAL EXIT ${exitNumber} (${position.side}): sold ${sharesToSell.toFixed(2)} shares @ ${exitPrice.toFixed(4)}, PnL: ${partialExitTrade.pnl >= 0 ? '+' : ''}$${partialExitTrade.pnl.toFixed(2)} (${partialExitTrade.pnlPercentage.toFixed(2)}%)`);
+  }
+
+  /**
    * Close a position
    */
   private closePosition(
     position: BacktestTrade,
     exitTime: Date,
     exitPrice: number,
-    exitReason: 'RESOLUTION' | 'STOP_LOSS' | 'TAKE_PROFIT' | 'MAX_HOLD_TIME'
+    exitReason: 'RESOLUTION' | 'STOP_LOSS' | 'TAKE_PROFIT' | 'MAX_HOLD_TIME' | 'TRAILING_STOP'
   ): void {
     const exitValue = position.shares * exitPrice;
     const exitFees = exitValue * 0.02; // 2% fee
@@ -623,11 +792,14 @@ export class BacktestEngine {
     position.status = 'CLOSED';
     position.exitReason = exitReason;
 
+    // Calculate holding duration
+    position.holdingDuration = (exitTime.getTime() - position.entryTime.getTime()) / (1000 * 60 * 60);
+
     this.currentCapital += netExitValue;
     this.trades.push(position);
     this.openPositions.delete(position.marketId);
 
-    console.log(`CLOSE ${position.side} position: ${position.pnl >= 0 ? '+' : ''}${position.pnl.toFixed(2)} USDC (${position.pnlPercentage.toFixed(2)}%) - ${exitReason}`);
+    console.log(`   💵 CLOSE ${position.side} position: ${position.pnl >= 0 ? '+' : ''}${position.pnl.toFixed(2)} USDC (${position.pnlPercentage.toFixed(2)}%) - ${exitReason}`);
   }
 
   /**
@@ -678,6 +850,17 @@ export class BacktestEngine {
   }
 
   /**
+   * Calculate current exposure (capital in open positions)
+   */
+  private calculateCurrentExposure(): number {
+    let exposure = 0;
+    for (const position of this.openPositions.values()) {
+      exposure += position.amountInvested;
+    }
+    return exposure;
+  }
+
+  /**
    * Record equity curve point
    */
   private recordEquityPoint(timestamp: Date): void {
@@ -719,7 +902,19 @@ export class BacktestEngine {
     const yesTrades = closedTrades.filter(t => t.side === 'YES');
     const noTrades = closedTrades.filter(t => t.side === 'NO');
     const yesWins = yesTrades.filter(t => t.pnl > 0);
+    const yesLosses = yesTrades.filter(t => t.pnl < 0);
     const noWins = noTrades.filter(t => t.pnl > 0);
+    const noLosses = noTrades.filter(t => t.pnl < 0);
+
+    // Exit reason distribution
+    const exitReasonDist = {
+      resolution: closedTrades.filter(t => t.exitReason === 'RESOLUTION').length,
+      stopLoss: closedTrades.filter(t => t.exitReason === 'STOP_LOSS').length,
+      takeProfit: closedTrades.filter(t => t.exitReason === 'TAKE_PROFIT').length,
+      maxHoldTime: closedTrades.filter(t => t.exitReason === 'MAX_HOLD_TIME').length,
+      trailingStop: closedTrades.filter(t => t.exitReason === 'TRAILING_STOP').length,
+      partialExits: closedTrades.filter(t => t.exitReason === 'PARTIAL_EXIT_1' || t.exitReason === 'PARTIAL_EXIT_2').length
+    };
 
     // Pro metrics
     const maxDrawdown = Math.max(...this.equityCurve.map(p => p.drawdown), 0);
@@ -735,16 +930,24 @@ export class BacktestEngine {
     const medianWin = this.calculateMedian(winningTrades.map(t => t.pnl));
     const medianLoss = this.calculateMedian(losingTrades.map(t => Math.abs(t.pnl)));
 
-    const avgHoldTime = closedTrades.length > 0
-      ? closedTrades.reduce((sum, t) => {
-          const holdTime = t.exitTime ? (t.exitTime.getTime() - t.entryTime.getTime()) / (1000 * 60 * 60) : 0;
-          return sum + holdTime;
-        }, 0) / closedTrades.length
+    // Holding time metrics
+    const holdTimes = closedTrades.map(t => t.holdingDuration || 0).filter(h => h > 0);
+    const avgHoldTime = holdTimes.length > 0
+      ? holdTimes.reduce((sum, h) => sum + h, 0) / holdTimes.length
+      : 0;
+    const medianHoldTime = this.calculateMedian(holdTimes);
+
+    // Capital allocation metrics
+    const capitalAllocations = closedTrades.map(t => t.capitalAllocation).filter(c => c > 0);
+    const avgCapitalAllocation = capitalAllocations.length > 0
+      ? capitalAllocations.reduce((sum, c) => sum + c, 0) / capitalAllocations.length
       : 0;
 
-    // Calculate consecutive wins/losses
+    // Calculate consecutive wins/losses and streaks
     let consecutiveWins = 0;
     let consecutiveLosses = 0;
+    let longestWinStreak = 0;
+    let longestLossStreak = 0;
     let currentWinStreak = 0;
     let currentLossStreak = 0;
 
@@ -753,12 +956,19 @@ export class BacktestEngine {
         currentWinStreak++;
         currentLossStreak = 0;
         consecutiveWins = Math.max(consecutiveWins, currentWinStreak);
+        longestWinStreak = Math.max(longestWinStreak, currentWinStreak);
       } else {
         currentLossStreak++;
         currentWinStreak = 0;
         consecutiveLosses = Math.max(consecutiveLosses, currentLossStreak);
+        longestLossStreak = Math.max(longestLossStreak, currentLossStreak);
       }
     }
+
+    // Time-series analytics
+    const dailyPnl = this.calculateDailyPnl(closedTrades);
+    const drawdownCurve = this.calculateDrawdownCurve();
+    const capitalUtilizationOverTime = this.calculateCapitalUtilization();
 
     return {
       // Free metrics
@@ -777,28 +987,48 @@ export class BacktestEngine {
       yesPerformance: {
         count: yesTrades.length,
         winRate: yesTrades.length > 0 ? (yesWins.length / yesTrades.length) * 100 : 0,
-        pnl: yesTrades.reduce((sum, t) => sum + t.pnl, 0)
+        pnl: yesTrades.reduce((sum, t) => sum + t.pnl, 0),
+        avgWin: yesWins.length > 0 ? yesWins.reduce((sum, t) => sum + t.pnl, 0) / yesWins.length : 0,
+        avgLoss: yesLosses.length > 0 ? Math.abs(yesLosses.reduce((sum, t) => sum + t.pnl, 0)) / yesLosses.length : 0
       },
       noPerformance: {
         count: noTrades.length,
         winRate: noTrades.length > 0 ? (noWins.length / noTrades.length) * 100 : 0,
-        pnl: noTrades.reduce((sum, t) => sum + t.pnl, 0)
+        pnl: noTrades.reduce((sum, t) => sum + t.pnl, 0),
+        avgWin: noWins.length > 0 ? noWins.reduce((sum, t) => sum + t.pnl, 0) / noWins.length : 0,
+        avgLoss: noLosses.length > 0 ? Math.abs(noLosses.reduce((sum, t) => sum + t.pnl, 0)) / noLosses.length : 0
       },
 
-      // Pro metrics
+      // Exit reason distribution
+      exitReasonDistribution: exitReasonDist,
+
+      // Risk & Drawdown metrics
       equityCurve: this.equityCurve,
       maxDrawdown,
       maxDrawdownPercentage,
       sharpeRatio,
       volatility,
       expectancy,
+      profitFactor: totalLossAmount > 0 ? totalWinAmount / totalLossAmount : totalWinAmount > 0 ? 999 : 0,
+
+      // Trade distribution
       medianWin,
       medianLoss,
       avgHoldTime,
-      capitalUtilization: 0, // TODO: calculate average capital in use
+      medianHoldTime,
+      capitalUtilization: avgCapitalAllocation,
+      avgCapitalAllocation,
+
+      // Streak analysis
       consecutiveWins,
       consecutiveLosses,
-      profitFactor: totalLossAmount > 0 ? totalWinAmount / totalLossAmount : totalWinAmount > 0 ? 999 : 0
+      longestWinStreak,
+      longestLossStreak,
+
+      // Time-series outputs
+      dailyPnl,
+      drawdownCurve,
+      capitalUtilizationOverTime
     };
   }
 
@@ -816,5 +1046,89 @@ export class BacktestEngine {
     return sorted.length % 2 === 0
       ? (sorted[mid - 1] + sorted[mid]) / 2
       : sorted[mid];
+  }
+
+  /**
+   * Calculate daily PnL time series
+   */
+  private calculateDailyPnl(trades: BacktestTrade[]): DailyPnlPoint[] {
+    const dailyMap = new Map<string, { pnl: number; count: number }>();
+
+    for (const trade of trades) {
+      if (!trade.exitTime) continue;
+      const dateKey = trade.exitTime.toISOString().split('T')[0];
+      const existing = dailyMap.get(dateKey) || { pnl: 0, count: 0 };
+      dailyMap.set(dateKey, {
+        pnl: existing.pnl + trade.pnl,
+        count: existing.count + 1
+      });
+    }
+
+    const result: DailyPnlPoint[] = [];
+    let cumulativePnl = 0;
+
+    const sortedDates = Array.from(dailyMap.keys()).sort();
+    for (const dateKey of sortedDates) {
+      const data = dailyMap.get(dateKey)!;
+      cumulativePnl += data.pnl;
+      result.push({
+        date: new Date(dateKey),
+        dailyPnl: data.pnl,
+        cumulativePnl,
+        tradesCount: data.count
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Calculate drawdown curve from equity curve
+   */
+  private calculateDrawdownCurve(): DrawdownPoint[] {
+    const result: DrawdownPoint[] = [];
+    let peak = this.initialBankroll;
+
+    for (const point of this.equityCurve) {
+      if (point.equity > peak) {
+        peak = point.equity;
+      }
+      const drawdown = peak - point.equity;
+      const drawdownPercentage = peak > 0 ? (drawdown / peak) * 100 : 0;
+      result.push({
+        timestamp: point.timestamp,
+        drawdown,
+        drawdownPercentage,
+        inDrawdown: drawdown > 0
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Calculate capital utilization over time
+   */
+  private calculateCapitalUtilization(): CapitalUtilizationPoint[] {
+    // This is a simplified version - in a real implementation,
+    // we'd track this during the backtest execution
+    const result: CapitalUtilizationPoint[] = [];
+
+    for (const point of this.equityCurve) {
+      // Simplified: use equity curve points
+      const capitalInUse = this.initialBankroll - point.equity + point.drawdown;
+      const utilizationPercentage = this.initialBankroll > 0
+        ? (capitalInUse / this.initialBankroll) * 100
+        : 0;
+
+      result.push({
+        timestamp: point.timestamp,
+        capitalInUse,
+        utilizationPercentage,
+        openPositions: 0 // Would need to track this during execution
+      });
+    }
+
+    return result;
   }
 }
