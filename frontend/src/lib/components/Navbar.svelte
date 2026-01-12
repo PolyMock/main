@@ -9,6 +9,8 @@
 	let showProfileDropdown = false;
 	let showSettingsDropdown = false;
 	let darkMode = false;
+	let settingsButtonElement: HTMLElement;
+	let profileButtonElement: HTMLElement;
 
 	// Subscribe to wallet store
 	walletStore.subscribe(value => {
@@ -97,6 +99,20 @@
 	</div>
 
 	<div class="navbar-right">
+		<!-- Social Links -->
+		<div class="social-links">
+			<a href="https://x.com/polymockxyz" target="_blank" rel="noopener noreferrer" class="social-link" title="Follow us on X">
+				<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+					<path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+				</svg>
+			</a>
+			<a href="https://t.me/+nxDZ0dMya1NhMDlk" target="_blank" rel="noopener noreferrer" class="social-link" title="Join us on Telegram">
+				<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+					<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/>
+				</svg>
+			</a>
+		</div>
+
 		{#if walletState.connected}
 			{#if !walletState.userAccountInitialized && !walletState.loading}
 				<button class="initialize-btn" on:click={handleInitialize} disabled={initializing}>
@@ -119,7 +135,7 @@
 		<!-- Account Button -->
 		{#if $authStore.isAuthenticated}
 			<div class="profile-dropdown-container">
-				<button class="account-btn" on:click={toggleProfileDropdown}>
+				<button class="account-btn" on:click={toggleProfileDropdown} bind:this={profileButtonElement}>
 					<img src={$authStore.user?.picture} alt="Profile" class="profile-pic" />
 					<span class="account-name">{$authStore.user?.name?.split(' ')[0]}</span>
 					<svg width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -127,8 +143,8 @@
 					</svg>
 				</button>
 
-				{#if showProfileDropdown}
-					<div class="profile-dropdown">
+				{#if showProfileDropdown && profileButtonElement}
+					<div class="profile-dropdown" style="top: {profileButtonElement.getBoundingClientRect().bottom + 8}px; right: {window.innerWidth - profileButtonElement.getBoundingClientRect().right}px;">
 						<div class="dropdown-header">
 							<img src={$authStore.user?.picture} alt="Profile" class="dropdown-profile-pic" />
 							<div class="dropdown-user-info">
@@ -167,7 +183,7 @@
 
 		<!-- Settings Dropdown -->
 		<div class="settings-dropdown-container">
-			<button class="settings-btn" on:click={toggleSettingsDropdown}>
+			<button class="settings-btn" on:click={toggleSettingsDropdown} bind:this={settingsButtonElement}>
 				<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
 					<path d="M3 5H17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
 					<path d="M3 10H17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -175,8 +191,8 @@
 				</svg>
 			</button>
 
-			{#if showSettingsDropdown}
-				<div class="settings-dropdown">
+			{#if showSettingsDropdown && settingsButtonElement}
+				<div class="settings-dropdown" style="top: {settingsButtonElement.getBoundingClientRect().bottom + 8}px;">
 					<button class="dropdown-item" on:click={toggleDarkMode}>
 						<svg width="16" height="16" viewBox="0 0 16 16" fill="none">
 							{#if darkMode}
@@ -207,22 +223,25 @@
 		padding: 16px 24px;
 		display: flex;
 		align-items: center;
-		gap: 16px;
+		gap: 12px;
 		border-bottom: 1px solid #2A2F45;
-		flex-wrap: wrap;
+		flex-wrap: nowrap;
 		min-height: 64px;
 		position: sticky;
 		top: 0;
-		z-index: 100;
+		z-index: 50;
+		overflow: visible;
 	}
 
 	.logo {
-		font-size: 20px;
+		font-size: 18px;
 		font-weight: 700;
 		color: #E8E8E8;
 		letter-spacing: 1px;
 		text-decoration: none;
 		transition: color 0.2s;
+		flex-shrink: 0;
+		white-space: nowrap;
 	}
 
 	.logo:hover {
@@ -231,18 +250,21 @@
 
 	.nav-links {
 		display: flex;
-		gap: 15px;
+		gap: 8px;
+		flex-shrink: 1;
+		min-width: 0;
 	}
 
 	.nav-link {
 		color: #A0A0A0;
 		text-decoration: none;
-		font-size: 13px;
-		padding: 6px 12px;
+		font-size: 12px;
+		padding: 6px 10px;
 		border: 1px solid transparent;
 		transition: all 0.2s;
 		border-radius: 4px;
 		font-weight: 500;
+		white-space: nowrap;
 	}
 
 	.nav-link:hover {
@@ -263,6 +285,48 @@
 		gap: 12px;
 		margin-left: auto;
 		flex-shrink: 0;
+	}
+
+	.social-links {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding-right: 8px;
+		border-right: 1px solid #2A2F45;
+		margin-right: 4px;
+		flex-shrink: 0;
+	}
+
+	.social-link {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 32px;
+		height: 32px;
+		border-radius: 6px;
+		text-decoration: none;
+		transition: all 0.2s ease;
+		border: none;
+	}
+
+	/* X (Twitter) specific styling */
+	.social-link:first-child {
+		background: #000000;
+		color: #FFFFFF;
+	}
+
+	.social-link:first-child:hover {
+		background: #1A1A1A;
+	}
+
+	/* Telegram specific styling */
+	.social-link:last-child {
+		background: #0088cc;
+		color: #FFFFFF;
+	}
+
+	.social-link:last-child:hover {
+		background: #0099dd;
 	}
 
 	.initialize-btn {
@@ -333,29 +397,30 @@
 	}
 
 	.connect-account-btn {
+		background: #1E2139;
+		color: #E8E8E8;
+		border: 1px solid #2A2F45;
 		padding: 8px 16px;
-		background: linear-gradient(135deg, #00B4FF 0%, #0094D6 100%);
-		color: white;
-		border: none;
-		font-weight: 600;
-		font-size: 13px;
-		cursor: pointer;
 		font-family: Inter, sans-serif;
-		border-radius: 8px;
+		font-size: 12px;
+		font-weight: 600;
+		cursor: pointer;
+		border-radius: 6px;
 		transition: all 200ms ease-out;
 		white-space: nowrap;
 		flex-shrink: 0;
 	}
 
 	.connect-account-btn:hover:not(:disabled) {
-		background: linear-gradient(135deg, #00D4FF 0%, #00B4FF 100%);
+		background: rgba(255, 255, 255, 0.05);
+		border-color: #00D084;
 		transform: scale(1.02);
-		box-shadow: 0 4px 12px rgba(0, 180, 255, 0.3);
 	}
 
 	.connect-account-btn:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
+		transform: none;
 	}
 
 	.profile-dropdown-container {
@@ -398,9 +463,10 @@
 	}
 
 	.profile-dropdown {
-		position: absolute;
-		top: calc(100% + 8px);
-		right: 0;
+		position: fixed;
+		top: auto;
+		right: auto;
+		margin-top: 8px;
 		min-width: 280px;
 		background: #151B2F;
 		border: 1px solid #2A2F45;
@@ -521,9 +587,10 @@
 	}
 
 	.settings-dropdown {
-		position: absolute;
-		top: calc(100% + 8px);
-		right: 0;
+		position: fixed;
+		top: auto;
+		right: 24px;
+		margin-top: 8px;
 		min-width: 200px;
 		background: #151B2F;
 		border: 1px solid #2A2F45;
@@ -585,5 +652,48 @@
 		.account-name {
 			display: none;
 		}
+
+		.social-links {
+			border-right: none;
+			padding-right: 0;
+			margin-right: 0;
+		}
+	}
+
+	/* Light mode styles for social links */
+	:global(.light-mode) .social-links {
+		border-right-color: #E0E0E0;
+	}
+
+	/* X (Twitter) keeps black background in light mode */
+	:global(.light-mode) .social-link:first-child {
+		background: #000000;
+		color: #FFFFFF;
+	}
+
+	:global(.light-mode) .social-link:first-child:hover {
+		background: #1A1A1A;
+	}
+
+	/* Telegram keeps blue background in light mode */
+	:global(.light-mode) .social-link:last-child {
+		background: #0088cc;
+		color: #FFFFFF;
+	}
+
+	:global(.light-mode) .social-link:last-child:hover {
+		background: #0099dd;
+	}
+
+	/* Light mode styles for login button */
+	:global(.light-mode) .connect-account-btn {
+		background: #FFFFFF;
+		color: #1A1A1A;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .connect-account-btn:hover:not(:disabled) {
+		background: rgba(0, 0, 0, 0.05);
+		border-color: #00B570;
 	}
 </style>

@@ -71,12 +71,17 @@
 				const pricePerShare = pos.pricePerShare.toNumber() / 1_000_000;
 				const predictionType: 'Yes' | 'No' = isYes ? 'Yes' : 'No';
 				const isClosed = !('active' in pos.status);
+				const isFullySold = 'fullySold' in pos.status;
+				const isPartiallySold = 'partiallySold' in pos.status;
 
-				// For closed positions, use averageSellPrice as the closed price
+				// For closed/sold positions, use averageSellPrice as the closed price
 				let closedPrice: number | undefined = undefined;
-				if (isClosed) {
+				if (isClosed || isFullySold || isPartiallySold) {
 					if (pos.averageSellPrice && pos.averageSellPrice.toNumber() > 0) {
 						closedPrice = pos.averageSellPrice.toNumber() / 1_000_000;
+						console.log(`Position ${pos.positionId.toString()}: averageSellPrice = ${closedPrice}`);
+					} else {
+						console.warn(`Position ${pos.positionId.toString()} is closed but averageSellPrice is 0 or missing`);
 					}
 				}
 
@@ -91,7 +96,7 @@
 					}
 
 					// Only fetch current price for active positions
-					if (!isClosed) {
+					if (!isClosed && !isFullySold) {
 						const fetchedPrice = await polymarketClient.getPositionCurrentPrice(
 							pos.marketId,
 							predictionType
@@ -100,17 +105,57 @@
 							currentPrice = fetchedPrice;
 						}
 					} else {
-						// For closed positions, use the closedPrice
-						currentPrice = closedPrice || pricePerShare;
+						// For closed/sold positions, MUST use closedPrice if available
+						if (closedPrice !== undefined && closedPrice > 0) {
+							currentPrice = closedPrice;
+						} else {
+							// Fallback: if no closedPrice, this is likely an old position closed via close_position
+							// In this case, we can't determine the actual close price, so skip it from PnL
+							console.warn(`Skipping position ${pos.positionId.toString()} from PnL - no valid close price`);
+							currentPrice = pricePerShare; // Use entry price as fallback
+						}
 					}
 				} catch (error) {
 					console.error(`Error fetching market data for position ${pos.positionId}:`, error);
 				}
 
-				// Calculate PnL based on the appropriate price
-				const priceForPnL = isClosed ? (closedPrice || currentPrice) : currentPrice;
+				// Calculate PnL - for partially sold positions, only count remaining shares
+				let sharesForCalculation = shares;
+				if (isPartiallySold) {
+					const remainingShares = pos.remainingShares.toNumber() / 1_000_000;
+					const soldShares = pos.totalSoldShares.toNumber() / 1_000_000;
+
+					// PnL from sold shares (realized)
+					const realizedPnL = (soldShares * closedPrice!) - (amountUsdc * (soldShares / shares));
+
+					// PnL from remaining shares (unrealized) - fetch current price
+					let unrealizedPnL = 0;
+					if (remainingShares > 0) {
+						try {
+							const fetchedPrice = await polymarketClient.getPositionCurrentPrice(
+								pos.marketId,
+								predictionType
+							);
+							const currentPriceForRemaining = (fetchedPrice !== null && fetchedPrice > 0) ? fetchedPrice : pricePerShare;
+							unrealizedPnL = (remainingShares * currentPriceForRemaining) - (amountUsdc * (remainingShares / shares));
+						} catch (error) {
+							console.error(`Error fetching price for remaining shares:`, error);
+							unrealizedPnL = 0;
+						}
+					}
+
+					const totalPnL = realizedPnL + unrealizedPnL;
+					const currentValue = (soldShares * closedPrice!) + (remainingShares * currentPrice);
+
+					return { pnl: totalPnL, currentValue, marketName };
+				}
+
+				// For fully closed/sold positions or active positions
+				const priceForPnL = (isClosed || isFullySold) ? (closedPrice || pricePerShare) : currentPrice;
 				const currentValue = shares * priceForPnL;
 				const pnl = currentValue - amountUsdc;
+
+				console.log(`Position ${pos.positionId.toString()}: shares=${shares}, priceForPnL=${priceForPnL}, amountUsdc=${amountUsdc}, pnl=${pnl}`);
 
 				return { pnl, currentValue, marketName };
 			});

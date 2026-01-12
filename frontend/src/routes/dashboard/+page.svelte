@@ -47,6 +47,8 @@
 	let modalMessage = '';
 	let modalDetails: any = null;
 	let pendingClose: (() => Promise<void>) | null = null;
+	let sharesToSell = 0;
+	let maxShares = 0;
 
 	let lastLoadedWallet: string | null = null;
 
@@ -87,10 +89,13 @@
 			// Convert blockchain positions to display format and fetch real-time prices
 			const positionsPromises = blockchainPositions.map(async (pos) => {
 				const positionId = pos.positionId.toString();
-				const isClosed = !('active' in pos.status);
+				const isClosed = 'closed' in pos.status;
+				const isFullySold = 'fullySold' in pos.status;
+				const isPartiallySold = 'partiallySold' in pos.status;
+				const isActive = 'active' in pos.status;
 
-				// If position is closed and already in cache, return cached version immediately
-				if (isClosed && closedPositionsCache.has(positionId)) {
+				// If position is fully closed/sold and already in cache, return cached version immediately
+				if ((isClosed || isFullySold) && closedPositionsCache.has(positionId)) {
 					console.log(`Using cached data for closed position ${positionId}`);
 					return closedPositionsCache.get(positionId)!;
 				}
@@ -98,17 +103,19 @@
 				const isYes = 'yes' in pos.predictionType;
 				const amountUsdc = pos.amountUsdc.toNumber() / 1_000_000;
 				const shares = pos.shares.toNumber() / 1_000_000;
+				const remainingShares = pos.remainingShares.toNumber() / 1_000_000;
+				const soldShares = pos.totalSoldShares.toNumber() / 1_000_000;
 				const pricePerShare = pos.pricePerShare.toNumber() / 1_000_000;
 				const predictionType: 'Yes' | 'No' = isYes ? 'Yes' : 'No';
 
-				// For closed positions, use averageSellPrice as the closed price
+				// For closed/sold positions, use averageSellPrice as the closed price
 				let closedPrice: number | undefined = undefined;
-				if (isClosed) {
+				if (isClosed || isFullySold || isPartiallySold) {
 					if (pos.averageSellPrice && pos.averageSellPrice.toNumber() > 0) {
 						closedPrice = pos.averageSellPrice.toNumber() / 1_000_000;
-						console.log(`Position ${pos.positionId} closed at price: ${closedPrice}`);
+						console.log(`Position ${pos.positionId} closed/sold at average price: ${closedPrice}`);
 					} else {
-						console.warn(`Position ${pos.positionId} closed but averageSellPrice is ${pos.averageSellPrice?.toNumber() || 0}. This should not happen.`);
+						console.warn(`Position ${pos.positionId} closed/sold but averageSellPrice is ${pos.averageSellPrice?.toNumber() || 0}`);
 					}
 				}
 
@@ -116,15 +123,15 @@
 				let marketName = `Market ${pos.marketId.slice(0, 10)}...`; // Fallback
 				let currentPrice = pricePerShare; // Fallback to entry price
 
-				// Fetch market name and current price (only for active positions)
+				// Fetch market name and current price
 				try {
 					const market = await polymarketClient.getMarketById(pos.marketId);
 					if (market) {
 						marketName = market.question || market.title || marketName;
 					}
 
-					// Only fetch current price for active positions
-					if (!isClosed) {
+					// Fetch current price for active or partially sold positions
+					if (isActive || isPartiallySold) {
 						const fetchedPrice = await polymarketClient.getPositionCurrentPrice(
 							pos.marketId,
 							predictionType
@@ -135,22 +142,44 @@
 						} else {
 							console.warn(`No valid price fetched for ${marketName}, using entry price ${pricePerShare}`);
 						}
-					} else {
-						// For closed positions, use the closedPrice
-						currentPrice = closedPrice || pricePerShare;
+					} else if (isClosed || isFullySold) {
+						// For fully closed/sold positions, use the closedPrice
+						if (closedPrice !== undefined && closedPrice > 0) {
+							currentPrice = closedPrice;
+						} else {
+							console.warn(`No valid close price for closed position ${pos.positionId}, using entry price`);
+							currentPrice = pricePerShare;
+						}
 					}
 				} catch (error) {
 					console.error(`Error fetching market data for position ${pos.positionId}:`, error);
 				}
 
-				// Calculate PnL based on the appropriate price
-				const priceForPnL = isClosed ? (closedPrice || currentPrice) : currentPrice;
-				const currentValue = shares * priceForPnL;
-				const pnl = currentValue - amountUsdc;
-				const pnlPercentage = (pnl / amountUsdc) * 100;
-				const status: 'Active' | 'Closed' = isClosed ? 'Closed' : 'Active';
+				// Calculate PnL
+				let pnl = 0;
+				let currentValue = 0;
 
-				console.log(`Position ${marketName} (${status}): Entry=${pricePerShare}, Price for PnL=${priceForPnL}, Shares=${shares}, PnL=${pnl}`);
+				if (isPartiallySold) {
+					// For partially sold: realized PnL + unrealized PnL
+					const realizedPnL = (soldShares * closedPrice!) - (amountUsdc * (soldShares / shares));
+					const unrealizedPnL = (remainingShares * currentPrice) - (amountUsdc * (remainingShares / shares));
+					pnl = realizedPnL + unrealizedPnL;
+					currentValue = (soldShares * closedPrice!) + (remainingShares * currentPrice);
+				} else if (isClosed || isFullySold) {
+					// For fully closed/sold: use closed price
+					const priceForPnL = closedPrice || pricePerShare;
+					currentValue = shares * priceForPnL;
+					pnl = currentValue - amountUsdc;
+				} else {
+					// For active positions: use current price
+					currentValue = shares * currentPrice;
+					pnl = currentValue - amountUsdc;
+				}
+
+				const pnlPercentage = (pnl / amountUsdc) * 100;
+				const status: 'Active' | 'Closed' = (isClosed || isFullySold) ? 'Closed' : 'Active';
+
+				console.log(`Position ${marketName} (${status}): Entry=${pricePerShare}, CurrentPrice=${currentPrice}, Shares=${shares}, Remaining=${remainingShares}, PnL=${pnl}`);
 
 				const position: Position = {
 					id: positionId,
@@ -158,20 +187,19 @@
 					marketName,
 					predictionType,
 					amountUsdc,
-					shares,
+					shares: remainingShares > 0 ? remainingShares : shares, // Show remaining shares if partially sold
 					pricePerShare,
-					// For closed positions, currentPrice should be the closedPrice for display consistency
-					currentPrice: isClosed ? (closedPrice || currentPrice) : currentPrice,
+					currentPrice: (isClosed || isFullySold) ? (closedPrice || currentPrice) : currentPrice,
 					closedPrice,
 					pnl,
 					pnlPercentage,
 					status,
 					openedAt: new Date(pos.openedAt.toNumber() * 1000),
-					closedAt: isClosed ? new Date(pos.closedAt.toNumber() * 1000) : undefined
+					closedAt: (isClosed || isFullySold) ? new Date(pos.closedAt.toNumber() * 1000) : undefined
 				};
 
-				// Cache closed positions so they NEVER get recalculated
-				if (isClosed) {
+				// Cache fully closed/sold positions so they NEVER get recalculated
+				if (isClosed || isFullySold) {
 					closedPositionsCache.set(positionId, position);
 					console.log(`Cached closed position ${positionId} with PnL: $${pnl.toFixed(2)}`);
 				}
@@ -257,7 +285,7 @@
 		}
 	}
 
-	async function closePosition(positionId: string, currentPrice: number, position: Position) {
+	async function sellPosition(positionId: string, currentPrice: number, position: Position) {
 		if (!walletState.connected || !walletState.adapter) {
 			showErrorModal = true;
 			modalTitle = 'Wallet Not Connected';
@@ -265,8 +293,12 @@
 			return;
 		}
 
+		// Initialize shares to sell with full position
+		maxShares = position.shares;
+		sharesToSell = position.shares;
+
 		// Show confirmation modal with position details
-		modalTitle = 'Close Position';
+		modalTitle = 'Sell Shares';
 		modalDetails = {
 			market: position.marketName,
 			type: position.predictionType,
@@ -279,31 +311,46 @@
 		};
 		showConfirmModal = true;
 
-		// Store the close execution
+		// Store the sell execution
 		pendingClose = async () => {
 			try {
-				const tx = await polymarketService.closePosition(
+				// Validate shares to sell
+				if (sharesToSell <= 0 || sharesToSell > maxShares) {
+					showErrorModal = true;
+					modalTitle = 'Invalid Amount';
+					modalMessage = `Please enter a valid number of shares between 0 and ${maxShares.toFixed(2)}`;
+					return;
+				}
+
+				const tx = await polymarketService.sellShares(
 					walletState.adapter,
 					parseInt(positionId),
-					currentPrice
+					sharesToSell,
+					currentPrice,
+					position.predictionType
 				);
 
-				// Immediately cache the closed position with the current price
-				const closedPosition: Position = {
-					...position,
-					status: 'Closed',
-					closedPrice: currentPrice,
-					currentPrice: currentPrice,
-					pnl: (position.shares * currentPrice) - position.amountUsdc,
-					pnlPercentage: (((position.shares * currentPrice) - position.amountUsdc) / position.amountUsdc) * 100,
-					closedAt: new Date()
-				};
-				closedPositionsCache.set(positionId, closedPosition);
-				console.log(`Manually cached closed position ${positionId} with closing price: $${currentPrice.toFixed(4)}`);
+				// Calculate if position is fully closed
+				const isFullyClosed = sharesToSell >= position.shares;
+
+				if (isFullyClosed) {
+					// Cache the fully closed position with the current price
+					const closedPosition: Position = {
+						...position,
+						status: 'Closed',
+						closedPrice: currentPrice,
+						currentPrice: currentPrice,
+						pnl: (position.shares * currentPrice) - position.amountUsdc,
+						pnlPercentage: (((position.shares * currentPrice) - position.amountUsdc) / position.amountUsdc) * 100,
+						closedAt: new Date()
+					};
+					closedPositionsCache.set(positionId, closedPosition);
+					console.log(`Cached fully sold position ${positionId} with close price: $${currentPrice.toFixed(4)}`);
+				}
 
 				// Show success modal
-				modalTitle = 'Position Closed!';
-				modalMessage = `Transaction: ${tx.slice(0, 20)}...`;
+				modalTitle = isFullyClosed ? 'Position Closed!' : 'Shares Sold!';
+				modalMessage = `Sold ${sharesToSell.toFixed(2)} shares. Transaction: ${tx.slice(0, 20)}...`;
 				showSuccessModal = true;
 
 				// Refresh balance and positions
@@ -312,9 +359,9 @@
 				}
 				await loadPositions();
 			} catch (error: any) {
-				console.error('Error closing position:', error);
+				console.error('Error selling shares:', error);
 				showErrorModal = true;
-				modalTitle = 'Failed to Close Position';
+				modalTitle = 'Failed to Sell Shares';
 				modalMessage = error.message || 'Unknown error occurred';
 			}
 		};
@@ -501,7 +548,7 @@
 								</td>
 								<td>
 									{#if position.status === 'Active'}
-										<button class="action-btn" on:click={() => closePosition(position.id, position.currentPrice, position)}>Close</button>
+										<button class="action-btn" on:click={() => sellPosition(position.id, position.currentPrice, position)}>Sell</button>
 									{/if}
 								</td>
 							</tr>
@@ -537,7 +584,7 @@
 					<span class="summary-value">{modalDetails.amount}</span>
 				</div>
 				<div class="summary-row">
-					<span class="summary-label">Shares:</span>
+					<span class="summary-label">Available Shares:</span>
 					<span class="summary-value">{modalDetails.shares}</span>
 				</div>
 				<div class="summary-row">
@@ -549,8 +596,33 @@
 					<span class="summary-value">{modalDetails.currentPrice}</span>
 				</div>
 				<div class="summary-row highlight">
-					<span class="summary-label">Profit/Loss:</span>
+					<span class="summary-label">Estimated P&L:</span>
 					<span class="summary-value">{modalDetails.pnl} ({modalDetails.pnlPercentage})</span>
+				</div>
+				<div class="shares-input-section">
+					<label for="sharesToSell" class="shares-label">
+						Shares to Sell:
+					</label>
+					<div class="input-with-max">
+						<input
+							id="sharesToSell"
+							type="number"
+							bind:value={sharesToSell}
+							min="0"
+							max={maxShares}
+							step="0.01"
+							class="shares-input"
+						/>
+						<button
+							class="max-btn"
+							on:click={() => sharesToSell = maxShares}
+						>
+							MAX
+						</button>
+					</div>
+					<div class="shares-info">
+						Available: {maxShares.toFixed(2)} shares
+					</div>
 				</div>
 			</div>
 			{/if}
@@ -558,7 +630,7 @@
 		<div class="modal-footer">
 			<button class="modal-btn cancel-btn" on:click={cancelClose}>Cancel</button>
 			<button class="modal-btn confirm-btn" on:click={confirmClose}>
-				Confirm Close
+				Confirm Sell
 			</button>
 		</div>
 	</div>
@@ -1397,5 +1469,99 @@
 	.confirm-btn:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
+	}
+
+	.shares-input-section {
+		margin-top: 20px;
+		padding: 16px;
+		background: #0A0E1A;
+		border-radius: 8px;
+		border: 1px solid #2A2F45;
+	}
+
+	.shares-label {
+		display: block;
+		color: #8B92AB;
+		font-size: 14px;
+		font-weight: 600;
+		margin-bottom: 8px;
+	}
+
+	.input-with-max {
+		display: flex;
+		gap: 8px;
+		margin-bottom: 8px;
+	}
+
+	.shares-input {
+		flex: 1;
+		padding: 10px 12px;
+		background: #151B2F;
+		border: 1px solid #3A3F55;
+		border-radius: 6px;
+		color: white;
+		font-size: 16px;
+		font-weight: 600;
+	}
+
+	.shares-input:focus {
+		outline: none;
+		border-color: #00B4FF;
+	}
+
+	.max-btn {
+		padding: 10px 16px;
+		background: rgba(0, 180, 255, 0.1);
+		border: 1px solid #00B4FF;
+		border-radius: 6px;
+		color: #00B4FF;
+		font-size: 12px;
+		font-weight: 700;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+
+	.max-btn:hover {
+		background: #00B4FF;
+		color: #0A0E1A;
+	}
+
+	.shares-info {
+		color: #8B92AB;
+		font-size: 12px;
+	}
+
+	:global(.light-mode) .shares-input-section {
+		background: #F5F5F5;
+		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .shares-label {
+		color: #666;
+	}
+
+	:global(.light-mode) .shares-input {
+		background: #FFFFFF;
+		border-color: #E0E0E0;
+		color: #1A1A1A;
+	}
+
+	:global(.light-mode) .shares-input:focus {
+		border-color: #00B570;
+	}
+
+	:global(.light-mode) .max-btn {
+		background: rgba(0, 181, 112, 0.1);
+		border-color: #00B570;
+		color: #00B570;
+	}
+
+	:global(.light-mode) .max-btn:hover {
+		background: #00B570;
+		color: #FFFFFF;
+	}
+
+	:global(.light-mode) .shares-info {
+		color: #666;
 	}
 </style>

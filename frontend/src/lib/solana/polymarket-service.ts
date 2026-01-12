@@ -398,6 +398,23 @@ export class PolymarketService {
 	}
 
 	/**
+	 * Sell shares from a position - automatically routes to sellYes or sellNo
+	 */
+	async sellShares(
+		wallet: any,
+		positionId: number,
+		sharesToSell: number,
+		currentPrice: number,
+		predictionType: 'Yes' | 'No'
+	): Promise<string> {
+		if (predictionType === 'Yes') {
+			return this.sellYes(wallet, positionId, sharesToSell, currentPrice);
+		} else {
+			return this.sellNo(wallet, positionId, sharesToSell, currentPrice);
+		}
+	}
+
+	/**
 	 * Get all positions for a user
 	 */
 	async getUserPositions(userPublicKey: PublicKey): Promise<PredictionPosition[]> {
