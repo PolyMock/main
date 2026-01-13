@@ -1,12 +1,14 @@
--- Users table - stores Google OAuth user information
+-- Users table - stores user authentication (Google OAuth OR Solana Wallet)
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  google_id TEXT UNIQUE NOT NULL,
-  email TEXT NOT NULL,
+  google_id TEXT UNIQUE,
+  solana_address TEXT UNIQUE,
+  email TEXT,
   name TEXT,
   picture TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  last_login DATETIME DEFAULT CURRENT_TIMESTAMP
+  last_login DATETIME DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT check_auth CHECK (google_id IS NOT NULL OR solana_address IS NOT NULL)
 );
 
 -- Backtest strategies table - stores completed backtest results
@@ -75,6 +77,7 @@ CREATE TABLE IF NOT EXISTS backtest_strategies (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
--- Index for faster user queries
+-- Indexes for faster user queries
 CREATE INDEX IF NOT EXISTS idx_user_strategies ON backtest_strategies(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_google_id ON users(google_id);
+CREATE INDEX IF NOT EXISTS idx_solana_address ON users(solana_address);

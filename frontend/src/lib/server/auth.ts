@@ -10,10 +10,11 @@ export interface GoogleUser {
 
 export interface SessionUser {
 	id: number;
-	googleId: string;
-	email: string;
+	googleId?: string;
+	solanaAddress?: string;
+	email: string | null;
 	name: string;
-	picture: string;
+	picture: string | null;
 }
 
 /**
@@ -82,6 +83,7 @@ export async function upsertUser(db: D1Database, googleUser: GoogleUser): Promis
 		return {
 			id: existingUser.id as number,
 			googleId: existingUser.google_id as string,
+			solanaAddress: existingUser.solana_address as string | undefined,
 			email: existingUser.email as string,
 			name: existingUser.name as string,
 			picture: existingUser.picture as string
@@ -103,9 +105,57 @@ export async function upsertUser(db: D1Database, googleUser: GoogleUser): Promis
 	return {
 		id: result.id as number,
 		googleId: result.google_id as string,
+		solanaAddress: result.solana_address as string | undefined,
 		email: result.email as string,
 		name: result.name as string,
 		picture: result.picture as string
+	};
+}
+
+/**
+ * Get or create user by Solana wallet address
+ */
+export async function upsertWalletUser(db: D1Database, walletAddress: string): Promise<SessionUser> {
+	// Check if user exists with this wallet
+	const existingUser = await db
+		.prepare('SELECT * FROM users WHERE solana_address = ?')
+		.bind(walletAddress)
+		.first();
+
+	if (existingUser) {
+		// Update last login
+		await db
+			.prepare('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE solana_address = ?')
+			.bind(walletAddress)
+			.run();
+
+		return {
+			id: existingUser.id as number,
+			googleId: existingUser.google_id as string | undefined,
+			solanaAddress: existingUser.solana_address as string,
+			email: existingUser.email as string | null,
+			name: existingUser.name as string,
+			picture: existingUser.picture as string | null
+		};
+	}
+
+	// Create new user with wallet address
+	const displayName = `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`;
+	const result = await db
+		.prepare('INSERT INTO users (solana_address, name) VALUES (?, ?) RETURNING *')
+		.bind(walletAddress, displayName)
+		.first();
+
+	if (!result) {
+		throw new Error('Failed to create user');
+	}
+
+	return {
+		id: result.id as number,
+		solanaAddress: result.solana_address as string,
+		email: null,
+		name: result.name as string,
+		picture: null
 	};
 }
 
