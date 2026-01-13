@@ -1,86 +1,235 @@
 <script lang="ts">
-	export let distribution: Array<{ min: number; max: number; count: number }> = [];
-	export let title: string = 'P&L Distribution';
+	export let distribution: {
+		buckets: Array<{ min: number; max: number; count: number; trades: number[] }>;
+		stats: {
+			winCount: number;
+			lossCount: number;
+			breakEvenCount: number;
+			avgWin: number;
+			avgLoss: number;
+			largestWin: number;
+			largestLoss: number;
+			median: number;
+			mean: number;
+		} | null;
+	};
 
-	$: maxCount = distribution.length > 0 ? Math.max(...distribution.map(d => d.count)) : 1;
+	$: maxCount = distribution.buckets.length > 0 ? Math.max(...distribution.buckets.map(d => d.count)) : 1;
+	$: totalTrades = distribution.stats ? distribution.stats.winCount + distribution.stats.lossCount + distribution.stats.breakEvenCount : 0;
 </script>
 
-<div class="chart-wrapper">
-	<h3>{title}</h3>
+<div class="pnl-distribution-section">
+	<div class="section-header">
+		<h3>P&L Distribution</h3>
+		<p class="section-description">Distribution of trade outcomes showing win/loss patterns</p>
+	</div>
 
-	{#if distribution.length === 0}
+	{#if distribution.buckets.length === 0}
 		<div class="no-data">No trade data available</div>
 	{:else}
-		<div class="histogram">
-			{#each distribution as bucket, i}
-				<div class="histogram-bar-wrapper">
-					<div class="histogram-bar-container">
-						<div
-							class="histogram-bar"
-							class:positive={bucket.min >= 0}
-							class:negative={bucket.max < 0}
-							style="height: {(bucket.count / maxCount) * 100}%"
-						>
-							<span class="bar-count">{bucket.count}</span>
+		<!-- Statistics Overview -->
+		{#if distribution.stats}
+			<div class="stats-overview">
+				<div class="stat-card">
+					<div class="stat-label">Win Rate</div>
+					<div class="stat-value positive">
+						{((distribution.stats.winCount / totalTrades) * 100).toFixed(1)}%
+					</div>
+					<div class="stat-sublabel">
+						{distribution.stats.winCount} / {totalTrades} trades
+					</div>
+				</div>
+
+				<div class="stat-card">
+					<div class="stat-label">Avg Win</div>
+					<div class="stat-value positive">+{distribution.stats.avgWin.toFixed(2)}%</div>
+					<div class="stat-sublabel">Mean winning trade</div>
+				</div>
+
+				<div class="stat-card">
+					<div class="stat-label">Avg Loss</div>
+					<div class="stat-value negative">{distribution.stats.avgLoss.toFixed(2)}%</div>
+					<div class="stat-sublabel">Mean losing trade</div>
+				</div>
+
+				<div class="stat-card">
+					<div class="stat-label">Profit Factor</div>
+					<div class="stat-value" class:positive={Math.abs(distribution.stats.avgWin * distribution.stats.winCount / (distribution.stats.avgLoss * distribution.stats.lossCount)) > 1}>
+						{distribution.stats.lossCount > 0
+							? Math.abs(distribution.stats.avgWin * distribution.stats.winCount / (distribution.stats.avgLoss * distribution.stats.lossCount)).toFixed(2)
+							: '∞'}
+					</div>
+					<div class="stat-sublabel">Risk/reward ratio</div>
+				</div>
+
+				<div class="stat-card">
+					<div class="stat-label">Best Trade</div>
+					<div class="stat-value positive">+{distribution.stats.largestWin.toFixed(2)}%</div>
+					<div class="stat-sublabel">Largest single win</div>
+				</div>
+
+				<div class="stat-card">
+					<div class="stat-label">Worst Trade</div>
+					<div class="stat-value negative">{distribution.stats.largestLoss.toFixed(2)}%</div>
+					<div class="stat-sublabel">Largest single loss</div>
+				</div>
+			</div>
+		{/if}
+
+		<!-- Histogram -->
+		<div class="histogram-container">
+			<div class="histogram">
+				{#each distribution.buckets as bucket, i}
+					<div class="bar-wrapper">
+						<div class="bar-container">
+							<div
+								class="bar"
+								class:positive={bucket.min >= 0}
+								class:negative={bucket.max < 0}
+								class:mixed={bucket.min < 0 && bucket.max >= 0}
+								style="height: {bucket.count > 0 ? (bucket.count / maxCount) * 100 : 0}%"
+								title="{bucket.min.toFixed(1)}% to {bucket.max.toFixed(1)}%: {bucket.count} trade{bucket.count !== 1 ? 's' : ''}"
+							>
+								{#if bucket.count > 0}
+									<span class="bar-count">{bucket.count}</span>
+								{/if}
+							</div>
+						</div>
+						<div class="bar-label">
+							{bucket.min.toFixed(0)}
 						</div>
 					</div>
-					{#if i % 2 === 0 || distribution.length <= 6}
-						<div class="histogram-label">
-							{bucket.min.toFixed(0)}%
-						</div>
-					{:else}
-						<div class="histogram-label-spacer"></div>
-					{/if}
-				</div>
-			{/each}
+				{/each}
+			</div>
+
+			<!-- X-axis labels -->
+			<div class="axis-labels">
+				<span class="axis-label-start">P&L %</span>
+			</div>
+
+			<!-- Zero line indicator -->
+			{#if distribution.stats && distribution.stats.largestLoss < 0 && distribution.stats.largestWin > 0}
+				<div class="zero-line-label">0% (Break Even)</div>
+			{/if}
 		</div>
 
-		<div class="chart-footer">
-			<div class="footer-label">
+		<!-- Legend -->
+		<div class="legend">
+			<div class="legend-item">
 				<span class="legend-box negative"></span>
-				Losses
+				<span>Losses ({distribution.stats?.lossCount || 0})</span>
 			</div>
-			<div class="footer-label">
+			<div class="legend-item">
+				<span class="legend-box mixed"></span>
+				<span>Mixed ({distribution.stats?.breakEvenCount || 0})</span>
+			</div>
+			<div class="legend-item">
 				<span class="legend-box positive"></span>
-				Wins
+				<span>Wins ({distribution.stats?.winCount || 0})</span>
 			</div>
 		</div>
 	{/if}
 </div>
 
 <style>
-	.chart-wrapper {
+	.pnl-distribution-section {
 		background: #141824;
 		border-radius: 12px;
-		padding: 24px;
-		margin: 20px 0;
+		padding: 32px;
+		margin: 24px 0;
+		border: 1px solid #1e2537;
+	}
+
+	.section-header {
+		margin-bottom: 28px;
+		text-align: center;
 	}
 
 	h3 {
 		color: white;
-		font-size: 18px;
-		font-weight: 600;
-		margin: 0 0 24px 0;
-		text-align: center;
+		font-size: 20px;
+		font-weight: 700;
+		margin: 0 0 8px 0;
+		letter-spacing: -0.02em;
+	}
+
+	.section-description {
+		color: #9ca3af;
+		font-size: 14px;
+		margin: 0;
 	}
 
 	.no-data {
 		text-align: center;
 		color: #6b7280;
-		padding: 40px;
+		padding: 60px 20px;
 		font-size: 14px;
+	}
+
+	/* Statistics Overview */
+	.stats-overview {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+		gap: 16px;
+		margin-bottom: 32px;
+		padding-bottom: 24px;
+		border-bottom: 1px solid #1e2537;
+	}
+
+	.stat-card {
+		background: #1a1f2e;
+		padding: 16px;
+		border-radius: 8px;
+		border: 1px solid #252d42;
+	}
+
+	.stat-label {
+		font-size: 12px;
+		color: #9ca3af;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		margin-bottom: 8px;
+	}
+
+	.stat-value {
+		font-size: 24px;
+		font-weight: 700;
+		color: white;
+		margin-bottom: 4px;
+		line-height: 1.2;
+	}
+
+	.stat-value.positive {
+		color: #10b981;
+	}
+
+	.stat-value.negative {
+		color: #ef4444;
+	}
+
+	.stat-sublabel {
+		font-size: 11px;
+		color: #6b7280;
+	}
+
+	/* Histogram */
+	.histogram-container {
+		position: relative;
+		margin-bottom: 20px;
 	}
 
 	.histogram {
 		display: flex;
 		align-items: flex-end;
 		justify-content: space-between;
-		height: 250px;
-		gap: 4px;
-		padding: 0 10px;
+		height: 300px;
+		gap: 2px;
+		padding: 20px 0;
+		border-bottom: 2px solid #2a2f45;
 	}
 
-	.histogram-bar-wrapper {
+	.bar-wrapper {
 		flex: 1;
 		display: flex;
 		flex-direction: column;
@@ -89,73 +238,103 @@
 		justify-content: flex-end;
 	}
 
-	.histogram-bar-container {
+	.bar-container {
 		width: 100%;
 		display: flex;
 		align-items: flex-end;
 		justify-content: center;
+		height: 100%;
 	}
 
-	.histogram-bar {
+	.bar {
 		width: 100%;
-		min-height: 4px;
+		min-height: 2px;
 		border-radius: 4px 4px 0 0;
 		position: relative;
 		display: flex;
 		align-items: flex-start;
 		justify-content: center;
-		padding-top: 6px;
+		padding-top: 8px;
+		cursor: pointer;
 	}
 
-	.histogram-bar.positive {
+	.bar.positive {
 		background: #10b981;
 	}
 
-	.histogram-bar.negative {
+	.bar.negative {
 		background: #ef4444;
 	}
 
-	.bar-count {
-		font-size: 11px;
-		font-weight: 600;
-		color: white;
-		text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+	.bar.mixed {
+		background: #6b7280;
 	}
 
-	.histogram-label {
-		font-size: 10px;
-		color: #9ca3af;
+	.bar-count {
+		font-size: 12px;
+		font-weight: 700;
+		color: white;
+		text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+	}
+
+	.bar-label {
+		font-size: 11px;
+		color: #6b7280;
 		margin-top: 8px;
 		white-space: nowrap;
 		text-align: center;
-		min-height: 20px;
+		font-weight: 500;
 	}
 
-	.histogram-label-spacer {
-		min-height: 20px;
-	}
-
-	.chart-footer {
+	.axis-labels {
 		display: flex;
 		justify-content: center;
-		gap: 24px;
-		margin-top: 30px;
-		padding-top: 16px;
+		margin-top: 12px;
+	}
+
+	.axis-label-start {
+		font-size: 12px;
+		color: #9ca3af;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.zero-line-label {
+		position: absolute;
+		left: 50%;
+		bottom: -8px;
+		transform: translateX(-50%);
+		font-size: 11px;
+		color: #6b7280;
+		background: #141824;
+		padding: 2px 8px;
+		border-radius: 4px;
+	}
+
+	/* Legend */
+	.legend {
+		display: flex;
+		justify-content: center;
+		gap: 32px;
+		margin-top: 24px;
+		padding-top: 20px;
 		border-top: 1px solid #1e2537;
 	}
 
-	.footer-label {
+	.legend-item {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: 10px;
 		font-size: 13px;
-		color: #9ca3af;
+		color: #d1d5db;
+		font-weight: 500;
 	}
 
 	.legend-box {
-		width: 16px;
-		height: 16px;
-		border-radius: 3px;
+		width: 20px;
+		height: 20px;
+		border-radius: 4px;
 	}
 
 	.legend-box.positive {
@@ -164,5 +343,26 @@
 
 	.legend-box.negative {
 		background: #ef4444;
+	}
+
+	.legend-box.mixed {
+		background: #6b7280;
+	}
+
+	/* Responsive adjustments */
+	@media (max-width: 768px) {
+		.stats-overview {
+			grid-template-columns: repeat(2, 1fr);
+		}
+
+		.histogram {
+			height: 250px;
+		}
+
+		.legend {
+			flex-direction: column;
+			gap: 12px;
+			align-items: center;
+		}
 	}
 </style>

@@ -920,33 +920,62 @@
 		tradesCurrentPage = 0;
 	}
 
-	// P&L distribution data for histogram
+	// P&L distribution data for professional histogram
 	$: pnlDistribution = backtestResult?.trades
 		? (() => {
-				const buckets = 10;
 				const trades = backtestResult.trades;
-				if (trades.length === 0) return [];
+				if (trades.length === 0) return { buckets: [], stats: null };
 
 				const pnls = trades.map(t => t.pnlPercentage);
 				const minPnl = Math.min(...pnls);
 				const maxPnl = Math.max(...pnls);
-				const range = maxPnl - minPnl;
-				const bucketSize = range / buckets;
 
-				const histogram = Array(buckets).fill(0).map((_, i) => ({
+				// Use smart bucketing: more buckets for larger datasets
+				const bucketCount = trades.length < 20 ? 5 : trades.length < 50 ? 8 : trades.length < 100 ? 10 : 15;
+
+				// Round range to nice numbers
+				const rawRange = maxPnl - minPnl;
+				const bucketSize = rawRange / bucketCount;
+
+				// Create histogram buckets
+				const buckets = Array(bucketCount).fill(0).map((_, i) => ({
 					min: minPnl + i * bucketSize,
 					max: minPnl + (i + 1) * bucketSize,
-					count: 0
+					count: 0,
+					trades: [] as number[]
 				}));
 
+				// Distribute trades into buckets
 				trades.forEach(trade => {
-					const bucketIndex = Math.min(Math.floor((trade.pnlPercentage - minPnl) / bucketSize), buckets - 1);
-					histogram[bucketIndex].count++;
+					const pnl = trade.pnlPercentage;
+					const bucketIndex = Math.min(
+						Math.floor((pnl - minPnl) / bucketSize),
+						bucketCount - 1
+					);
+					buckets[bucketIndex].count++;
+					buckets[bucketIndex].trades.push(pnl);
 				});
 
-				return histogram;
+				// Calculate distribution statistics
+				const winningTrades = pnls.filter(p => p > 0);
+				const losingTrades = pnls.filter(p => p < 0);
+				const breakEvenTrades = pnls.filter(p => p === 0);
+
+				const stats = {
+					winCount: winningTrades.length,
+					lossCount: losingTrades.length,
+					breakEvenCount: breakEvenTrades.length,
+					avgWin: winningTrades.length > 0 ? winningTrades.reduce((a, b) => a + b, 0) / winningTrades.length : 0,
+					avgLoss: losingTrades.length > 0 ? losingTrades.reduce((a, b) => a + b, 0) / losingTrades.length : 0,
+					largestWin: winningTrades.length > 0 ? Math.max(...winningTrades) : 0,
+					largestLoss: losingTrades.length > 0 ? Math.min(...losingTrades) : 0,
+					median: pnls.sort((a, b) => a - b)[Math.floor(pnls.length / 2)],
+					mean: pnls.reduce((a, b) => a + b, 0) / pnls.length
+				};
+
+				return { buckets, stats };
 		  })()
-		: [];
+		: { buckets: [], stats: null };
 
 	// Available exit reasons for filter dropdown
 	$: availableExitReasons = backtestResult?.trades
@@ -1950,7 +1979,7 @@
 												/>
 											</div>
 										</div>
-										<p class="help-text">Optional: Restrict when trades can be entered (defaults to full backtest period)</p>
+										<p class="help-text">Optional: Restrict when trades can be entered</p>
 									</div>
 
 									<!-- Trade Frequency Controls -->
@@ -5043,13 +5072,13 @@
 
 .help-text {
 	font-size: 13px;
-	color: #9ca3af;
+	color: #8b92ab;
 	margin-top: 8px;
 }
 
 .help-text-sm {
 	font-size: 12px;
-	color: #9ca3af;
+	color: #8b92ab;
 	margin-top: 4px;
 }
 
