@@ -1,13 +1,11 @@
 import type { RequestHandler } from './$types';
 import { env } from '$env/dynamic/private';
 
-const GOOGLE_CLIENT_ID = env.GOOGLE_CLIENT_ID || '';
-const GOOGLE_CLIENT_SECRET = env.GOOGLE_CLIENT_SECRET || '';
-const REDIRECT_URI = env.PUBLIC_BASE_URL
-	? `${env.PUBLIC_BASE_URL}/api/auth/google/callback`
-	: 'http://localhost:5173/api/auth/google/callback';
-
 export const GET: RequestHandler = async ({ url }) => {
+	const GOOGLE_CLIENT_ID = env.GOOGLE_CLIENT_ID || '';
+	const GOOGLE_CLIENT_SECRET = env.GOOGLE_CLIENT_SECRET || '';
+	const baseUrl = env.PUBLIC_BASE_URL || url.origin;
+	const REDIRECT_URI = `${baseUrl}/api/auth/google/callback`;
 	const code = url.searchParams.get('code');
 	const error = url.searchParams.get('error');
 

@@ -1,10 +1,11 @@
 import { redirect } from '@sveltejs/kit';
-import { GOOGLE_CLIENT_ID } from '$env/static/private';
-import { PUBLIC_BASE_URL } from '$env/static/public';
 import type { RequestHandler } from './$types';
+import { env } from '$env/dynamic/private';
 
-export const GET: RequestHandler = async () => {
-	const redirectUri = `${PUBLIC_BASE_URL}/api/auth/google/callback`;
+export const GET: RequestHandler = async ({ url }) => {
+	const GOOGLE_CLIENT_ID = env.GOOGLE_CLIENT_ID || '';
+	const baseUrl = env.PUBLIC_BASE_URL || url.origin;
+	const redirectUri = `${baseUrl}/api/auth/google/callback`;
 
 	const googleAuthUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
 	googleAuthUrl.searchParams.set('client_id', GOOGLE_CLIENT_ID);
