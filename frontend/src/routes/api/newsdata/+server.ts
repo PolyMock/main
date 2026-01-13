@@ -4,21 +4,28 @@ import { NEWDATA_API_KEY } from '$env/static/private';
 
 
 const cache = new Map<string, { data: any; timestamp: number }>();
-const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
+const CACHE_DURATION = 60 * 60 * 1000; // 60 minutes (1 hour)
 
 export const GET: RequestHandler = async ({ url }) => {
 	try {
 		const category = url.searchParams.get('category') || 'top';
 		const language = url.searchParams.get('language') || 'en';
 
-		
+
 		const cacheKey = `${category}-${language}`;
 
-		
+
 		const cached = cache.get(cacheKey);
-		if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-			console.log('Returning cached news data for:', cacheKey);
-			return json(cached.data);
+		if (cached) {
+			const isExpired = Date.now() - cached.timestamp >= CACHE_DURATION;
+
+			// Always return cached data if available
+			if (!isExpired) {
+				console.log('Returning fresh cached news data for:', cacheKey);
+				return json(cached.data);
+			} else {
+				console.log('Cached data expired, but will use as fallback if API fails:', cacheKey);
+			}
 		}
 
 		// Fetch from NewsData API
@@ -38,6 +45,17 @@ export const GET: RequestHandler = async ({ url }) => {
 		if (!response.ok) {
 			const errorText = await response.text();
 			console.error('NewsData API error:', response.status, errorText);
+
+			// If rate limited and we have cached data, return it even if expired
+			if (response.status === 429 && cached) {
+				console.log('Rate limited - returning stale cached data for:', cacheKey);
+				return json(cached.data, {
+					headers: {
+						'X-Cache-Status': 'stale-due-to-rate-limit'
+					}
+				});
+			}
+
 			return json(
 				{
 					error: 'Failed to fetch news',
