@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { CRYPTOCOMPARE_API_BASE } from '$env/static/private';
+
+const CRYPTOCOMPARE_API_BASE = 'https://min-api.cryptocompare.com';
 
 export const GET: RequestHandler = async ({ url }) => {
 	try {
