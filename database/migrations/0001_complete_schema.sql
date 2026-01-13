@@ -1,15 +1,18 @@
--- Initial schema migration for Polymock database
--- Run this with: wrangler d1 execute polymock-db --file=./database/migrations/0001_initial_schema.sql
+-- Complete Polymock Database Schema
+-- Includes: Users (Google + Wallet auth), Backtest Strategies
+-- Run with: wrangler d1 execute polymock-db --remote --file=./database/migrations/0001_complete_schema.sql
 
--- Users table - stores Google OAuth user information
+-- Users table - supports both Google OAuth and Solana Wallet authentication
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  google_id TEXT UNIQUE NOT NULL,
-  email TEXT NOT NULL,
+  google_id TEXT UNIQUE,
+  solana_address TEXT UNIQUE,
+  email TEXT,
   name TEXT,
   picture TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  last_login DATETIME DEFAULT CURRENT_TIMESTAMP
+  last_login DATETIME DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT check_auth CHECK (google_id IS NOT NULL OR solana_address IS NOT NULL)
 );
 
 -- Backtest strategies table - stores completed backtest results
@@ -78,6 +81,7 @@ CREATE TABLE IF NOT EXISTS backtest_strategies (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
--- Indexes
-CREATE INDEX IF NOT EXISTS idx_user_strategies ON backtest_strategies(user_id, created_at DESC);
+-- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_google_id ON users(google_id);
+CREATE INDEX IF NOT EXISTS idx_solana_address ON users(solana_address);
+CREATE INDEX IF NOT EXISTS idx_user_strategies ON backtest_strategies(user_id, created_at DESC);
