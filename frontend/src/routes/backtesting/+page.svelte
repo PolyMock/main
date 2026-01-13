@@ -10,7 +10,6 @@
 	import type { BacktestResult } from '$lib/backtesting/types';
 	import EquityCurveChart from '$lib/components/EquityCurveChart.svelte';
 	import PnLDistributionChart from '$lib/components/PnLDistributionChart.svelte';
-	import MarketPriceChart from '$lib/components/MarketPriceChart.svelte';
 
 	// Main tab state - set based on URL parameter
 	let activeMainTab: 'summary' | 'strategies' = 'summary';
@@ -180,7 +179,6 @@
 							}
 						}
 					} catch (error) {
-						console.error(`Error calculating PnL for position ${pos.id}:`, error);
 						const currentValue = pos.shares * pos.pricePerShare;
 						pos.pnl = currentValue - pos.amountUsdc;
 						pos.pnlPercentage = (pos.pnl / pos.amountUsdc) * 100;
@@ -191,7 +189,6 @@
 			positions = initialPositions;
 			calculateMetrics();
 		} catch (error) {
-			console.error('Error loading backtesting data:', error);
 			positions = [];
 		} finally {
 			loading = false;
@@ -515,7 +512,6 @@
 			const data = await response.json();
 			availableMarkets = data.markets || [];
 		} catch (err: any) {
-			console.error('Error fetching markets:', err);
 			availableMarkets = [];
 		} finally {
 			loadingMarkets = false;
@@ -622,6 +618,12 @@
 			endDateStr = formatDateForInput(marketEndTime);
 			config.startDate = marketStartTime;
 			config.endDate = marketEndTime;
+
+			// Auto-set entry time constraints to match market date range
+			earliestEntryStr = formatDateForInput(marketStartTime);
+			latestEntryStr = formatDateForInput(marketEndTime);
+			config.entryTimeConstraints.earliestEntry = marketStartTime;
+			config.entryTimeConstraints.latestEntry = marketEndTime;
 		}
 
 		// Move to phase 2
@@ -798,10 +800,15 @@
 			progress = 100;
 			strategyTab = 'results';
 
-			console.log('Backtest completed:', backtestResult);
+			if (backtestResult) {
+				console.log('Backtest completed:', {
+					trades: backtestResult.trades?.length || 0,
+					metrics: backtestResult.metrics,
+					firstTrade: backtestResult.trades?.[0]
+				});
+			}
 		} catch (err: any) {
 			error = err.message || 'An error occurred';
-			console.error('Backtest error:', err);
 		} finally {
 			isRunning = false;
 		}
@@ -844,6 +851,10 @@
 	let tradeSearchQuery = '';
 	let tradeFilterSide: 'ALL' | 'YES' | 'NO' = 'ALL';
 	let tradeFilterExitReason: string = 'ALL';
+
+	// Pagination for trades table
+	let tradesCurrentPage = 0;
+	let tradesPerPage = 50;
 
 	// Filtered and sorted trades for the table
 	$: filteredTrades = backtestResult?.trades
@@ -895,6 +906,19 @@
 
 		return tradeSortDirection === 'asc' ? aVal - bVal : bVal - aVal;
 	});
+
+	// Paginated trades
+	$: paginatedTrades = sortedAndFilteredTrades.slice(
+		tradesCurrentPage * tradesPerPage,
+		(tradesCurrentPage + 1) * tradesPerPage
+	);
+
+	$: totalTradesPages = Math.ceil(sortedAndFilteredTrades.length / tradesPerPage);
+
+	// Reset to page 0 when filters change
+	$: if (tradeSearchQuery || tradeFilterSide || tradeFilterExitReason) {
+		tradesCurrentPage = 0;
+	}
 
 	// P&L distribution data for histogram
 	$: pnlDistribution = backtestResult?.trades
@@ -1785,17 +1809,17 @@
 											{/if}
 
 											<div class="sizing-input-group">
-												<label>Max Total Exposure (% of bankroll)</label>
+												<label>Max Total Exposure</label>
 												<input
 													type="number"
 													bind:value={config.positionSizing.maxExposurePercent}
 													min="1"
 													max="100"
 													step="5"
-													placeholder="Optional - e.g., 50"
+													placeholder="50"
 													class="sizing-input"
 												/>
-												<p class="help-text-sm">Limit total capital in open positions</p>
+												<p class="help-text-sm">Maximum % of bankroll in open positions simultaneously</p>
 											</div>
 										</div>
 									</div>
@@ -1905,7 +1929,7 @@
 
 									<!-- Time Constraints -->
 									<div class="form-section">
-										<label>Entry Time Constraints (Optional)</label>
+										<label>Entry Time Window</label>
 										<div class="date-range-group">
 											<div class="date-input-wrapper">
 												<span class="date-label">Earliest Entry</span>
@@ -1913,7 +1937,7 @@
 													type="date"
 													bind:value={earliestEntryStr}
 													class="date-input"
-													placeholder="Optional"
+													placeholder="Backtest start date"
 												/>
 											</div>
 											<div class="date-input-wrapper">
@@ -1922,16 +1946,16 @@
 													type="date"
 													bind:value={latestEntryStr}
 													class="date-input"
-													placeholder="Optional"
+													placeholder="Backtest end date"
 												/>
 											</div>
 										</div>
-										<p class="help-text">Restrict entries to specific date range within backtest period</p>
+										<p class="help-text">Optional: Restrict when trades can be entered (defaults to full backtest period)</p>
 									</div>
 
 									<!-- Trade Frequency Controls -->
 									<div class="form-section">
-										<label>Trade Frequency Controls (Optional)</label>
+										<label>Trade Frequency Limit</label>
 										<div class="frequency-controls">
 											<div class="frequency-input-group">
 												<span class="input-label">Max Trades Per Day</span>
@@ -1944,19 +1968,8 @@
 													class="frequency-input"
 												/>
 											</div>
-											<div class="frequency-input-group">
-												<span class="input-label">Cooldown (hours)</span>
-												<input
-													type="number"
-													bind:value={config.tradeFrequency.cooldownHours}
-													min="0"
-													step="0.5"
-													placeholder="No cooldown"
-													class="frequency-input"
-												/>
-											</div>
 										</div>
-										<p class="help-text">Limit trade frequency to avoid overtrading</p>
+										<p class="help-text">Optional: Limit daily trade frequency to prevent overtrading</p>
 									</div>
 								</div>
 							</div>
@@ -1979,11 +1992,12 @@
 											min="0"
 											max="100"
 											step="1"
-											placeholder="e.g., 20 (leave empty for none)"
+											placeholder="20"
 											class="exit-input"
 										/>
+										<p class="help-text-sm">Exit when position loses this % (leave empty for none)</p>
 									</div>
-			
+
 									<div class="form-section">
 										<label>Take Profit (%)</label>
 										<input
@@ -1992,11 +2006,12 @@
 											min="0"
 											max="500"
 											step="1"
-											placeholder="e.g., 50 (leave empty for none)"
+											placeholder="50"
 											class="exit-input"
 										/>
+										<p class="help-text-sm">Exit when position gains this % (leave empty for none)</p>
 									</div>
-			
+
 									<div class="form-section">
 										<label>Max Hold Time (hours)</label>
 										<input
@@ -2004,25 +2019,52 @@
 											bind:value={config.exitRules.maxHoldTime}
 											min="1"
 											step="1"
-											placeholder="e.g., 168 (leave empty for none)"
+											placeholder="168"
 											class="exit-input"
 										/>
+										<p class="help-text-sm">Auto-exit after this duration (leave empty for none)</p>
 									</div>
 			
+									<!-- Optional Features Toggle Section -->
 									<div class="form-section">
-										<label class="checkbox-label">
-											<input type="checkbox" bind:checked={config.exitRules.resolveOnExpiry} />
-											<span>Close at resolution</span>
-										</label>
+										<label class="section-label">Optional Exit Features</label>
+										<div class="optional-features">
+											<button
+												type="button"
+												class="toggle-feature-btn"
+												class:active={config.exitRules.resolveOnExpiry}
+												on:click={() => config.exitRules.resolveOnExpiry = !config.exitRules.resolveOnExpiry}
+											>
+												<span class="toggle-icon">{config.exitRules.resolveOnExpiry ? '✓' : '+'}</span>
+												<span class="toggle-text">Close at Resolution</span>
+											</button>
+
+											<button
+												type="button"
+												class="toggle-feature-btn"
+												class:active={config.exitRules.trailingStop.enabled}
+												on:click={() => config.exitRules.trailingStop.enabled = !config.exitRules.trailingStop.enabled}
+											>
+												<span class="toggle-icon">{config.exitRules.trailingStop.enabled ? '✓' : '+'}</span>
+												<span class="toggle-text">Trailing Stop Loss</span>
+											</button>
+
+											<button
+												type="button"
+												class="toggle-feature-btn"
+												class:active={config.exitRules.partialExits.enabled}
+												on:click={() => config.exitRules.partialExits.enabled = !config.exitRules.partialExits.enabled}
+											>
+												<span class="toggle-icon">{config.exitRules.partialExits.enabled ? '✓' : '+'}</span>
+												<span class="toggle-text">Partial Exits</span>
+											</button>
+										</div>
 									</div>
 
-									<!-- Trailing Stop Loss -->
-									<div class="form-section">
-										<label class="checkbox-label">
-											<input type="checkbox" bind:checked={config.exitRules.trailingStop.enabled} />
-											<span>Enable Trailing Stop Loss</span>
-										</label>
-										{#if config.exitRules.trailingStop.enabled}
+									<!-- Trailing Stop Loss Config -->
+									{#if config.exitRules.trailingStop.enabled}
+										<div class="form-section feature-config">
+											<h4 class="feature-config-title">Trailing Stop Loss Settings</h4>
 											<div class="trailing-stop-config">
 												<div class="trailing-input-group">
 													<span class="input-label">Activation at Profit (%)</span>
@@ -2032,7 +2074,7 @@
 														min="0"
 														max="500"
 														step="5"
-														placeholder="e.g., 20"
+														placeholder="20"
 														class="trailing-input"
 													/>
 													<p class="help-text-sm">Activate trailing stop after reaching this % profit</p>
@@ -2045,22 +2087,19 @@
 														min="1"
 														max="100"
 														step="1"
-														placeholder="e.g., 10"
+														placeholder="10"
 														class="trailing-input"
 													/>
 													<p class="help-text-sm">Exit if profit drops by this % from peak</p>
 												</div>
 											</div>
-										{/if}
-									</div>
+										</div>
+									{/if}
 
-									<!-- Partial Exits -->
-									<div class="form-section">
-										<label class="checkbox-label">
-											<input type="checkbox" bind:checked={config.exitRules.partialExits.enabled} />
-											<span>Enable Partial Exits</span>
-										</label>
-										{#if config.exitRules.partialExits.enabled}
+									<!-- Partial Exits Config -->
+									{#if config.exitRules.partialExits.enabled}
+										<div class="form-section feature-config">
+											<h4 class="feature-config-title">Partial Exits Settings</h4>
 											<div class="partial-exits-config">
 												<div class="partial-exit-row">
 													<span class="partial-label">First Exit:</span>
@@ -2124,8 +2163,8 @@
 												</div>
 												<p class="help-text">Take profits at multiple levels (e.g., sell 50% at +30%, then 50% at +60%)</p>
 											</div>
-										{/if}
-									</div>
+										</div>
+									{/if}
 								</div>
 							</div>
 						{/if}
@@ -2388,9 +2427,6 @@
 
 						<!-- P&L Distribution -->
 						<PnLDistributionChart distribution={pnlDistribution} />
-
-						<!-- Market Price Chart (placeholder for single market view) -->
-						<!-- <MarketPriceChart trades={backtestResult.trades} candlesticks={[]} /> -->
 					</div>
 
 					<!-- ADVANCED METRICS -->
@@ -2618,7 +2654,7 @@
 									</tr>
 								</thead>
 								<tbody>
-									{#each sortedAndFilteredTrades as trade}
+									{#each paginatedTrades as trade}
 										<tr>
 											<td class="market-cell" title={trade.marketName}>
 												{trade.marketName.substring(0, 35)}...
@@ -2649,6 +2685,30 @@
 								</tbody>
 							</table>
 						</div>
+
+						<!-- Pagination Controls -->
+						{#if totalTradesPages > 1}
+							<div class="pagination-controls">
+								<button
+									class="pagination-btn"
+									on:click={() => tradesCurrentPage = Math.max(0, tradesCurrentPage - 1)}
+									disabled={tradesCurrentPage === 0}
+								>
+									← Previous
+								</button>
+								<span class="pagination-info">
+									Page {tradesCurrentPage + 1} of {totalTradesPages}
+									(Showing {paginatedTrades.length} of {sortedAndFilteredTrades.length} trades)
+								</span>
+								<button
+									class="pagination-btn"
+									on:click={() => tradesCurrentPage = Math.min(totalTradesPages - 1, tradesCurrentPage + 1)}
+									disabled={tradesCurrentPage >= totalTradesPages - 1}
+								>
+									Next →
+								</button>
+							</div>
+						{/if}
 					</div>
 
 				{/if}
@@ -4869,6 +4929,84 @@
 	font-weight: 500;
 }
 
+/* Optional Feature Toggle Buttons */
+.section-label {
+	display: block;
+	font-size: 14px;
+	font-weight: 600;
+	color: #8b92ab;
+	margin-bottom: 12px;
+}
+
+.optional-features {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+	gap: 12px;
+}
+
+.toggle-feature-btn {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 14px 16px;
+	background: #1e2537;
+	border: 2px solid #2a2f45;
+	border-radius: 8px;
+	color: #8b92ab;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.2s;
+	font-size: 14px;
+}
+
+.toggle-feature-btn:hover {
+	background: #252d42;
+	border-color: #3b82f6;
+}
+
+.toggle-feature-btn.active {
+	background: #1e3a5f;
+	border-color: #3b82f6;
+	color: white;
+}
+
+.toggle-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	border-radius: 4px;
+	background: #2a2f45;
+	font-size: 14px;
+	transition: all 0.2s;
+}
+
+.toggle-feature-btn.active .toggle-icon {
+	background: #3b82f6;
+	color: white;
+}
+
+.toggle-text {
+	flex: 1;
+}
+
+/* Feature Configuration Sections */
+.feature-config {
+	margin-top: 16px;
+	padding: 20px;
+	background: #141824;
+	border: 1px solid #2a2f45;
+	border-radius: 8px;
+}
+
+.feature-config-title {
+	font-size: 15px;
+	font-weight: 600;
+	color: white;
+	margin-bottom: 16px;
+}
+
 /* New V1 Features Styles */
 .date-range-group {
 	display: grid;
@@ -6002,6 +6140,46 @@
 	font-family: 'Monaco', 'Courier New', monospace;
 	font-size: 12px;
 	color: #cbd5e0;
+}
+
+/* Pagination Controls */
+.pagination-controls {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	gap: 20px;
+	padding: 20px;
+	background: #141824;
+	border-top: 1px solid #2d3748;
+	border-radius: 0 0 12px 12px;
+}
+
+.pagination-btn {
+	padding: 8px 16px;
+	background: #1a1f2e;
+	border: 1px solid #2d3748;
+	border-radius: 8px;
+	color: #e2e8f0;
+	font-size: 14px;
+	font-weight: 500;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.pagination-btn:hover:not(:disabled) {
+	background: #2d3748;
+	border-color: #3b82f6;
+	color: #3b82f6;
+}
+
+.pagination-btn:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+
+.pagination-info {
+	font-size: 14px;
+	color: #9ca3af;
 }
 
 /* Responsive adjustments */

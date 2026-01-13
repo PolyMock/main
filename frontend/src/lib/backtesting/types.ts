@@ -206,6 +206,14 @@ export interface BacktestResult {
   endingCapital: number;
   marketsAnalyzed: number;
   executionTime: number; // ms
+  debugInfo?: {
+    marketsProcessed: number;
+    marketsWithData: number;
+    totalCandlesticks: number;
+    validCandlesticks: number;
+    entryAttempts: number;
+    reasons: string[];
+  };
 }
 
 export interface MarketSnapshot {

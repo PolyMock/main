@@ -71,22 +71,10 @@ export class BacktestEngine {
       reasons: []
     };
 
-    console.log('\n🚀 Starting backtest:', {
-      startDate: config.startDate.toISOString(),
-      endDate: config.endDate.toISOString(),
-      entryType: config.entryType,
-      initialBankroll: config.initialBankroll,
-      hasSpecificMarket: !!config.specificMarket?.conditionId,
-      entryPriceThreshold: config.entryPriceThreshold,
-      positionSizing: config.positionSizing
-    });
-
     // Fetch markets in the date range
     const markets = await this.fetchRelevantMarkets(config);
-    console.log(`Found ${markets.length} markets to analyze`);
-    
+
     if (markets.length === 0) {
-      console.warn('⚠️  No markets found matching criteria');
       return {
         strategyConfig: config,
         trades: [],
@@ -112,26 +100,7 @@ export class BacktestEngine {
 
     const executionTime = Date.now() - startTime;
 
-    console.log('\n📊 Backtest Summary:');
-    console.log(`   Markets analyzed: ${markets.length}`);
-    console.log(`   Markets with data: ${this.debugInfo.marketsWithData}`);
-    console.log(`   Total candlesticks: ${this.debugInfo.totalCandlesticks}`);
-    console.log(`   Valid candlesticks: ${this.debugInfo.validCandlesticks}`);
-    console.log(`   Entry attempts: ${this.debugInfo.entryAttempts}`);
-    console.log(`   Total trades: ${this.trades.length}`);
-    console.log(`   Starting capital: $${config.initialBankroll.toLocaleString()}`);
-    console.log(`   Ending capital: $${this.currentCapital.toLocaleString()}`);
-    console.log(`   Net P&L: $${(this.currentCapital - config.initialBankroll).toLocaleString()}`);
-    console.log(`   Execution time: ${(executionTime / 1000).toFixed(2)}s`);
-    
-    if (this.trades.length === 0 && this.debugInfo.reasons.length > 0) {
-      console.log('\n⚠️  Reasons for no trades:');
-      this.debugInfo.reasons.forEach((reason, i) => {
-        console.log(`   ${i + 1}. ${reason}`);
-      });
-    }
-
-    const result = {
+    return {
       strategyConfig: config,
       trades: this.trades,
       metrics,
@@ -141,14 +110,6 @@ export class BacktestEngine {
       executionTime,
       debugInfo: this.debugInfo
     };
-    
-    // Log debug info if no trades
-    if (this.trades.length === 0) {
-      console.log('\n🔍 Debug Information:');
-      console.log(JSON.stringify(this.debugInfo, null, 2));
-    }
-    
-    return result;
   }
 
   /**
@@ -158,7 +119,6 @@ export class BacktestEngine {
     // If specific market is targeted, create a synthetic market object
     // We don't need full market metadata 
     if (config.specificMarket?.conditionId) {
-      console.log(`Using specific market with condition_id: ${config.specificMarket.conditionId}`);
 
       // Create a minimal market object - the actual data will come from candlesticks
       const syntheticMarket = {
@@ -198,7 +158,6 @@ export class BacktestEngine {
         });
 
         if (specificMarket) {
-          console.log(`Found specific market: ${specificMarket.question || specificMarket.title}`);
           return [specificMarket];
         }
 
@@ -206,7 +165,6 @@ export class BacktestEngine {
         if (offset >= 500) break; // Safety limit
       }
 
-      console.warn('Specific market not found');
       return [];
     }
 
@@ -266,9 +224,6 @@ export class BacktestEngine {
    */
   private async processMarket(market: any, config: StrategyConfig): Promise<void> {
     try {
-      console.log(`\n📊 Processing market: ${market.title || market.question || market.condition_id}`);
-      console.log(`   Condition ID: ${market.condition_id}`);
-      console.log(`   Date range: ${config.startDate.toISOString()} to ${config.endDate.toISOString()}`);
 
       // Calculate date range and choose appropriate interval
       const rangeDays = (config.endDate.getTime() - config.startDate.getTime()) / (1000 * 60 * 60 * 24);
@@ -289,7 +244,6 @@ export class BacktestEngine {
         intervalLabel = '1 day';
       }
 
-      console.log(`   Date range: ${rangeDays.toFixed(1)} days, using interval: ${interval} (${intervalLabel})`);
 
       // Try to fetch candlestick data, with fallback to larger intervals if no data
       let candlesticks = await this.domeClient.getCandlesticks(
@@ -301,7 +255,6 @@ export class BacktestEngine {
 
       // If no data with current interval and it's not daily yet, try daily
       if (candlesticks.length === 0 && interval !== 1440) {
-        console.log(`   No data with ${intervalLabel} interval, trying daily interval...`);
         candlesticks = await this.domeClient.getCandlesticks(
           market.condition_id,
           1440,
@@ -310,15 +263,13 @@ export class BacktestEngine {
         );
       }
 
-      console.log(`   Fetched ${candlesticks.length} candlesticks`);
       this.debugInfo.totalCandlesticks += candlesticks.length;
 
       if (candlesticks.length === 0) {
-        console.log(`   ⚠️  No candlestick data for market ${market.condition_id}`);
         this.debugInfo.reasons.push(`Market ${market.condition_id}: No candlestick data`);
         return;
       }
-      
+
       this.debugInfo.marketsWithData++;
 
       // Log sample candlesticks for debugging
@@ -342,7 +293,6 @@ export class BacktestEngine {
           const minPrice = Math.min(...prices);
           const maxPrice = Math.max(...prices);
           const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
-          console.log(`   📊 Price stats: min=${minPrice.toFixed(4)}, max=${maxPrice.toFixed(4)}, avg=${avgPrice.toFixed(4)}, valid=${prices.length}/${candlesticks.length}`);
         }
       }
 
@@ -351,7 +301,6 @@ export class BacktestEngine {
       let invalidCandles = 0;
       let processedCandles = 0;
       
-      console.log(`   🔄 Processing ${candlesticks.length} candlesticks...`);
       console.log(`   📋 Entry config:`, {
         entryType: config.entryType,
         entryPriceThreshold: JSON.stringify(config.entryPriceThreshold),
@@ -366,7 +315,6 @@ export class BacktestEngine {
         if (!candle.close || candle.close <= 0 || candle.close > 1) {
           invalidCandles++;
           if (invalidCandles <= 3) { // Only log first few invalid candles
-            console.warn(`   ⚠️  Skipping invalid candle at ${candle.timestamp.toISOString()}: close=${candle.close}`);
           }
           continue;
         }
@@ -375,7 +323,6 @@ export class BacktestEngine {
         
         // Log first valid candle for debugging
         if (processedCandles === 1) {
-          console.log(`   🕯️  First valid candle: price=${candle.close.toFixed(4)}, timestamp=${candle.timestamp.toISOString()}`);
         }
 
         // Check exit conditions for open positions
@@ -395,17 +342,13 @@ export class BacktestEngine {
         this.recordEquityPoint(candle.timestamp);
       }
 
-      console.log(`   📊 Processed ${processedCandles} valid candles (${invalidCandles} invalid)`);
       this.debugInfo.validCandlesticks += processedCandles;
       this.debugInfo.entryAttempts += entryAttempts;
       
       if (entryAttempts > 0) {
-        console.log(`   ✅ Made ${entryAttempts} entry attempt(s)`);
       } else {
-        console.log(`   ⚠️  No entry attempts made`);
         const firstValidPrice = processedCandles > 0 ? candlesticks.find(c => c.close > 0 && c.close <= 1)?.close : null;
         const debugMsg = `Market ${market.condition_id}: No entries - validCandles=${processedCandles}, firstPrice=${firstValidPrice?.toFixed(4) || 'N/A'}, entryType=${config.entryType}, thresholds=${JSON.stringify(config.entryPriceThreshold)}`;
-        console.log(`   💡 ${debugMsg}`);
         this.debugInfo.reasons.push(debugMsg);
       }
 
@@ -417,7 +360,6 @@ export class BacktestEngine {
       }
 
     } catch (error) {
-      console.error(`Error processing market ${market.market_id}:`, error);
     }
   }
 
@@ -471,7 +413,6 @@ export class BacktestEngine {
     // Check if we have enough capital
     const positionSize = this.calculatePositionSize(config);
     if (positionSize > this.currentCapital) {
-      console.log(`   💰 Insufficient capital: need ${positionSize.toFixed(2)}, have ${this.currentCapital.toFixed(2)}`);
       return;
     }
 
@@ -489,7 +430,6 @@ export class BacktestEngine {
 
     // Validate prices are in valid range
     if (yesPrice <= 0 || yesPrice >= 1 || noPrice <= 0 || noPrice >= 1) {
-      console.warn(`   ⚠️  Invalid prices: yes=${yesPrice}, no=${noPrice}`);
       return;
     }
 
@@ -631,7 +571,6 @@ export class BacktestEngine {
     const dateKey = candle.timestamp.toISOString().split('T')[0];
     this.tradesPerDay.set(dateKey, (this.tradesPerDay.get(dateKey) || 0) + 1);
 
-    console.log(`   🎯 OPEN ${side} position: ${trade.marketName.substring(0, 50)}... @ ${price.toFixed(4)} (${shares.toFixed(2)} shares, $${amountUsdc.toFixed(2)} invested)`);
   }
 
   /**
@@ -763,7 +702,6 @@ export class BacktestEngine {
     }
     position.partialExitNumber = exitNumber;
 
-    console.log(`   💰 PARTIAL EXIT ${exitNumber} (${position.side}): sold ${sharesToSell.toFixed(2)} shares @ ${exitPrice.toFixed(4)}, PnL: ${partialExitTrade.pnl >= 0 ? '+' : ''}$${partialExitTrade.pnl.toFixed(2)} (${partialExitTrade.pnlPercentage.toFixed(2)}%)`);
   }
 
   /**
@@ -799,7 +737,6 @@ export class BacktestEngine {
     this.trades.push(position);
     this.openPositions.delete(position.marketId);
 
-    console.log(`   💵 CLOSE ${position.side} position: ${position.pnl >= 0 ? '+' : ''}${position.pnl.toFixed(2)} USDC (${position.pnlPercentage.toFixed(2)}%) - ${exitReason}`);
   }
 
   /**

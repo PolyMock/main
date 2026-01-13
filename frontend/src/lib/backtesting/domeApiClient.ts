@@ -117,7 +117,6 @@ export class DomeApiClient {
 
       return [];
     } catch (error: any) {
-      console.error('Error fetching markets from Dome API:', error.response?.data || error.message);
       return []; // Return empty array instead of throwing
     }
   }
@@ -183,31 +182,25 @@ export class DomeApiClient {
       const candlesticksArray = rawData.candlesticks;
 
       if (!candlesticksArray || !Array.isArray(candlesticksArray)) {
-        console.warn(`No candlestick data returned for ${conditionId}. Response:`, rawData);
         return [];
       }
 
       if (candlesticksArray.length === 0) {
-        console.warn(`⚠️  Empty candlesticks array returned from API for ${conditionId}`);
-        console.warn(`   This could mean: 1) Market has no trading data in this period, 2) Market is too new, 3) Wrong condition_id format`);
         return [];
       }
 
-      console.log(`📊 Received ${candlesticksArray.length} candlestick entries from API`);
 
       const candlesticks: Candlestick[] = [];
 
       // API returns array of tuples: [[candlestick_data_array, token_metadata], ...]
       for (const item of candlesticksArray) {
         if (!Array.isArray(item) || item.length < 2) {
-          console.warn(`Unexpected candlestick item structure:`, item);
           continue;
         }
 
         // First element is the array of candlestick objects
         const candleDataArray = item[0];
         if (!Array.isArray(candleDataArray)) {
-          console.warn(`Candlestick data is not an array:`, candleDataArray);
           continue;
         }
 
@@ -217,14 +210,12 @@ export class DomeApiClient {
         // Process each candlestick in the array
         for (const candleData of candleDataArray) {
           if (!candleData || !candleData.end_period_ts) {
-            console.warn(`Invalid candlestick data:`, candleData);
             continue;
           }
 
           // Extract price data - prefer _dollars fields as they're more reliable
           const priceData = candleData.price;
           if (!priceData) {
-            console.warn(`No price data in candlestick:`, candleData);
             continue;
           }
 
@@ -312,15 +303,12 @@ export class DomeApiClient {
       }
 
       if (candlesticks.length === 0) {
-        console.warn(`⚠️  No valid candlesticks parsed for ${conditionId} - all prices were invalid or missing`);
       } else {
-        console.log(`✅ Successfully parsed ${candlesticks.length} candlesticks for ${conditionId}`);
         // Log price range for validation
         const prices = candlesticks.map(c => c.close).filter(p => p > 0);
         if (prices.length > 0) {
           const minPrice = Math.min(...prices);
           const maxPrice = Math.max(...prices);
-          console.log(`   Price range: ${minPrice.toFixed(4)} - ${maxPrice.toFixed(4)}`);
         }
       }
       
@@ -359,7 +347,6 @@ export class DomeApiClient {
       const data: DomeMarketPrice = response.data.data || response.data;
       return data.price;
     } catch (error: any) {
-      console.error(`Error fetching price for ${tokenId}:`, error.response?.data || error.message);
       return null;
     }
   }
@@ -387,7 +374,6 @@ export class DomeApiClient {
 
       return response.data.data || response.data;
     } catch (error: any) {
-      console.error(`Error fetching orderbook for ${assetId}:`, error.response?.data || error.message);
       return [];
     }
   }
