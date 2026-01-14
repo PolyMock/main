@@ -967,52 +967,52 @@
 
 		try {
 			const strategyData = {
-				strategy_name: strategyName,
-				market_id: selectedMarket.condition_id,
-				market_question: selectedMarket.question,
-				initial_capital: config.initialBankroll,
-				start_date: config.startDate?.toISOString() || '',
-				end_date: config.endDate?.toISOString() || '',
+				strategyName: strategyName,
+				marketId: selectedMarket.condition_id,
+				marketQuestion: selectedMarket.question,
+				initialCapital: config.initialBankroll,
+				startDate: config.startDate?.toISOString() || '',
+				endDate: config.endDate?.toISOString() || '',
 
 				// Entry rules
-				entry_type: config.entryType,
-				entry_config: JSON.stringify({
+				entryType: config.entryType,
+				entryConfig: {
 					buyThreshold: config.buyThreshold,
 					sellThreshold: config.sellThreshold,
 					entryTimeConstraints: config.entryTimeConstraints
-				}),
+				},
 
 				// Position sizing
-				position_sizing_type: config.positionSizing.type,
-				position_sizing_value: config.positionSizing.value,
-				max_position_size: config.positionSizing.maxPositionSize,
+				positionSizingType: config.positionSizing.type,
+				positionSizingValue: config.positionSizing.value,
+				maxPositionSize: config.positionSizing.maxPositionSize,
 
 				// Exit rules
-				stop_loss: config.stopLoss,
-				take_profit: config.takeProfit,
-				time_based_exit: config.timeBasedExit,
+				stopLoss: config.stopLoss,
+				takeProfit: config.takeProfit,
+				timeBasedExit: config.timeBasedExit,
 
-				// Results
-				final_capital: backtestResult.endingCapital,
-				total_return_percent: backtestResult.metrics.roi,
-				total_trades: backtestResult.metrics.totalTrades,
-				winning_trades: backtestResult.metrics.winningTrades,
-				losing_trades: backtestResult.metrics.losingTrades,
-				break_even_trades: backtestResult.metrics.breakEvenTrades || 0,
-				win_rate: backtestResult.metrics.winRate,
-				avg_win: backtestResult.metrics.avgWin,
-				avg_loss: backtestResult.metrics.avgLoss,
-				largest_win: backtestResult.metrics.largestWin,
-				largest_loss: backtestResult.metrics.largestLoss,
-				profit_factor: backtestResult.metrics.profitFactor,
-				sharpe_ratio: backtestResult.metrics.sharpeRatio,
-				max_drawdown: backtestResult.metrics.maxDrawdown,
-				avg_trade_duration: backtestResult.metrics.avgTradeDuration,
-
-				// Full data
-				trades_data: JSON.stringify(backtestResult.trades),
-				equity_curve: JSON.stringify(backtestResult.equityCurve),
-				pnl_distribution: JSON.stringify(backtestResult.pnlDistribution)
+				// Backtest results
+				backtestResult: {
+					finalCapital: backtestResult.endingCapital,
+					totalReturnPercent: backtestResult.metrics.roi,
+					totalTrades: backtestResult.metrics.totalTrades,
+					winningTrades: backtestResult.metrics.winningTrades,
+					losingTrades: backtestResult.metrics.losingTrades,
+					breakEvenTrades: backtestResult.metrics.breakEvenTrades || 0,
+					winRate: backtestResult.metrics.winRate,
+					avgWin: backtestResult.metrics.avgWin,
+					avgLoss: backtestResult.metrics.avgLoss,
+					largestWin: backtestResult.metrics.largestWin || 0,
+					largestLoss: backtestResult.metrics.largestLoss || 0,
+					profitFactor: backtestResult.metrics.profitFactor,
+					sharpeRatio: backtestResult.metrics.sharpeRatio,
+					maxDrawdown: backtestResult.metrics.maxDrawdown,
+					avgTradeDuration: backtestResult.metrics.avgTradeDuration || 0,
+					trades: backtestResult.trades || [],
+					equityCurve: backtestResult.equityCurve || [],
+					pnlDistribution: backtestResult.pnlDistribution || {}
+				}
 			};
 
 			const response = await fetch('/api/strategies', {
