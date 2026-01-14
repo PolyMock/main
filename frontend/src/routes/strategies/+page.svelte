@@ -95,7 +95,11 @@
 			<h1>My Backtest Strategies</h1>
 			{#if user}
 				<div class="user-section">
-					<img src={user.picture} alt={user.name} class="avatar" />
+					{#if user.picture}
+						<img src={user.picture} alt={user.name} class="avatar" />
+					{:else}
+						<div class="avatar-placeholder">{user.name.charAt(0).toUpperCase()}</div>
+					{/if}
 					<span>{user.name}</span>
 					<button on:click={handleLogout} class="btn-logout">Logout</button>
 				</div>
@@ -232,6 +236,20 @@
 		height: 40px;
 		border-radius: 50%;
 		border: 2px solid #3b82f6;
+	}
+
+	.avatar-placeholder {
+		width: 40px;
+		height: 40px;
+		border-radius: 50%;
+		border: 2px solid #3b82f6;
+		background: #3b82f6;
+		color: white;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-weight: 700;
+		font-size: 18px;
 	}
 
 	.btn-logout {
