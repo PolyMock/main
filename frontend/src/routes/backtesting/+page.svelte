@@ -418,6 +418,15 @@
 	let backtestResult: BacktestResult | null = null;
 	// Removed showProMetrics - all metrics are now always visible
 
+	// Save strategy state
+	let showSaveModal = false;
+	let showAuthModal = false;
+	let strategyName = '';
+	let savingStrategy = false;
+	let saveError = '';
+	let currentUser: any = null;
+	let isAuthenticating = false;
+
 	// Wizard state
 	let currentStep = 0;
 	const totalSteps = 5; // Markets (with date range & filters), Capital, Entry, Exit, Position Sizing
@@ -831,6 +840,208 @@
 			day: 'numeric'
 		});
 	}
+
+	// Check if user is authenticated (either session or wallet)
+	async function checkAuth() {
+		try {
+			const response = await fetch('/api/auth/user');
+			const data = await response.json();
+			currentUser = data.user;
+		} catch (error) {
+			console.error('Auth check failed:', error);
+			currentUser = null;
+		}
+	}
+
+	// Check if user can save (has session OR wallet connected)
+	function canSave(): boolean {
+		return currentUser !== null || $walletStore.connected;
+	}
+
+	// Authenticate with wallet
+	async function authenticateWallet() {
+		isAuthenticating = true;
+		saveError = '';
+
+		try {
+			const wallet = $walletStore;
+
+			if (!wallet.adapter || !wallet.publicKey) {
+				throw new Error('Wallet not connected');
+			}
+
+			// Check if adapter supports signing
+			if (typeof wallet.adapter.signMessage !== 'function') {
+				throw new Error('Wallet does not support message signing');
+			}
+
+			const publicKey = wallet.publicKey.toBase58();
+			console.log('Starting wallet authentication for:', publicKey);
+
+			// Create message to sign
+			const message = `Sign this message to authenticate with Polymock.\n\nWallet: ${publicKey}\nTimestamp: ${Date.now()}`;
+			const messageBytes = new TextEncoder().encode(message);
+
+			console.log('Requesting signature from wallet...');
+			// Request signature from wallet adapter
+			const signature = await wallet.adapter.signMessage(messageBytes);
+			console.log('Signature received');
+
+			// Send to backend
+			console.log('Sending auth request to backend...');
+			const response = await fetch('/api/auth/wallet', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					walletAddress: publicKey,
+					signature: Array.from(signature),
+					message: message
+				})
+			});
+
+			const data = await response.json();
+			console.log('Backend response:', { status: response.status, data });
+
+			if (response.ok && data.success) {
+				console.log('Authentication successful, setting currentUser:', data.user);
+				currentUser = data.user;
+				showAuthModal = false;
+				showSaveModal = true;
+				strategyName = '';
+				saveError = '';
+				console.log('Save modal should now be open');
+			} else {
+				throw new Error(data.error || 'Authentication failed');
+			}
+		} catch (error: any) {
+			console.error('Wallet authentication error:', error);
+			saveError = error.message || 'Wallet authentication failed';
+		} finally {
+			isAuthenticating = false;
+		}
+	}
+
+	// Show save modal or auth modal
+	async function showSaveStrategyModal() {
+		console.log('Save button clicked', {
+			canSave: canSave(),
+			currentUser,
+			walletConnected: $walletStore.connected,
+			walletAddress: $walletStore.publicKey?.toBase58()
+		});
+
+		if (!canSave()) {
+			console.log('Opening auth modal - no auth');
+			showAuthModal = true;
+			saveError = '';
+			return;
+		}
+
+		// If wallet is connected but no session, authenticate first
+		if (!currentUser && $walletStore.connected) {
+			console.log('Wallet connected but no session - authenticating');
+			await authenticateWallet();
+			return;
+		}
+
+		console.log('Opening save modal');
+		showSaveModal = true;
+		strategyName = '';
+		saveError = '';
+	}
+
+	// Save strategy to database
+	async function saveStrategy() {
+		if (!strategyName.trim()) {
+			saveError = 'Please enter a strategy name';
+			return;
+		}
+
+		if (!backtestResult || !selectedMarket) {
+			saveError = 'Missing backtest data';
+			return;
+		}
+
+		savingStrategy = true;
+		saveError = '';
+
+		try {
+			const strategyData = {
+				strategy_name: strategyName,
+				market_id: selectedMarket.condition_id,
+				market_question: selectedMarket.question,
+				initial_capital: config.initialBankroll,
+				start_date: config.startDate?.toISOString() || '',
+				end_date: config.endDate?.toISOString() || '',
+
+				// Entry rules
+				entry_type: config.entryType,
+				entry_config: JSON.stringify({
+					buyThreshold: config.buyThreshold,
+					sellThreshold: config.sellThreshold,
+					entryTimeConstraints: config.entryTimeConstraints
+				}),
+
+				// Position sizing
+				position_sizing_type: config.positionSizing.type,
+				position_sizing_value: config.positionSizing.value,
+				max_position_size: config.positionSizing.maxPositionSize,
+
+				// Exit rules
+				stop_loss: config.stopLoss,
+				take_profit: config.takeProfit,
+				time_based_exit: config.timeBasedExit,
+
+				// Results
+				final_capital: backtestResult.endingCapital,
+				total_return_percent: backtestResult.metrics.roi,
+				total_trades: backtestResult.metrics.totalTrades,
+				winning_trades: backtestResult.metrics.winningTrades,
+				losing_trades: backtestResult.metrics.losingTrades,
+				break_even_trades: backtestResult.metrics.breakEvenTrades || 0,
+				win_rate: backtestResult.metrics.winRate,
+				avg_win: backtestResult.metrics.avgWin,
+				avg_loss: backtestResult.metrics.avgLoss,
+				largest_win: backtestResult.metrics.largestWin,
+				largest_loss: backtestResult.metrics.largestLoss,
+				profit_factor: backtestResult.metrics.profitFactor,
+				sharpe_ratio: backtestResult.metrics.sharpeRatio,
+				max_drawdown: backtestResult.metrics.maxDrawdown,
+				avg_trade_duration: backtestResult.metrics.avgTradeDuration,
+
+				// Full data
+				trades_data: JSON.stringify(backtestResult.trades),
+				equity_curve: JSON.stringify(backtestResult.equityCurve),
+				pnl_distribution: JSON.stringify(backtestResult.pnlDistribution)
+			};
+
+			const response = await fetch('/api/strategies', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(strategyData)
+			});
+
+			const data = await response.json();
+
+			if (!response.ok) {
+				throw new Error(data.error || 'Failed to save strategy');
+			}
+
+			// Success - redirect to strategies page
+			showSaveModal = false;
+			alert('Strategy saved successfully!');
+			window.location.href = '/strategies';
+		} catch (error: any) {
+			saveError = error.message || 'Failed to save strategy';
+		} finally {
+			savingStrategy = false;
+		}
+	}
+
+	// Check auth on mount
+	onMount(() => {
+		checkAuth();
+	});
 
 	$: sortedTrades = backtestResult?.trades
 		? [...backtestResult.trades].sort((a, b) => new Date(b.entryTime).getTime() - new Date(a.entryTime).getTime())
@@ -2299,6 +2510,14 @@
 
 				<!-- Export Buttons -->
 				<div class="export-actions">
+					<button class="btn-save" on:click={showSaveStrategyModal}>
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+							<polyline points="17 21 17 13 7 13 7 21"/>
+							<polyline points="7 3 7 8 15 8"/>
+						</svg>
+						Save Strategy
+					</button>
 					<button class="btn-export" on:click={exportToCSV}>
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
@@ -2746,6 +2965,136 @@
 		</div>
 	{/if}
 </div>
+
+<!-- Authentication Required Modal -->
+{#if showAuthModal}
+	<div class="modal-overlay" on:click={() => (showAuthModal = false)}>
+		<div class="modal-content auth-modal" on:click={(e) => e.stopPropagation()}>
+			<div class="modal-header">
+				<h2>Authentication Required</h2>
+				<button class="modal-close" on:click={() => (showAuthModal = false)}>
+					<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<line x1="18" y1="6" x2="6" y2="18"/>
+						<line x1="6" y1="6" x2="18" y2="18"/>
+					</svg>
+				</button>
+			</div>
+
+			<div class="modal-body">
+				<p class="modal-description">To save your strategy, please authenticate with one of the following methods:</p>
+
+				<div class="auth-options">
+					{#if $walletStore.connected}
+						<button class="auth-option" on:click={authenticateWallet} disabled={isAuthenticating}>
+							<div class="auth-icon wallet-icon">
+								<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+									<path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/>
+									<path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/>
+									<path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/>
+								</svg>
+							</div>
+							<div class="auth-text">
+								<div class="auth-title">
+									{isAuthenticating ? 'Signing...' : 'Sign with Wallet'}
+								</div>
+								<div class="auth-subtitle">
+									{$walletStore.publicKey?.toBase58().slice(0, 8)}...{$walletStore.publicKey?.toBase58().slice(-8)}
+								</div>
+							</div>
+						</button>
+					{:else}
+						<div class="auth-option disabled">
+							<div class="auth-icon wallet-icon">
+								<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+									<path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/>
+									<path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/>
+									<path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/>
+								</svg>
+							</div>
+							<div class="auth-text">
+								<div class="auth-title">Connect Wallet First</div>
+								<div class="auth-subtitle">Use the wallet button in the navbar</div>
+							</div>
+						</div>
+					{/if}
+
+					<a href="/api/auth/login" class="auth-option">
+						<div class="auth-icon google-icon">
+							<svg width="24" height="24" viewBox="0 0 24 24">
+								<path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+								<path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+								<path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+								<path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+							</svg>
+						</div>
+						<div class="auth-text">
+							<div class="auth-title">Sign in with Google</div>
+							<div class="auth-subtitle">Quick and secure</div>
+						</div>
+					</a>
+				</div>
+
+				{#if saveError}
+					<div class="error-message">{saveError}</div>
+				{/if}
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Save Strategy Modal -->
+{#if showSaveModal}
+	<div class="modal-overlay" on:click={() => (showSaveModal = false)}>
+		<div class="modal-content" on:click={(e) => e.stopPropagation()}>
+			<div class="modal-header">
+				<h2>Save Strategy</h2>
+				<button class="modal-close" on:click={() => (showSaveModal = false)}>
+					<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<line x1="18" y1="6" x2="6" y2="18"/>
+						<line x1="6" y1="6" x2="18" y2="18"/>
+					</svg>
+				</button>
+			</div>
+
+			<div class="modal-body">
+				<p class="modal-description">Give your strategy a name to save it for future reference</p>
+
+				<div class="form-group">
+					<label for="strategy-name">Strategy Name</label>
+					<input
+						id="strategy-name"
+						type="text"
+						bind:value={strategyName}
+						placeholder="e.g., Conservative Buy-Low Strategy"
+						maxlength="100"
+						disabled={savingStrategy}
+					/>
+				</div>
+
+				{#if saveError}
+					<div class="error-message">{saveError}</div>
+				{/if}
+
+				<div class="modal-actions">
+					<button
+						class="btn-cancel"
+						on:click={() => (showSaveModal = false)}
+						disabled={savingStrategy}
+					>
+						Cancel
+					</button>
+					<button
+						class="btn-save-confirm"
+						on:click={saveStrategy}
+						disabled={savingStrategy || !strategyName.trim()}
+					>
+						{savingStrategy ? 'Saving...' : 'Save Strategy'}
+					</button>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <style>
 	.backtesting-container {
@@ -5630,6 +5979,270 @@
 
 .btn-export svg {
 	margin-right: 6px;
+}
+
+/* Save Strategy Button */
+.btn-save {
+	background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+	border: 1px solid #3b82f6;
+	color: white;
+	padding: 10px 20px;
+	border-radius: 8px;
+	cursor: pointer;
+	font-size: 14px;
+	font-weight: 600;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	transition: all 0.2s;
+}
+
+.btn-save:hover {
+	background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+	transform: translateY(-2px);
+	box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.btn-save svg {
+	flex-shrink: 0;
+}
+
+/* Save Modal */
+.modal-overlay {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background: rgba(0, 0, 0, 0.7);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 1000;
+	padding: 20px;
+}
+
+.modal-content {
+	background: #141824;
+	border: 1px solid #2a2f45;
+	border-radius: 16px;
+	max-width: 500px;
+	width: 100%;
+	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.modal-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 24px 24px 16px 24px;
+	border-bottom: 1px solid #2a2f45;
+}
+
+.modal-header h2 {
+	margin: 0;
+	font-size: 20px;
+	font-weight: 600;
+	color: white;
+}
+
+.modal-close {
+	background: transparent;
+	border: none;
+	color: #8b92ab;
+	cursor: pointer;
+	padding: 4px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: color 0.2s;
+}
+
+.modal-close:hover {
+	color: white;
+}
+
+.modal-body {
+	padding: 24px;
+}
+
+.modal-description {
+	color: #8b92ab;
+	margin: 0 0 24px 0;
+	font-size: 14px;
+	line-height: 1.6;
+}
+
+.form-group {
+	margin-bottom: 24px;
+}
+
+.form-group label {
+	display: block;
+	color: #8b92ab;
+	font-size: 14px;
+	font-weight: 600;
+	margin-bottom: 8px;
+}
+
+.form-group input {
+	width: 100%;
+	background: #0a0e1a;
+	border: 1px solid #2a2f45;
+	border-radius: 8px;
+	padding: 12px 16px;
+	color: white;
+	font-size: 14px;
+	transition: border-color 0.2s;
+}
+
+.form-group input:focus {
+	outline: none;
+	border-color: #3b82f6;
+}
+
+.form-group input:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.error-message {
+	background: rgba(239, 68, 68, 0.1);
+	border: 1px solid #ef4444;
+	border-radius: 8px;
+	padding: 12px;
+	color: #ef4444;
+	font-size: 14px;
+	margin-bottom: 16px;
+}
+
+.modal-actions {
+	display: flex;
+	gap: 12px;
+	justify-content: flex-end;
+}
+
+.btn-cancel {
+	background: transparent;
+	border: 1px solid #2a2f45;
+	color: #8b92ab;
+	padding: 10px 24px;
+	border-radius: 8px;
+	cursor: pointer;
+	font-size: 14px;
+	font-weight: 600;
+	transition: all 0.2s;
+}
+
+.btn-cancel:hover:not(:disabled) {
+	border-color: #8b92ab;
+	color: white;
+}
+
+.btn-cancel:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.btn-save-confirm {
+	background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+	border: 1px solid #3b82f6;
+	color: white;
+	padding: 10px 24px;
+	border-radius: 8px;
+	cursor: pointer;
+	font-size: 14px;
+	font-weight: 600;
+	transition: all 0.2s;
+}
+
+.btn-save-confirm:hover:not(:disabled) {
+	background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+	transform: translateY(-1px);
+}
+
+.btn-save-confirm:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+/* Auth Modal Styles */
+.auth-modal {
+	max-width: 450px;
+}
+
+.auth-options {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	margin-bottom: 16px;
+}
+
+.auth-option {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	padding: 16px;
+	background: #0a0e1a;
+	border: 2px solid #2a2f45;
+	border-radius: 12px;
+	cursor: pointer;
+	transition: all 0.2s;
+	text-decoration: none;
+	color: inherit;
+}
+
+.auth-option:hover:not(.disabled) {
+	border-color: #3b82f6;
+	background: #141824;
+	transform: translateY(-2px);
+}
+
+.auth-option.disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.auth-option:disabled {
+	opacity: 0.7;
+	cursor: wait;
+}
+
+.auth-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 48px;
+	height: 48px;
+	border-radius: 12px;
+	flex-shrink: 0;
+}
+
+.wallet-icon {
+	background: linear-gradient(135deg, #9945ff 0%, #7928ca 100%);
+	color: white;
+}
+
+.google-icon {
+	background: white;
+	padding: 8px;
+}
+
+.auth-text {
+	flex: 1;
+	text-align: left;
+}
+
+.auth-title {
+	font-size: 16px;
+	font-weight: 600;
+	color: white;
+	margin-bottom: 4px;
+}
+
+.auth-subtitle {
+	font-size: 13px;
+	color: #8b92ab;
 }
 
 /* Hero Summary Section */
