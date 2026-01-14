@@ -7,6 +7,9 @@
 	} from '@solana/wallet-adapter-wallets';
 	import type { Adapter } from '@solana/wallet-adapter-base';
 
+	export let isDropdownMode = false;
+	export let onClose: (() => void) | undefined = undefined;
+
 	let walletState = $walletStore;
 	let showWalletModal = false;
 	let availableWallets: Adapter[] = [];
@@ -33,6 +36,7 @@
 			setWalletConnecting(true);
 			setWalletAdapter(wallet);
 			showWalletModal = false;
+			if (onClose) onClose();
 
 			// Set up event listeners
 			wallet.on('connect', async () => {
@@ -88,20 +92,38 @@
 	}
 </script>
 
-<div class="wallet-section">
-	{#if walletState.connected && walletState.publicKey}
-		<div class="wallet-info">
-			<span class="wallet-address">{formatAddress(walletState.publicKey.toString())}</span>
-			<button class="disconnect-btn" on:click={disconnect} disabled={walletState.disconnecting}>
-				{walletState.disconnecting ? 'DISCONNECTING...' : 'DISCONNECT'}
-			</button>
+{#if isDropdownMode}
+	<!-- Render as dropdown option -->
+	<button class="connect-option" on:click={openWalletModal} disabled={walletState.connecting}>
+		<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+			<rect x="2" y="5" width="16" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/>
+			<path d="M14 10h1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+			<path d="M2 8h16" stroke="currentColor" stroke-width="1.5"/>
+		</svg>
+		<div class="connect-option-text">
+			<div class="connect-option-title">
+				{walletState.connecting ? 'Connecting...' : 'Wallet'}
+			</div>
+			<div class="connect-option-subtitle">Connect with Solana wallet</div>
 		</div>
-	{:else}
-		<button class="connect-btn" on:click={openWalletModal} disabled={walletState.connecting}>
-			{walletState.connecting ? 'CONNECTING...' : 'CONNECT WALLET'}
-		</button>
-	{/if}
-</div>
+	</button>
+{:else}
+	<!-- Render as standalone button -->
+	<div class="wallet-section">
+		{#if walletState.connected && walletState.publicKey}
+			<div class="wallet-info">
+				<span class="wallet-address">{formatAddress(walletState.publicKey.toString())}</span>
+				<button class="disconnect-btn" on:click={disconnect} disabled={walletState.disconnecting}>
+					{walletState.disconnecting ? 'DISCONNECTING...' : 'DISCONNECT'}
+				</button>
+			</div>
+		{:else}
+			<button class="connect-btn" on:click={openWalletModal} disabled={walletState.connecting}>
+				{walletState.connecting ? 'CONNECTING...' : 'CONNECT WALLET'}
+			</button>
+		{/if}
+	</div>
+{/if}
 
 {#if showWalletModal}
 	<div class="wallet-modal-overlay" on:click={closeWalletModal} role="button" tabindex="0" on:keydown={(e) => e.key === 'Escape' && closeWalletModal()}>
@@ -131,6 +153,53 @@
 {/if}
 
 <style>
+	/* Dropdown mode styles */
+	.connect-option {
+		width: 100%;
+		padding: 14px 16px;
+		background: transparent;
+		border: none;
+		cursor: pointer;
+		transition: all 200ms ease-out;
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		text-align: left;
+		color: #E8E8E8;
+	}
+
+	.connect-option:hover:not(:disabled) {
+		background: rgba(0, 208, 132, 0.1);
+	}
+
+	.connect-option:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.connect-option svg {
+		flex-shrink: 0;
+	}
+
+	.connect-option-text {
+		flex: 1;
+	}
+
+	.connect-option-title {
+		font-size: 14px;
+		font-weight: 600;
+		color: #E8E8E8;
+		margin-bottom: 2px;
+		font-family: Inter, sans-serif;
+	}
+
+	.connect-option-subtitle {
+		font-size: 12px;
+		color: #8B92AB;
+		font-family: Inter, sans-serif;
+	}
+
+	/* Standalone button styles */
 	.wallet-section {
 		display: flex;
 		align-items: center;

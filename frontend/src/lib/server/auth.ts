@@ -1,6 +1,38 @@
 import { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET } from '$env/static/private';
 import type { RequestEvent } from '@sveltejs/kit';
 
+// Cloudflare D1 Database type
+export interface D1Database {
+	prepare(query: string): D1PreparedStatement;
+	exec(query: string): Promise<D1ExecResult>;
+	batch<T = unknown>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]>;
+}
+
+interface D1PreparedStatement {
+	bind(...values: unknown[]): D1PreparedStatement;
+	first<T = any>(colName?: string): Promise<T | null>;
+	run(): Promise<D1Result>;
+	all<T = any>(): Promise<D1Result<T>>;
+}
+
+interface D1Result<T = unknown> {
+	results: T[];
+	success: boolean;
+	meta: {
+		duration: number;
+		rows_read: number;
+		rows_written: number;
+		last_row_id: number;
+		changed_db: boolean;
+		changes: number;
+	};
+}
+
+interface D1ExecResult {
+	count: number;
+	duration: number;
+}
+
 export interface GoogleUser {
 	id: string;
 	email: string;
@@ -68,10 +100,17 @@ export async function getGoogleUser(code: string, redirectUri: string): Promise<
  */
 export async function upsertUser(db: D1Database, googleUser: GoogleUser): Promise<SessionUser> {
 	// Check if user exists
-	const existingUser = await db
-		.prepare('SELECT * FROM users WHERE google_id = ?')
-		.bind(googleUser.id)
-		.first();
+		const existingUser = await db
+			.prepare('SELECT * FROM users WHERE google_id = ?')
+			.bind(googleUser.id)
+			.first<{
+				id: number;
+				google_id: string;
+				solana_address: string | null;
+				email: string;
+				name: string;
+				picture: string;
+			}>();
 
 	if (existingUser) {
 		// Update last login
@@ -96,7 +135,14 @@ export async function upsertUser(db: D1Database, googleUser: GoogleUser): Promis
 			'INSERT INTO users (google_id, email, name, picture) VALUES (?, ?, ?, ?) RETURNING *'
 		)
 		.bind(googleUser.id, googleUser.email, googleUser.name, googleUser.picture)
-		.first();
+		.first<{
+			id: number;
+			google_id: string;
+			solana_address: string | null;
+			email: string;
+			name: string;
+			picture: string;
+		}>();
 
 	if (!result) {
 		throw new Error('Failed to create user');
@@ -120,7 +166,14 @@ export async function upsertWalletUser(db: D1Database, walletAddress: string): P
 	const existingUser = await db
 		.prepare('SELECT * FROM users WHERE solana_address = ?')
 		.bind(walletAddress)
-		.first();
+		.first<{
+			id: number;
+			google_id: string | null;
+			solana_address: string;
+			email: string | null;
+			name: string;
+			picture: string | null;
+		}>();
 
 	if (existingUser) {
 		// Update last login
@@ -144,7 +197,14 @@ export async function upsertWalletUser(db: D1Database, walletAddress: string): P
 	const result = await db
 		.prepare('INSERT INTO users (solana_address, name) VALUES (?, ?) RETURNING *')
 		.bind(walletAddress, displayName)
-		.first();
+		.first<{
+			id: number;
+			google_id: string | null;
+			solana_address: string;
+			email: string | null;
+			name: string;
+			picture: string | null;
+		}>();
 
 	if (!result) {
 		throw new Error('Failed to create user');

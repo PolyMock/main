@@ -2,6 +2,38 @@
  * Database helper functions for Cloudflare D1
  */
 
+// Cloudflare D1 Database type
+export interface D1Database {
+	prepare(query: string): D1PreparedStatement;
+	exec(query: string): Promise<D1ExecResult>;
+	batch<T = unknown>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]>;
+}
+
+interface D1PreparedStatement {
+	bind(...values: unknown[]): D1PreparedStatement;
+	first<T = any>(colName?: string): Promise<T | null>;
+	run(): Promise<D1Result>;
+	all<T = any>(): Promise<D1Result<T>>;
+}
+
+interface D1Result<T = unknown> {
+	results: T[];
+	success: boolean;
+	meta: {
+		duration: number;
+		rows_read: number;
+		rows_written: number;
+		last_row_id: number;
+		changed_db: boolean;
+		changes: number;
+	};
+}
+
+interface D1ExecResult {
+	count: number;
+	duration: number;
+}
+
 export interface BacktestStrategy {
 	id?: number;
 	userId: number;

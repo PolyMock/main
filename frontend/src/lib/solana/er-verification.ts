@@ -133,8 +133,8 @@ export class ERVerification {
 				dataSame,
 				erData,
 				mainChainData,
-				lastModifiedSlotER: erAccountInfo?.slot || null,
-				lastModifiedSlotMain: mainAccountInfo?.slot || null,
+				lastModifiedSlotER: null, // AccountInfo doesn't have slot property
+				lastModifiedSlotMain: null, // AccountInfo doesn't have slot property
 			};
 		} catch (error) {
 			console.error('Error comparing account data:', error);

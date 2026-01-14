@@ -3094,7 +3094,7 @@
 						id="strategy-name"
 						type="text"
 						bind:value={strategyName}
-						placeholder="e.g., Conservative Buy-Low Strategy"
+						placeholder=""
 						maxlength="100"
 						disabled={savingStrategy}
 					/>

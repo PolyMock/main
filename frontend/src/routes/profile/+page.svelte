@@ -15,11 +15,52 @@
 	let worstTradeMarket = '';
 	let totalPredictions = 0;
 	let profitLoss = 0;
+	let openPositions: any[] = [];
 	let timeFilter: '1D' | '1W' | '1M' | 'ALL' = 'ALL';
-	let showUploadModal = false;
-	let fileInput: HTMLInputElement;
-	let previewUrl: string | null = null;
-	let uploading = false;
+
+	// Chart data for different time periods
+	let chartDataSets = {
+		'1D': {
+			profitLoss: 0,
+			path: 'M 0 50 L 400 50',
+			period: 'Today'
+		},
+		'1W': {
+			profitLoss: 0,
+			path: 'M 0 50 L 400 50',
+			period: 'Past Week'
+		},
+		'1M': {
+			profitLoss: 0,
+			path: 'M 0 50 L 400 50',
+			period: 'Past Month'
+		},
+		'ALL': {
+			profitLoss: 0,
+			path: 'M 0 50 L 400 50',
+			period: 'All Time'
+		}
+	};
+
+	// Function to generate chart path based on P/L
+	function generateChartPath(pnl: number): string {
+		if (pnl === 0) {
+			return 'M 0 50 L 400 50'; // Flat line in the middle
+		}
+		// Generate a trending line based on P/L value
+		const isPositive = pnl > 0;
+		if (isPositive) {
+			// Upward trending for positive P/L
+			return 'M 0 70 L 50 65 L 100 55 L 150 45 L 200 50 L 250 40 L 300 35 L 350 30 L 400 25';
+		} else {
+			// Downward trending for negative P/L
+			return 'M 0 30 L 50 35 L 100 45 L 150 55 L 200 50 L 250 60 L 300 65 L 350 70 L 400 75';
+		}
+	}
+
+	// Reactive values based on time filter
+	$: currentChartData = chartDataSets[timeFilter];
+	$: displayProfitLoss = currentChartData.profitLoss;
 	let lastLoadedWallet: string | null = null;
 
 	// Subscribe to wallet state
@@ -73,6 +114,7 @@
 				const isClosed = !('active' in pos.status);
 				const isFullySold = 'fullySold' in pos.status;
 				const isPartiallySold = 'partiallySold' in pos.status;
+				const isOpen = 'active' in pos.status && !isFullySold;
 
 				// For closed/sold positions, use averageSellPrice as the closed price
 				let closedPrice: number | undefined = undefined;
@@ -157,10 +199,23 @@
 
 				console.log(`Position ${pos.positionId.toString()}: shares=${shares}, priceForPnL=${priceForPnL}, amountUsdc=${amountUsdc}, pnl=${pnl}`);
 
-				return { pnl, currentValue, marketName };
+				return {
+					pnl,
+					currentValue,
+					marketName,
+					isOpen,
+					marketId: pos.marketId,
+					predictionType,
+					shares,
+					amountUsdc,
+					currentPrice: priceForPnL
+				};
 			});
 
 			const processedPositions = await Promise.all(positionsPromises);
+
+			// Filter open positions
+			openPositions = processedPositions.filter(pos => pos.isOpen);
 
 			// Calculate totals and find best/worst trades
 			for (const pos of processedPositions) {
@@ -183,6 +238,38 @@
 			bestTradeMarket = bestMarket;
 			worstTradeMarket = worstMarket;
 			profitLoss = totalPnL;
+
+			// Update chart data with calculated P/L (for now, using approximations for different time periods)
+			// In production, you would calculate actual P/L for different time periods based on trade dates
+			// Only calculate approximations if totalPnL is not 0, otherwise keep all at 0
+			const pnl1D = totalPnL === 0 ? 0 : totalPnL * 0.05; // Approximate 5% for 1 day
+			const pnl1W = totalPnL === 0 ? 0 : totalPnL * 0.20; // Approximate 20% for 1 week
+			const pnl1M = totalPnL === 0 ? 0 : totalPnL * 0.50; // Approximate 50% for 1 month
+			const pnlALL = totalPnL; // Total P/L for all time
+
+			// Reassign to trigger reactivity
+			chartDataSets = {
+				'1D': {
+					profitLoss: pnl1D,
+					path: generateChartPath(pnl1D),
+					period: 'Today'
+				},
+				'1W': {
+					profitLoss: pnl1W,
+					path: generateChartPath(pnl1W),
+					period: 'Past Week'
+				},
+				'1M': {
+					profitLoss: pnl1M,
+					path: generateChartPath(pnl1M),
+					period: 'Past Month'
+				},
+				'ALL': {
+					profitLoss: pnlALL,
+					path: generateChartPath(pnlALL),
+					period: 'All Time'
+				}
+			};
 		} catch (error) {
 			console.error('Error loading profile data:', error);
 		} finally {
@@ -210,89 +297,6 @@
 
 	function setTimeFilter(filter: '1D' | '1W' | '1M' | 'ALL') {
 		timeFilter = filter;
-		// In production, this would filter the data by time range
-	}
-
-	function openUploadModal() {
-		if (!$authStore.isAuthenticated) {
-			alert('Please log in to change your profile picture');
-			return;
-		}
-		showUploadModal = true;
-	}
-
-	function closeUploadModal() {
-		showUploadModal = false;
-		previewUrl = null;
-		if (fileInput) {
-			fileInput.value = '';
-		}
-	}
-
-	function handleFileSelect(event: Event) {
-		const input = event.target as HTMLInputElement;
-		const file = input.files?.[0];
-
-		if (!file) return;
-
-		// Validate file type
-		if (!file.type.startsWith('image/')) {
-			alert('Please select an image file');
-			input.value = '';
-			return;
-		}
-
-		// Validate file size (max 5MB)
-		if (file.size > 5 * 1024 * 1024) {
-			alert('Image size must be less than 5MB');
-			input.value = '';
-			return;
-		}
-
-		// Create preview
-		const reader = new FileReader();
-		reader.onload = (e) => {
-			previewUrl = e.target?.result as string;
-		};
-		reader.readAsDataURL(file);
-	}
-
-	async function uploadProfilePicture() {
-		if (!fileInput?.files?.[0]) return;
-
-		uploading = true;
-
-		try {
-			const file = fileInput.files[0];
-			const reader = new FileReader();
-
-			reader.onload = async (e) => {
-				const dataUrl = e.target?.result as string;
-
-				// In production, you would upload to a cloud storage service
-				// For now, we'll store the data URL directly (not recommended for production)
-				authStore.updateProfilePicture(dataUrl);
-
-				uploading = false;
-				closeUploadModal();
-				alert('Profile picture updated successfully!');
-			};
-
-			reader.onerror = () => {
-				uploading = false;
-				alert('Failed to read image file');
-			};
-
-			reader.readAsDataURL(file);
-		} catch (error) {
-			console.error('Upload failed:', error);
-			uploading = false;
-			alert('Failed to upload profile picture');
-		}
-	}
-
-	function triggerFileInput() {
-		fileInput?.click();
 	}
 </script>
 
@@ -317,20 +321,12 @@
 							<img src={$authStore.user.picture} alt="Profile" class="user-avatar" />
 						{:else}
 							<div class="user-avatar-placeholder">
-								<svg width="40" height="40" viewBox="0 0 40 40" fill="none">
-									<circle cx="20" cy="20" r="20" fill="#2A2F45"/>
-									<path d="M20 20C22.7614 20 25 17.7614 25 15C25 12.2386 22.7614 10 20 10C17.2386 10 15 12.2386 15 15C15 17.7614 17.2386 20 20 20Z" fill="#8B92AB"/>
-									<path d="M10 32C10 27.5817 13.5817 24 18 24H22C26.4183 24 30 27.5817 30 32V34H10V32Z" fill="#8B92AB"/>
-								</svg>
+								{#if walletState.publicKey}
+									{walletState.publicKey.toString().charAt(0).toUpperCase()}
+								{:else}
+									?
+								{/if}
 							</div>
-						{/if}
-						{#if $authStore.isAuthenticated}
-							<button class="edit-avatar-btn" on:click={openUploadModal}>
-								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-									<path d="M12 20h9"/>
-									<path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
-								</svg>
-							</button>
 						{/if}
 					</div>
 					<div class="user-info">
@@ -354,7 +350,7 @@
 				<!-- Stats Row -->
 				<div class="stats-row">
 					<div class="stat-item">
-						<div class="stat-label">Positions Value</div>
+						<div class="stat-label">Total Positions Value</div>
 						<div class="stat-value">{formatLargeNumber(positionsValue)}</div>
 					</div>
 					<div class="stat-divider"></div>
@@ -375,9 +371,26 @@
 					</div>
 					<div class="stat-divider"></div>
 					<div class="stat-item">
-						<div class="stat-label">Predictions</div>
+						<div class="stat-label">Total Predictions</div>
 						<div class="stat-value">{totalPredictions}</div>
 					</div>
+				</div>
+
+				<!-- Quick Actions -->
+				<div class="quick-actions">
+					<a href="/strategies" class="action-btn">
+						<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+						</svg>
+						View My Strategies
+					</a>
+					<a href="/backtesting" class="action-btn">
+						<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<circle cx="12" cy="12" r="10"/>
+							<polyline points="12 6 12 12 16 14"/>
+						</svg>
+						Backtest Strategy
+					</a>
 				</div>
 			</div>
 
@@ -420,30 +433,30 @@
 					</div>
 				</div>
 
-				<div class="pnl-amount" class:positive={profitLoss >= 0} class:negative={profitLoss < 0}>
-					{formatCurrency(profitLoss)}
+				<div class="pnl-amount" class:positive={displayProfitLoss >= 0} class:negative={displayProfitLoss < 0}>
+					{formatCurrency(displayProfitLoss)}
 				</div>
 
-				<div class="pnl-period">Past Month</div>
+				<div class="pnl-period">{currentChartData.period}</div>
 
-				<!-- Simple Chart Placeholder -->
+				<!-- Dynamic Chart -->
 				<div class="chart-container">
 					<svg class="chart" viewBox="0 0 400 100" preserveAspectRatio="none">
 						<defs>
 							<linearGradient id="chartGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-								<stop offset="0%" style="stop-color: {profitLoss >= 0 ? '#00D68F' : '#FF6B6B'}; stop-opacity: 0.3"/>
-								<stop offset="100%" style="stop-color: {profitLoss >= 0 ? '#00D68F' : '#FF6B6B'}; stop-opacity: 0"/>
+								<stop offset="0%" style="stop-color: {displayProfitLoss >= 0 ? '#00D68F' : '#FF6B6B'}; stop-opacity: 0.3"/>
+								<stop offset="100%" style="stop-color: {displayProfitLoss >= 0 ? '#00D68F' : '#FF6B6B'}; stop-opacity: 0"/>
 							</linearGradient>
 						</defs>
-						<!-- Sample wavy line -->
+						<!-- Dynamic path based on time filter -->
 						<path
-							d="M 0 50 Q 50 40, 100 45 T 200 40 T 300 35 T 400 30"
+							d="{currentChartData.path}"
 							fill="none"
-							stroke="{profitLoss >= 0 ? '#00D68F' : '#FF6B6B'}"
+							stroke="{displayProfitLoss >= 0 ? '#00D68F' : '#FF6B6B'}"
 							stroke-width="2"
 						/>
 						<path
-							d="M 0 50 Q 50 40, 100 45 T 200 40 T 300 35 T 400 30 L 400 100 L 0 100 Z"
+							d="{currentChartData.path} L 400 100 L 0 100 Z"
 							fill="url(#chartGradient)"
 						/>
 					</svg>
@@ -454,63 +467,67 @@
 						<rect width="16" height="16" rx="3" fill="#2A2F45"/>
 						<path d="M4 8L7 11L12 5" stroke="#00B4FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
 					</svg>
-					Polymarket
+					Polymock
 				</div>
+			</div>
+
+			<!-- Current Open Positions -->
+			<div class="open-positions-card">
+				<div class="card-header">
+					<h2>Current Open Positions</h2>
+					<span class="position-count">{openPositions.length} {openPositions.length === 1 ? 'Position' : 'Positions'}</span>
+				</div>
+
+				{#if openPositions.length === 0}
+					<div class="empty-positions">
+						<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+							<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+							<line x1="9" y1="9" x2="15" y2="9"/>
+							<line x1="9" y1="15" x2="15" y2="15"/>
+						</svg>
+						<p>No open positions</p>
+						<a href="/" class="trade-btn">Start Trading</a>
+					</div>
+				{:else}
+					<div class="positions-list">
+						{#each openPositions as position}
+							<div class="position-item">
+								<div class="position-main">
+									<div class="position-market">
+										<h3>{position.marketName}</h3>
+										<span class="position-type" class:yes={position.predictionType === 'Yes'} class:no={position.predictionType === 'No'}>
+											{position.predictionType}
+										</span>
+									</div>
+									<div class="position-stats">
+										<div class="position-stat">
+											<span class="stat-label">Shares</span>
+											<span class="stat-value">{position.shares.toFixed(2)}</span>
+										</div>
+										<div class="position-stat">
+											<span class="stat-label">Invested</span>
+											<span class="stat-value">{formatCurrency(position.amountUsdc)}</span>
+										</div>
+										<div class="position-stat">
+											<span class="stat-label">Current Value</span>
+											<span class="stat-value">{formatCurrency(position.currentValue)}</span>
+										</div>
+										<div class="position-stat">
+											<span class="stat-label">P&L</span>
+											<span class="stat-value" class:positive={position.pnl >= 0} class:negative={position.pnl < 0}>
+												{position.pnl >= 0 ? '+' : ''}{formatCurrency(position.pnl)}
+											</span>
+										</div>
+									</div>
+								</div>
+							</div>
+						{/each}
+					</div>
+				{/if}
 			</div>
 		</div>
 	{/if}
 </div>
-
-<!-- Upload Profile Picture Modal -->
-{#if showUploadModal}
-<div class="modal-overlay" on:click={closeUploadModal}>
-	<div class="modal-content" on:click|stopPropagation>
-		<div class="modal-header">
-			<h3>Change Profile Picture</h3>
-			<button class="modal-close" on:click={closeUploadModal}>×</button>
-		</div>
-		<div class="modal-body">
-			<div class="upload-area">
-				{#if previewUrl}
-					<div class="preview-container">
-						<img src={previewUrl} alt="Preview" class="preview-image" />
-					</div>
-				{:else}
-					<div class="upload-placeholder">
-						<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-							<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-							<circle cx="8.5" cy="8.5" r="1.5"/>
-							<polyline points="21 15 16 10 5 21"/>
-						</svg>
-						<p>Click to select an image</p>
-						<span>PNG, JPG up to 5MB</span>
-					</div>
-				{/if}
-				<input
-					type="file"
-					bind:this={fileInput}
-					on:change={handleFileSelect}
-					accept="image/*"
-					class="file-input"
-				/>
-				<button class="select-file-btn" on:click={triggerFileInput}>
-					{previewUrl ? 'Choose Different Image' : 'Select Image'}
-				</button>
-			</div>
-		</div>
-		<div class="modal-footer">
-			<button class="modal-btn cancel-btn" on:click={closeUploadModal}>Cancel</button>
-			<button
-				class="modal-btn confirm-btn"
-				on:click={uploadProfilePicture}
-				disabled={!previewUrl || uploading}
-			>
-				{uploading ? 'Uploading...' : 'Save'}
-			</button>
-		</div>
-	</div>
-</div>
-{/if}
 
 <style>
 	.profile-container {
@@ -561,8 +578,7 @@
 		max-width: 1200px;
 		margin: 0 auto;
 		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 20px;
+		gap: 24px;
 	}
 
 	.user-card {
@@ -602,8 +618,11 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: #1E2139;
+		background: linear-gradient(135deg, #00B4FF 0%, #0094D6 100%);
 		border: 2px solid #2A2F45;
+		font-size: 36px;
+		font-weight: 700;
+		color: white;
 	}
 
 	.edit-avatar-btn {
@@ -710,6 +729,40 @@
 		background: #2A2F45;
 	}
 
+	.quick-actions {
+		display: flex;
+		gap: 12px;
+		padding-top: 20px;
+		border-top: 1px solid #2A2F45;
+	}
+
+	.action-btn {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		padding: 12px 20px;
+		background: #2A2F45;
+		border: 1px solid #3A3F55;
+		border-radius: 8px;
+		color: #E8E8E8;
+		font-size: 14px;
+		font-weight: 600;
+		text-decoration: none;
+		transition: all 0.2s;
+	}
+
+	.action-btn:hover {
+		background: #3A3F55;
+		border-color: #00B4FF;
+		color: #00B4FF;
+	}
+
+	.action-btn svg {
+		flex-shrink: 0;
+	}
+
 	.pnl-card {
 		background: #151B2F;
 		border: 1px solid #2A2F45;
@@ -809,6 +862,176 @@
 		font-size: 13px;
 		color: #8B92AB;
 		width: fit-content;
+	}
+
+	/* Open Positions Card */
+	.open-positions-card {
+		background: #151B2F;
+		border: 1px solid #2A2F45;
+		border-radius: 12px;
+		padding: 24px;
+		margin-top: 24px;
+	}
+
+	.open-positions-card .card-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 20px;
+	}
+
+	.open-positions-card .card-header h2 {
+		font-size: 18px;
+		font-weight: 700;
+		color: #E8E8E8;
+		margin: 0;
+	}
+
+	.position-count {
+		padding: 4px 12px;
+		background: rgba(0, 180, 255, 0.1);
+		border: 1px solid #00B4FF;
+		border-radius: 6px;
+		font-size: 12px;
+		font-weight: 600;
+		color: #00B4FF;
+	}
+
+	.empty-positions {
+		text-align: center;
+		padding: 60px 20px;
+		color: #8B92AB;
+	}
+
+	.empty-positions svg {
+		margin-bottom: 16px;
+		opacity: 0.5;
+	}
+
+	.empty-positions p {
+		font-size: 14px;
+		margin-bottom: 20px;
+	}
+
+	.trade-btn {
+		display: inline-block;
+		padding: 10px 24px;
+		background: #2A2F45;
+		border: 1px solid #3A3F55;
+		color: #E8E8E8;
+		border-radius: 8px;
+		text-decoration: none;
+		font-weight: 600;
+		font-size: 14px;
+		transition: all 0.2s;
+	}
+
+	.trade-btn:hover {
+		background: #3A3F55;
+		border-color: #00B4FF;
+		color: #00B4FF;
+	}
+
+	.positions-list {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+
+	.position-item {
+		background: #1A1F2E;
+		border: 1px solid #2A2F45;
+		border-radius: 10px;
+		padding: 16px;
+		transition: all 0.2s;
+	}
+
+	.position-item:hover {
+		border-color: #3b82f6;
+	}
+
+	.position-main {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+
+	.position-market {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	.position-market h3 {
+		font-size: 14px;
+		font-weight: 600;
+		color: #E8E8E8;
+		margin: 0;
+		flex: 1;
+		line-height: 1.4;
+	}
+
+	.position-type {
+		padding: 4px 10px;
+		border-radius: 6px;
+		font-size: 11px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+		flex-shrink: 0;
+	}
+
+	.position-type.yes {
+		background: rgba(0, 214, 143, 0.1);
+		color: #00D68F;
+		border: 1px solid #00D68F;
+	}
+
+	.position-type.no {
+		background: rgba(255, 107, 107, 0.1);
+		color: #FF6B6B;
+		border: 1px solid #FF6B6B;
+	}
+
+	.position-stats {
+		display: grid;
+		grid-template-columns: repeat(4, 1fr);
+		gap: 16px;
+	}
+
+	.position-stat {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.position-stat .stat-label {
+		font-size: 11px;
+		color: #6B7280;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+		font-weight: 600;
+	}
+
+	.position-stat .stat-value {
+		font-size: 14px;
+		color: #E8E8E8;
+		font-weight: 600;
+	}
+
+	.position-stat .stat-value.positive {
+		color: #00D68F;
+	}
+
+	.position-stat .stat-value.negative {
+		color: #FF6B6B;
+	}
+
+	@media (max-width: 768px) {
+		.position-stats {
+			grid-template-columns: repeat(2, 1fr);
+		}
 	}
 
 	@media (max-width: 968px) {

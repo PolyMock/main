@@ -421,7 +421,7 @@
 									{#each event.markets.sort((a: PolyMarket, b: PolyMarket) => (b.volume_24hr || b.volume || 0) - (a.volume_24hr || a.volume || 0)).slice(0, 2) as market}
 										<div class="market-preview-item">
 											<div class="market-top-row">
-												<span class="market-question-text" on:click={() => selectMarket(market, event)} role="button" tabindex="0" on:keydown={(e) => e.key === 'Enter' && selectMarket(market, event)}>
+												<span class="market-question-text" on:click={() => selectEvent(event)} role="button" tabindex="0" on:keydown={(e) => e.key === 'Enter' && selectEvent(event)}>
 													{market.question || 'Unknown Question'}
 												</span>
 												<div class="chance-badge">
@@ -431,10 +431,10 @@
 											</div>
 
 											<div class="market-bottom-row">
-												<button class="trade-btn yes-trade" on:click={() => selectMarket(market, event)}>
+												<button class="trade-btn yes-trade" on:click={() => selectEvent(event)}>
 													Yes
 												</button>
-												<button class="trade-btn no-trade" on:click={() => selectMarket(market, event)}>
+												<button class="trade-btn no-trade" on:click={() => selectEvent(event)}>
 													No
 												</button>
 											</div>
@@ -671,7 +671,8 @@
 	}
 
 	.news-item:hover {
-		background: rgba(255, 255, 255, 0.05);
+		background: rgba(0, 180, 255, 0.05);
+		border-color: #00B4FF;
 	}
 
 	.news-meta {
@@ -915,7 +916,6 @@
 	.yes-trade:hover {
 		background: rgba(0, 208, 132, 0.25);
 		border-color: #00D084;
-		transform: translateY(-1px);
 	}
 
 	.no-trade {
@@ -927,7 +927,6 @@
 	.no-trade:hover {
 		background: rgba(255, 71, 87, 0.25);
 		border-color: #FF4757;
-		transform: translateY(-1px);
 	}
 
 	.event-total-volume {

@@ -501,14 +501,13 @@
 	}
 
 	.news-item:hover {
-		background: rgba(255, 255, 255, 0.05);
-		border-color: #3A4055;
-		transform: translateX(4px);
+		background: rgba(0, 180, 255, 0.05);
+		border-color: #00B4FF;
 	}
 
 	.news-item.active {
-		background: rgba(0, 208, 132, 0.1);
-		border-color: #00D084;
+		background: rgba(0, 180, 255, 0.1);
+		border-color: #00B4FF;
 	}
 
 	.news-meta {
@@ -646,8 +645,9 @@
 		align-items: center;
 		gap: 8px;
 		padding: 12px 24px;
-		background: #00B4FF;
-		color: #ffffff;
+		background: transparent;
+		border: 1px solid #2A2F45;
+		color: #8B92AB;
 		text-decoration: none;
 		border-radius: 8px;
 		font-weight: 600;
@@ -656,9 +656,9 @@
 	}
 
 	.read-more-btn:hover {
-		background: #0088DD;
-		transform: translateY(-2px);
-		box-shadow: 0 4px 12px rgba(0, 180, 255, 0.3);
+		background: rgba(0, 180, 255, 0.05);
+		border-color: #00B4FF;
+		color: #00B4FF;
 	}
 
 	.empty-state {

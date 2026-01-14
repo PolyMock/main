@@ -8,9 +8,11 @@
 	let initializing = false;
 	let showProfileDropdown = false;
 	let showSettingsDropdown = false;
+	let showConnectDropdown = false;
 	let darkMode = false;
 	let settingsButtonElement: HTMLElement;
 	let profileButtonElement: HTMLElement;
+	let connectButtonElement: HTMLElement;
 
 	// Subscribe to wallet store
 	walletStore.subscribe(value => {
@@ -48,13 +50,26 @@
 		}
 	}
 
-	function handleLogout() {
+	async function handleLogout() {
+		// Disconnect wallet if connected
+		if (walletState.connected && walletState.adapter) {
+			try {
+				await walletState.adapter.disconnect();
+			} catch (error) {
+				console.error('Failed to disconnect wallet:', error);
+			}
+		}
+		// Logout Google auth
 		authStore.logout();
 		showProfileDropdown = false;
 	}
 
 	function toggleProfileDropdown() {
 		showProfileDropdown = !showProfileDropdown;
+	}
+
+	function toggleConnectDropdown() {
+		showConnectDropdown = !showConnectDropdown;
 	}
 
 	// Close dropdown when clicking outside
@@ -65,6 +80,9 @@
 		}
 		if (!target.closest('.settings-dropdown-container')) {
 			showSettingsDropdown = false;
+		}
+		if (!target.closest('.connect-dropdown-container')) {
+			showConnectDropdown = false;
 		}
 	}
 
@@ -132,12 +150,30 @@
 			{/if}
 		{/if}
 
-		<!-- Account Button -->
-		{#if $authStore.isAuthenticated}
+		<!-- Profile Button - Shows when connected -->
+		{#if $authStore.isAuthenticated || walletState.connected}
 			<div class="profile-dropdown-container">
-				<button class="account-btn" on:click={toggleProfileDropdown} bind:this={profileButtonElement}>
-					<img src={$authStore.user?.picture} alt="Profile" class="profile-pic" />
-					<span class="account-name">{$authStore.user?.name?.split(' ')[0]}</span>
+				<button class="profile-btn" on:click={toggleProfileDropdown} bind:this={profileButtonElement}>
+					{#if $authStore.user?.picture}
+						<img src={$authStore.user.picture} alt="Profile" class="profile-pic" />
+					{:else}
+						<div class="profile-pic-placeholder">
+							{#if walletState.publicKey}
+								{walletState.publicKey.toString().charAt(0).toUpperCase()}
+							{:else}
+								?
+							{/if}
+						</div>
+					{/if}
+					<span class="profile-name">
+						{#if $authStore.user?.name}
+							{$authStore.user.name.split(' ')[0]}
+						{:else if walletState.publicKey}
+							{walletState.publicKey.toString().slice(0, 4)}...{walletState.publicKey.toString().slice(-4)}
+						{:else}
+							Profile
+						{/if}
+					</span>
 					<svg width="12" height="12" viewBox="0 0 12 12" fill="none">
 						<path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
 					</svg>
@@ -146,10 +182,32 @@
 				{#if showProfileDropdown && profileButtonElement}
 					<div class="profile-dropdown" style="top: {profileButtonElement.getBoundingClientRect().bottom + 8}px; right: {window.innerWidth - profileButtonElement.getBoundingClientRect().right}px;">
 						<div class="dropdown-header">
-							<img src={$authStore.user?.picture} alt="Profile" class="dropdown-profile-pic" />
+							{#if $authStore.user?.picture}
+								<img src={$authStore.user.picture} alt="Profile" class="dropdown-profile-pic" />
+							{:else}
+								<div class="dropdown-profile-pic-placeholder">
+									{#if walletState.publicKey}
+										{walletState.publicKey.toString().charAt(0).toUpperCase()}
+									{:else}
+										?
+									{/if}
+								</div>
+							{/if}
 							<div class="dropdown-user-info">
-								<div class="dropdown-user-name">{$authStore.user?.name}</div>
-								<div class="dropdown-user-email">{$authStore.user?.email}</div>
+								<div class="dropdown-user-name">
+									{#if $authStore.user?.name}
+										{$authStore.user.name}
+									{:else if walletState.publicKey}
+										{walletState.publicKey.toString().slice(0, 4)}...{walletState.publicKey.toString().slice(-4)}
+									{:else}
+										Anonymous
+									{/if}
+								</div>
+								{#if $authStore.user?.email}
+									<div class="dropdown-user-email">{$authStore.user.email}</div>
+								{:else if walletState.publicKey}
+									<div class="dropdown-user-email">Wallet Connected</div>
+								{/if}
 							</div>
 						</div>
 						<div class="dropdown-divider"></div>
@@ -160,6 +218,13 @@
 							</svg>
 							Profile
 						</a>
+						<a href="/strategies" class="dropdown-item" on:click={() => showProfileDropdown = false}>
+							<svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+								<path d="M4 2H12C12.5523 2 13 2.44772 13 3V13C13 13.5523 12.5523 14 12 14H4C3.44772 14 3 13.5523 3 13V3C3 2.44772 3.44772 2 4 2Z" stroke="currentColor" stroke-width="1.5"/>
+								<path d="M6 6H10M6 9H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+							</svg>
+							My Strategies
+						</a>
 						<button class="dropdown-item" on:click={handleLogout}>
 							<svg width="16" height="16" viewBox="0 0 16 16" fill="none">
 								<path d="M6 14H3C2.44772 14 2 13.5523 2 13V3C2 2.44772 2.44772 2 3 2H6M11 11L14 8M14 8L11 5M14 8H6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -169,17 +234,37 @@
 					</div>
 				{/if}
 			</div>
-		{:else}
-			<button class="connect-account-btn" on:click={handleConnectAccount} disabled={$authStore.loading}>
-				{#if $authStore.loading}
-					Connecting...
-				{:else}
-					Log In
-				{/if}
-			</button>
 		{/if}
 
-		<WalletButton />
+		<!-- Connect Button - Shows when not connected -->
+		{#if !$authStore.isAuthenticated && !walletState.connected}
+			<div class="connect-dropdown-container">
+				<button class="connect-btn" on:click={toggleConnectDropdown} bind:this={connectButtonElement}>
+					Connect
+					<svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+						<path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+					</svg>
+				</button>
+
+				{#if showConnectDropdown && connectButtonElement}
+					<div class="connect-dropdown" style="top: {connectButtonElement.getBoundingClientRect().bottom + 8}px; right: {window.innerWidth - connectButtonElement.getBoundingClientRect().right}px;">
+						<button class="connect-option" on:click={() => { handleConnectAccount(); showConnectDropdown = false; }}>
+							<svg width="20" height="20" viewBox="0 0 18 18">
+								<path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18z"></path>
+								<path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2a4.8 4.8 0 0 1-7.18-2.54H1.83v2.07A8 8 0 0 0 8.98 17z"></path>
+								<path fill="#FBBC05" d="M4.5 10.52a4.8 4.8 0 0 1 0-3.04V5.41H1.83a8 8 0 0 0 0 7.18l2.67-2.07z"></path>
+								<path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 0 0 1.83 5.4L4.5 7.49a4.77 4.77 0 0 1 4.48-3.3z"></path>
+							</svg>
+							<div class="connect-option-text">
+								<div class="connect-option-title">Google Account</div>
+								<div class="connect-option-subtitle">Sign in with Google</div>
+							</div>
+						</button>
+						<WalletButton isDropdownMode={true} onClose={() => showConnectDropdown = false} />
+					</div>
+				{/if}
+			</div>
+		{/if}
 
 		<!-- Settings Dropdown -->
 		<div class="settings-dropdown-container">
@@ -462,6 +547,148 @@
 		text-overflow: ellipsis;
 	}
 
+	/* Connect Button Styles */
+	.connect-dropdown-container {
+		position: relative;
+	}
+
+	.connect-btn {
+		padding: 8px 16px;
+		background: #1E2139;
+		border: 1px solid #2A2F45;
+		border-radius: 8px;
+		color: #E8E8E8;
+		font-family: Inter, sans-serif;
+		font-size: 13px;
+		font-weight: 600;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		white-space: nowrap;
+	}
+
+	.connect-btn svg {
+		width: 16px;
+		height: 16px;
+		transition: transform 0.2s;
+	}
+
+	.connect-dropdown {
+		position: fixed;
+		top: auto;
+		right: auto;
+		margin-top: 8px;
+		min-width: 280px;
+		background: #151B2F;
+		border: 1px solid #2A2F45;
+		border-radius: 12px;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+		z-index: 1000;
+		animation: slideDown 0.2s ease-out;
+		overflow: hidden;
+	}
+
+	.connect-option {
+		width: 100%;
+		padding: 14px 16px;
+		background: transparent;
+		border: none;
+		cursor: pointer;
+		transition: all 200ms ease-out;
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		text-align: left;
+		border-bottom: 1px solid #2A2F45;
+	}
+
+	.connect-option:last-child {
+		border-bottom: none;
+	}
+
+	.connect-option:hover {
+		background: rgba(0, 208, 132, 0.1);
+	}
+
+	.connect-option svg {
+		flex-shrink: 0;
+	}
+
+	.connect-option-text {
+		flex: 1;
+	}
+
+	.connect-option-title {
+		font-size: 14px;
+		font-weight: 600;
+		color: #E8E8E8;
+		margin-bottom: 2px;
+	}
+
+	.connect-option-subtitle {
+		font-size: 12px;
+		color: #8B92AB;
+	}
+
+	/* Profile Button Styles */
+	.profile-btn {
+		padding: 6px 12px;
+		background: #1E2139;
+		border: 1px solid #2A2F45;
+		border-radius: 8px;
+		color: #E8E8E8;
+		font-family: Inter, sans-serif;
+		font-size: 13px;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 200ms ease-out;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		white-space: nowrap;
+	}
+
+	.profile-btn:hover {
+		background: #252A45;
+		border-color: #00D084;
+	}
+
+	.profile-name {
+		max-width: 100px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.profile-pic-placeholder {
+		width: 24px;
+		height: 24px;
+		border-radius: 50%;
+		background: linear-gradient(135deg, #00B4FF 0%, #0094D6 100%);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 12px;
+		font-weight: 700;
+		color: white;
+		flex-shrink: 0;
+	}
+
+	.dropdown-profile-pic-placeholder {
+		width: 48px;
+		height: 48px;
+		border-radius: 50%;
+		background: linear-gradient(135deg, #00B4FF 0%, #0094D6 100%);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 20px;
+		font-weight: 700;
+		color: white;
+		border: 2px solid #2A2F45;
+		flex-shrink: 0;
+	}
+
 	.profile-dropdown {
 		position: fixed;
 		top: auto;
@@ -541,12 +768,14 @@
 		font-size: 13px;
 		font-weight: 500;
 		cursor: pointer;
-		transition: all 200ms ease-out;
+		transition: background 200ms ease-out, color 200ms ease-out;
 		display: flex;
 		align-items: center;
 		gap: 10px;
 		text-align: left;
 		text-decoration: none;
+		margin: 0;
+		box-sizing: border-box;
 	}
 
 	.dropdown-item:hover {

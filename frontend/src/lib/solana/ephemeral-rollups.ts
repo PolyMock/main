@@ -6,7 +6,6 @@ import {
 } from '@solana/web3.js';
 import {
 	createDelegateInstruction,
-	createUndelegateInstruction,
 } from '@magicblock-labs/ephemeral-rollups-sdk';
 import { PUBLIC_SOLANA_PROGRAM_ID } from '$env/static/public';
 
@@ -60,8 +59,7 @@ export class EphemeralRollupsService {
 	 */
 	async delegateAccount(
 		wallet: any,
-		accountPDA: PublicKey,
-		commitmentLevel: 'processed' | 'confirmed' | 'finalized' = 'finalized'
+		accountPDA: PublicKey
 	): Promise<string> {
 		try {
 			if (!wallet || !wallet.publicKey) {
@@ -75,7 +73,6 @@ export class EphemeralRollupsService {
 				payer,
 				delegatedAccount: accountPDA,
 				ownerProgram: new PublicKey(PUBLIC_SOLANA_PROGRAM_ID),
-				commitmentLevel,
 			});
 
 			// Create transaction
@@ -109,50 +106,13 @@ export class EphemeralRollupsService {
 	 * Undelegate an account from the ephemeral rollup
 	 * @param wallet - The wallet adapter
 	 * @param accountPDA - The PDA to undelegate
+	 * @deprecated createUndelegateInstruction is not available in the SDK
 	 */
 	async undelegateAccount(
 		wallet: any,
 		accountPDA: PublicKey
 	): Promise<string> {
-		try {
-			if (!wallet || !wallet.publicKey) {
-				throw new Error('Wallet not connected');
-			}
-
-			const payer = wallet.publicKey;
-
-			// Create the undelegation instruction
-			const undelegateIx = createUndelegateInstruction({
-				payer,
-				delegatedAccount: accountPDA,
-				ownerProgram: new PublicKey(PUBLIC_SOLANA_PROGRAM_ID),
-			});
-
-			// Create transaction
-			const transaction = new Transaction().add(undelegateIx);
-
-			// Get latest blockhash
-			const { blockhash, lastValidBlockHeight } = await this.mainConnection.getLatestBlockhash();
-			transaction.recentBlockhash = blockhash;
-			transaction.feePayer = payer;
-
-			// Sign and send transaction
-			const signedTx = await wallet.signTransaction(transaction);
-			const signature = await this.mainConnection.sendRawTransaction(signedTx.serialize());
-
-			// Confirm transaction
-			await this.mainConnection.confirmTransaction({
-				signature,
-				blockhash,
-				lastValidBlockHeight,
-			});
-
-			console.log('Account undelegated from ER:', signature);
-			return signature;
-		} catch (error) {
-			console.error('Error undelegating account:', error);
-			throw error;
-		}
+		throw new Error('Undelegate functionality is not available in the current SDK version');
 	}
 
 	/**

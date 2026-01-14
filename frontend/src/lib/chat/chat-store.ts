@@ -75,7 +75,7 @@ function createChatStore() {
 			const newMessage: ChatMessage = {
 				id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
 				marketId,
-				userId: auth.user.sub,
+				userId: auth.user.id,
 				userName: auth.user.name,
 				userPicture: auth.user.picture,
 				message: message.trim(),
@@ -114,7 +114,7 @@ function createChatStore() {
 				const marketMessages = newMessages.get(marketId) || [];
 
 				const updatedMessages = marketMessages.map(msg => {
-					if (msg.id === messageId && msg.userId === auth.user!.sub) {
+					if (msg.id === messageId && msg.userId === auth.user!.id) {
 						return {
 							...msg,
 							message: newContent.trim(),
@@ -149,7 +149,7 @@ function createChatStore() {
 				const marketMessages = newMessages.get(marketId) || [];
 
 				const updatedMessages = marketMessages.filter(
-					msg => !(msg.id === messageId && msg.userId === auth.user!.sub)
+					msg => !(msg.id === messageId && msg.userId === auth.user!.id)
 				);
 
 				// Update storage

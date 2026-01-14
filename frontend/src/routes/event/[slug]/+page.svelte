@@ -783,7 +783,7 @@
 
 	.back-button-primary:hover {
 		background: #00B570;
-		transform: scale(1.02);
+		transform: none;
 	}
 
 	.loading-state,
@@ -1007,9 +1007,10 @@
 	}
 
 	.yes-btn:hover {
-		background: rgba(0, 208, 132, 0.25);
-		border-color: #00D084;
-		transform: translateY(-1px);
+		background: rgba(0, 180, 255, 0.05);
+		border-color: #00B4FF;
+		color: #00B4FF;
+		transform: none;
 	}
 
 	.no-btn {
@@ -1019,9 +1020,10 @@
 	}
 
 	.no-btn:hover {
-		background: rgba(255, 71, 87, 0.25);
-		border-color: #FF4757;
-		transform: translateY(-1px);
+		background: rgba(0, 180, 255, 0.05);
+		border-color: #00B4FF;
+		color: #00B4FF;
+		transform: none;
 	}
 
 	.resolved-toggle-container {
@@ -1158,6 +1160,12 @@
 		border-color: rgba(0, 208, 132, 0.3);
 	}
 
+	.yes-outcome:hover:not(.active) {
+		background: rgba(0, 208, 132, 0.25);
+		border-color: #00D084;
+		transform: none;
+	}
+
 	.yes-outcome.active {
 		background: #00D084;
 		color: #000;
@@ -1165,14 +1173,21 @@
 	}
 
 	.no-outcome {
-		background: rgba(255, 255, 255, 0.05);
-		color: #E8E8E8;
-		border-color: #2A2F45;
+		background: rgba(255, 71, 87, 0.1);
+		color: #FF4757;
+		border-color: rgba(255, 71, 87, 0.3);
+	}
+
+	.no-outcome:hover:not(.active) {
+		background: rgba(255, 71, 87, 0.25);
+		border-color: #FF4757;
+		transform: none;
 	}
 
 	.no-outcome.active {
-		background: #2A2F45;
-		border-color: #3A4055;
+		background: #FF4757;
+		color: #000;
+		border-color: #FF4757;
 	}
 
 	.amount-section {
@@ -1264,14 +1279,15 @@
 
 	.quick-btn:hover {
 		background: #2A2F45;
-		border-color: #00D084;
+		border-color: #00B4FF;
+		transform: none;
 	}
 
 	.action-button {
 		width: 100%;
 		padding: 16px;
-		background: #2A2F45;
-		border: none;
+		background: transparent;
+		border: 1px solid #2A2F45;
 		color: #666;
 		font-family: Inter, sans-serif;
 		font-size: 16px;
@@ -1283,14 +1299,17 @@
 	}
 
 	.action-button.enabled {
-		background: #00B4FF;
-		color: #ffffff;
+		background: transparent;
+		border: 1px solid #00B4FF;
+		color: #00B4FF;
 		cursor: pointer;
 	}
 
 	.action-button.enabled:hover {
-		background: #0094D6;
-		transform: scale(1.02);
+		background: transparent;
+		border-color: #00B4FF;
+		color: #00B4FF;
+		transform: none;
 	}
 
 	.action-button:disabled {
@@ -1517,7 +1536,6 @@
 
 	.confirm-btn:hover:not(:disabled) {
 		background: #0094D6;
-		transform: translateY(-1px);
 	}
 
 	.confirm-btn:disabled {

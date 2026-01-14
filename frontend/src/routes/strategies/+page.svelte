@@ -110,17 +110,33 @@
 			<div class="loading">Loading...</div>
 		{:else if !user}
 			<div class="login-prompt">
-				<h2>Login to Save and View Your Strategies</h2>
-				<p>Sign in with Google to save your backtest results and access them anytime.</p>
-				<button on:click={handleLogin} class="btn-login">
-					<svg width="18" height="18" viewBox="0 0 18 18">
-						<path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18z"></path>
-						<path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2a4.8 4.8 0 0 1-7.18-2.54H1.83v2.07A8 8 0 0 0 8.98 17z"></path>
-						<path fill="#FBBC05" d="M4.5 10.52a4.8 4.8 0 0 1 0-3.04V5.41H1.83a8 8 0 0 0 0 7.18l2.67-2.07z"></path>
-						<path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 0 0 1.83 5.4L4.5 7.49a4.77 4.77 0 0 1 4.48-3.3z"></path>
-					</svg>
-					Sign in with Google
-				</button>
+				<h2>Connect to Save and View Your Strategies</h2>
+				<p>Connect with your Google account or Solana wallet to save your backtest results and access them anytime.</p>
+				<div class="connect-options">
+					<button on:click={handleLogin} class="btn-connect">
+						<svg width="20" height="20" viewBox="0 0 18 18">
+							<path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18z"></path>
+							<path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2a4.8 4.8 0 0 1-7.18-2.54H1.83v2.07A8 8 0 0 0 8.98 17z"></path>
+							<path fill="#FBBC05" d="M4.5 10.52a4.8 4.8 0 0 1 0-3.04V5.41H1.83a8 8 0 0 0 0 7.18l2.67-2.07z"></path>
+							<path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 0 0 1.83 5.4L4.5 7.49a4.77 4.77 0 0 1 4.48-3.3z"></path>
+						</svg>
+						<div class="connect-text">
+							<div class="connect-title">Google Account</div>
+							<div class="connect-subtitle">Sign in with Google</div>
+						</div>
+					</button>
+					<a href="/" class="btn-connect">
+						<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+							<rect x="2" y="5" width="16" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/>
+							<path d="M14 10h1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+							<path d="M2 8h16" stroke="currentColor" stroke-width="1.5"/>
+						</svg>
+						<div class="connect-text">
+							<div class="connect-title">Wallet</div>
+							<div class="connect-subtitle">Connect with Solana wallet</div>
+						</div>
+					</a>
+				</div>
 			</div>
 		{:else if strategies.length === 0}
 			<div class="empty-state">
@@ -289,24 +305,52 @@
 		margin-bottom: 32px;
 	}
 
-	.btn-login {
-		display: inline-flex;
-		align-items: center;
-		gap: 12px;
-		padding: 14px 32px;
-		background: white;
-		color: #1f2937;
-		border: none;
-		border-radius: 8px;
-		font-size: 16px;
-		font-weight: 600;
-		cursor: pointer;
-		transition: all 0.2s;
+	.connect-options {
+		display: flex;
+		gap: 16px;
+		justify-content: center;
+		flex-wrap: wrap;
 	}
 
-	.btn-login:hover {
-		transform: translateY(-2px);
-		box-shadow: 0 4px 12px rgba(255, 255, 255, 0.2);
+	.btn-connect {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 16px 24px;
+		background: #1E2139;
+		border: 1px solid #2A2F45;
+		border-radius: 12px;
+		cursor: pointer;
+		transition: all 0.2s;
+		text-decoration: none;
+		color: inherit;
+		min-width: 240px;
+	}
+
+	.btn-connect:hover {
+		border-color: #3b82f6;
+		background: #252A45;
+	}
+
+	.btn-connect svg {
+		flex-shrink: 0;
+	}
+
+	.connect-text {
+		text-align: left;
+		flex: 1;
+	}
+
+	.connect-title {
+		font-size: 15px;
+		font-weight: 600;
+		color: #E8E8E8;
+		margin-bottom: 2px;
+	}
+
+	.connect-subtitle {
+		font-size: 13px;
+		color: #8B92AB;
 	}
 
 	.btn-primary {

@@ -142,7 +142,7 @@ export class PolymarketService {
 			}
 
 			const [userAccountPDA] = this.getUserAccountPDA(userPublicKey);
-			const account = await this.program.account.userAccount.fetch(userAccountPDA);
+			const account = await (this.program.account as any).userAccount.fetch(userAccountPDA);
 			return account as UserAccount;
 		} catch (error) {
 			console.error('Error fetching user account:', error);
@@ -168,7 +168,7 @@ export class PolymarketService {
 			const [configPDA] = this.getConfigPDA();
 
 			// Get config to find treasury
-			const config = await this.program.account.programConfig.fetch(configPDA);
+			const config = await (this.program.account as any).programConfig.fetch(configPDA);
 
 			const entryFeeLamports = entryFee * LAMPORTS_PER_SOL;
 
