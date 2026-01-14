@@ -4,8 +4,8 @@
 	"version": "0.0.1",
 	"type": "module",
 	"scripts": {
-		"dev": "npm run build && wrangler pages dev .svelte-kit/cloudflare --compatibility-date=2024-01-01 --d1 DB=polymock-db --port=8788 --live-reload",
-		"dev:vite": "vite dev",
+		"dev": "vite dev",
+		"dev:wrangler": "npm run build && wrangler pages dev .svelte-kit/cloudflare --compatibility-date=2024-01-01 --d1 DB=polymock-db --port=8788 --live-reload",
 		"dev:watch": "vite build --watch",
 		"build": "vite build",
 		"preview": "vite preview",

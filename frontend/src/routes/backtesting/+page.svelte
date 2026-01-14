@@ -426,6 +426,7 @@
 	let saveError = '';
 	let currentUser: any = null;
 	let isAuthenticating = false;
+	let showSuccessNotification = false;
 
 	// Wizard state
 	let currentStep = 0;
@@ -937,13 +938,15 @@
 			return;
 		}
 
-		// If wallet is connected but no session, authenticate first
-		if (!currentUser && $walletStore.connected) {
-			console.log('Wallet connected but no session - authenticating');
+		// Always re-authenticate with wallet to ensure fresh session
+		// This handles cases where the session cookie may have expired
+		if ($walletStore.connected) {
+			console.log('Re-authenticating wallet to ensure fresh session');
 			await authenticateWallet();
 			return;
 		}
 
+		// If user is logged in with Google (has currentUser but no wallet)
 		console.log('Opening save modal');
 		showSaveModal = true;
 		strategyName = '';
@@ -1027,10 +1030,15 @@
 				throw new Error(data.error || 'Failed to save strategy');
 			}
 
-			// Success - redirect to strategies page
+			// Success - show notification
 			showSaveModal = false;
-			alert('Strategy saved successfully!');
-			window.location.href = '/strategies';
+			showSuccessNotification = true;
+
+			// Auto-hide notification and redirect after 3 seconds
+			setTimeout(() => {
+				showSuccessNotification = false;
+				window.location.href = '/strategies';
+			}, 3000);
 		} catch (error: any) {
 			saveError = error.message || 'Failed to save strategy';
 		} finally {
@@ -2965,6 +2973,27 @@
 		</div>
 	{/if}
 </div>
+
+<!-- Success Notification -->
+{#if showSuccessNotification}
+	<div class="success-notification">
+		<div class="success-content">
+			<svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+				<circle cx="12" cy="12" r="10" fill="#10b981"/>
+				<path d="M8 12l3 3 5-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+			</svg>
+			<div>
+				<h3>Strategy Saved Successfully!</h3>
+				<p>Your backtest strategy has been saved. Redirecting to strategies page...</p>
+			</div>
+			<button on:click={() => showSuccessNotification = false} class="close-notification">
+				<svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+					<path d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"/>
+				</svg>
+			</button>
+		</div>
+	</div>
+{/if}
 
 <!-- Authentication Required Modal -->
 {#if showAuthModal}
@@ -6867,5 +6896,71 @@
 		padding: 10px 8px;
 		font-size: 12px;
 	}
+}
+
+/* Success Notification */
+.success-notification {
+	position: fixed;
+	top: 80px;
+	right: 20px;
+	z-index: 10000;
+	animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+	from {
+		transform: translateX(400px);
+		opacity: 0;
+	}
+	to {
+		transform: translateX(0);
+		opacity: 1;
+	}
+}
+
+.success-content {
+	background: #141824;
+	border: 2px solid #10b981;
+	border-radius: 12px;
+	padding: 20px;
+	display: flex;
+	align-items: flex-start;
+	gap: 16px;
+	min-width: 400px;
+	max-width: 500px;
+	box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+.success-content svg:first-child {
+	flex-shrink: 0;
+	margin-top: 2px;
+}
+
+.success-content h3 {
+	margin: 0 0 4px 0;
+	color: #10b981;
+	font-size: 16px;
+	font-weight: 700;
+}
+
+.success-content p {
+	margin: 0;
+	color: #8b92ab;
+	font-size: 14px;
+}
+
+.close-notification {
+	background: transparent;
+	border: none;
+	color: #6b7280;
+	cursor: pointer;
+	padding: 4px;
+	margin-left: auto;
+	flex-shrink: 0;
+	transition: color 0.2s;
+}
+
+.close-notification:hover {
+	color: white;
 }
 </style>
