@@ -4,6 +4,7 @@
 	import { HermesClient } from '@pythnetwork/hermes-client';
 	import { polymarketClient, type PolyMarket, type PolyEvent } from '$lib/polymarket';
 	import NewsTicker from '$lib/components/NewsTicker.svelte';
+	import polydataLogo from '$lib/assets/polydata.svg';
 
 	const hermesClient = new HermesClient('https://hermes.pyth.network', {});
 
@@ -287,60 +288,69 @@
 </script>
 
 <div class="polyMock">
+	<!-- 1. Ticker bar with news (top) -->
+	<div class="ticker-bar">
+		<NewsTicker />
+	</div>
+
+	<!-- 2. Prices and Polydata bar (middle) -->
 	<div class="command-bar">
+		<!-- Polydata Link - Extreme Left -->
+		<a href="https://www.polydata.cc/" target="_blank" rel="noopener noreferrer" class="polydata-link">
+			<img src={polydataLogo} alt="Polydata" class="polydata-logo" />
+			<span class="polydata-text">Access to Polymarket Analytics</span>
+		</a>
+
+		<div class="pyth-status">
+			<span class="status-label">BTC/USD</span>
+			<span class="status-value">${prices.BTC.price.toFixed(0)}</span>
+			<span class={prices.BTC.change >= 0 ? 'status-change-up' : 'status-change-down'}>
+				{prices.BTC.change >= 0 ? '▲' : '▼'} {Math.abs(prices.BTC.change).toFixed(2)}%
+			</span>
+			<span class="status-confidence" title="Confidence Interval">±{prices.BTC.confidence.toFixed(2)}</span>
+		</div>
+		<div class="pyth-status">
+			<span class="status-label">ETH/USD</span>
+			<span class="status-value">${prices.ETH.price.toFixed(0)}</span>
+			<span class={prices.ETH.change >= 0 ? 'status-change-up' : 'status-change-down'}>
+				{prices.ETH.change >= 0 ? '▲' : '▼'} {Math.abs(prices.ETH.change).toFixed(2)}%
+			</span>
+			<span class="status-confidence" title="Confidence Interval">±{prices.ETH.confidence.toFixed(2)}</span>
+		</div>
+		<div class="pyth-status">
+			<span class="status-label">BNB/USD</span>
+			<span class="status-value">${prices.BNB.price.toFixed(0)}</span>
+			<span class={prices.BNB.change >= 0 ? 'status-change-up' : 'status-change-down'}>
+				{prices.BNB.change >= 0 ? '▲' : '▼'} {Math.abs(prices.BNB.change).toFixed(2)}%
+			</span>
+			<span class="status-confidence" title="Confidence Interval">±{prices.BNB.confidence.toFixed(2)}</span>
+		</div>
+		<div class="pyth-status">
+			<span class="status-label">SOL/USD</span>
+			<span class="status-value">${prices.SOL.price.toFixed(2)}</span>
+			<span class={prices.SOL.change >= 0 ? 'status-change-up' : 'status-change-down'}>
+				{prices.SOL.change >= 0 ? '▲' : '▼'} {Math.abs(prices.SOL.change).toFixed(2)}%
+			</span>
+			<span class="status-confidence" title="Confidence Interval">±{prices.SOL.confidence.toFixed(4)}</span>
+		</div>
+		<div class="pyth-status">
+			<span class="status-label">XRP/USD</span>
+			<span class="status-value">${prices.XRP.price.toFixed(2)}</span>
+			<span class={prices.XRP.change >= 0 ? 'status-change-up' : 'status-change-down'}>
+				{prices.XRP.change >= 0 ? '▲' : '▼'} {Math.abs(prices.XRP.change).toFixed(2)}%
+			</span>
+			<span class="status-confidence" title="Confidence Interval">±{prices.XRP.confidence.toFixed(4)}</span>
+		</div>
+	</div>
+
+	<!-- 3. Search bar (bottom) -->
+	<div class="search-bar">
 		<input
 			type="text"
 			bind:value={searchQuery}
 			placeholder="Search markets..."
 			class="search-input"
 		/>
-
-		<div class="command-bar-right">
-			<div class="pyth-status">
-				<span class="status-label">BTC/USD</span>
-				<span class="status-value">${prices.BTC.price.toFixed(0)}</span>
-				<span class={prices.BTC.change >= 0 ? 'status-change-up' : 'status-change-down'}>
-					{prices.BTC.change >= 0 ? '▲' : '▼'} {Math.abs(prices.BTC.change).toFixed(2)}%
-				</span>
-				<span class="status-confidence" title="Confidence Interval">±{prices.BTC.confidence.toFixed(2)}</span>
-			</div>
-			<div class="pyth-status">
-				<span class="status-label">ETH/USD</span>
-				<span class="status-value">${prices.ETH.price.toFixed(0)}</span>
-				<span class={prices.ETH.change >= 0 ? 'status-change-up' : 'status-change-down'}>
-					{prices.ETH.change >= 0 ? '▲' : '▼'} {Math.abs(prices.ETH.change).toFixed(2)}%
-				</span>
-				<span class="status-confidence" title="Confidence Interval">±{prices.ETH.confidence.toFixed(2)}</span>
-			</div>
-			<div class="pyth-status">
-				<span class="status-label">BNB/USD</span>
-				<span class="status-value">${prices.BNB.price.toFixed(0)}</span>
-				<span class={prices.BNB.change >= 0 ? 'status-change-up' : 'status-change-down'}>
-					{prices.BNB.change >= 0 ? '▲' : '▼'} {Math.abs(prices.BNB.change).toFixed(2)}%
-				</span>
-				<span class="status-confidence" title="Confidence Interval">±{prices.BNB.confidence.toFixed(2)}</span>
-			</div>
-			<div class="pyth-status">
-				<span class="status-label">SOL/USD</span>
-				<span class="status-value">${prices.SOL.price.toFixed(2)}</span>
-				<span class={prices.SOL.change >= 0 ? 'status-change-up' : 'status-change-down'}>
-					{prices.SOL.change >= 0 ? '▲' : '▼'} {Math.abs(prices.SOL.change).toFixed(2)}%
-				</span>
-				<span class="status-confidence" title="Confidence Interval">±{prices.SOL.confidence.toFixed(4)}</span>
-			</div>
-			<div class="pyth-status">
-				<span class="status-label">XRP/USD</span>
-				<span class="status-value">${prices.XRP.price.toFixed(2)}</span>
-				<span class={prices.XRP.change >= 0 ? 'status-change-up' : 'status-change-down'}>
-					{prices.XRP.change >= 0 ? '▲' : '▼'} {Math.abs(prices.XRP.change).toFixed(2)}%
-				</span>
-				<span class="status-confidence" title="Confidence Interval">±{prices.XRP.confidence.toFixed(4)}</span>
-			</div>
-		</div>
-	</div>
-
-	<div class="ticker-bar">
-		<NewsTicker />
 	</div>
 
 	<div class="main-grid">
@@ -489,27 +499,33 @@
 		flex-direction: column;
 	}
 
+	.search-bar {
+		background: #151B2F;
+		padding: 12px 24px;
+		border-bottom: 1px solid #2A2F45;
+	}
+
+	.search-input {
+		width: 100%;
+		background: #0A0E27;
+		border: 1px solid #2A2F45;
+		color: #E8E8E8;
+		padding: 12px 16px;
+		font-family: Inter, sans-serif;
+		font-size: 15px;
+		border-radius: 8px;
+		transition: border-color 200ms ease-out;
+		box-sizing: border-box;
+	}
+
 	.command-bar {
 		background: #151B2F;
 		padding: 12px 24px;
 		display: flex;
 		align-items: center;
-		gap: 16px;
+		gap: 10px;
 		border-bottom: 1px solid #2A2F45;
-		flex-wrap: wrap;
-	}
-
-	.search-input {
-		flex: 1;
-		min-width: 200px;
-		background: #0A0E27;
-		border: 1px solid #2A2F45;
-		color: #E8E8E8;
-		padding: 10px 14px;
-		font-family: Inter, sans-serif;
-		font-size: 14px;
-		border-radius: 8px;
-		transition: border-color 200ms ease-out;
+		flex-wrap: nowrap;
 	}
 
 	.search-input:focus {
@@ -571,6 +587,39 @@
 		gap: 10px;
 		margin-left: auto;
 		flex-shrink: 0;
+	}
+
+	/* Polydata Link Styles - Match pyth-status styling */
+	.polydata-link {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 6px 10px;
+		background: #1E2139;
+		border: 1px solid #2A2F45;
+		border-radius: 6px;
+		text-decoration: none;
+		transition: border-color 200ms ease-out;
+		flex-shrink: 0;
+	}
+
+	.polydata-link:hover {
+		border-color: #3b82f6;
+	}
+
+	.polydata-logo {
+		width: 16px;
+		height: 16px;
+		background: #000;
+		padding: 2px;
+		border-radius: 2px;
+	}
+
+	.polydata-text {
+		font-size: 11px;
+		color: #A0A0A0;
+		white-space: nowrap;
+		font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
 	}
 
 	.ticker-bar {
