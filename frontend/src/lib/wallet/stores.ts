@@ -106,32 +106,45 @@ export async function initializeUserAccountIfNeeded(wallet: any) {
 			return;
 		}
 
+		console.log('Starting user account initialization...');
 		setWalletLoading(true);
 
 		// Initialize the Solana program with MagicBlock RPC
 		// MagicBlock RPC automatically handles ER routing - no delegation needed!
+		console.log('Initializing Solana program...');
 		await polymarketService.initializeProgram(wallet);
+		console.log('Program initialized successfully');
 
 		const userPublicKey = new PublicKey(wallet.publicKey.toString());
 
 		// Check if user account exists
+		console.log('Checking user account existence...');
 		const exists = await polymarketService.checkUserAccount(userPublicKey);
+		console.log('User account exists:', exists);
 
 		if (!exists) {
 			console.log('User account does not exist, initializing...');
 			// Initialize with 0.1 SOL entry fee
 			await polymarketService.initializeUserAccount(wallet, 0.1);
+			console.log('User account initialized');
 		}
 
 		// Fetch user account data
+		console.log('Fetching user account data...');
 		const userAccount = await polymarketService.getUserAccount(userPublicKey);
 		if (userAccount) {
 			const balance = userAccount.usdcBalance.toNumber() / 1_000_000; // Convert from 6 decimals
+			console.log('User balance:', balance, 'USDC');
 			setUserBalance(balance);
 			setUserAccountInitialized(true);
 		}
-	} catch (error) {
+	} catch (error: any) {
 		console.error('Error initializing user account:', error);
+		console.error('Error details:', {
+			message: error?.message,
+			code: error?.code,
+			stack: error?.stack
+		});
 	} finally {
 		setWalletLoading(false);
 	}

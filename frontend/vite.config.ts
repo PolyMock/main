@@ -11,9 +11,18 @@ export default defineConfig({
 				process: true,
 				Buffer: true,
 			},
+			protocolImports: true,
+			overrides: {
+				process: 'process/browser'
+			}
 		}),
 	],
 	define: {
 		'process.env': {},
 	},
+	resolve: {
+		alias: {
+			process: 'process/browser'
+		}
+	}
 });

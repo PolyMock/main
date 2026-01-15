@@ -1,7 +1,6 @@
 /**
  * Database helper functions for Cloudflare D1
  */
-
 // Cloudflare D1 Database type
 export interface D1Database {
 	prepare(query: string): D1PreparedStatement;

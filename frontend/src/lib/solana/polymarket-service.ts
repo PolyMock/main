@@ -66,17 +66,32 @@ export class PolymarketService {
 	 */
 	async initializeProgram(wallet: any): Promise<void> {
 		try {
+			if (!wallet) {
+				throw new Error('Wallet is required for program initialization');
+			}
+
+			if (!wallet.publicKey) {
+				throw new Error('Wallet public key is not available');
+			}
+
+			console.log('Creating AnchorProvider with wallet:', wallet.publicKey.toString());
+
 			const provider = new AnchorProvider(
 				this.connection,
 				wallet,
-				{ commitment: 'confirmed' }
+				{ commitment: 'confirmed', preflightCommitment: 'confirmed' }
 			);
 
 			// Use the local IDL file
 			this.program = new Program(IDL as Idl, provider);
-			console.log('Program initialized with MagicBlock RPC');
-		} catch (error) {
+			console.log('Program initialized with MagicBlock RPC successfully');
+		} catch (error: any) {
 			console.error('Failed to initialize program:', error);
+			console.error('Error details:', {
+				message: error?.message,
+				wallet: wallet ? 'present' : 'missing',
+				publicKey: wallet?.publicKey ? wallet.publicKey.toString() : 'missing'
+			});
 			throw error;
 		}
 	}

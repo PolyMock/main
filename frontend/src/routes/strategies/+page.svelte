@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { walletStore } from '$lib/wallet/stores';
+	import { authStore } from '$lib/auth/auth-store';
 
 	interface User {
 		id: number;
@@ -27,26 +29,59 @@
 	let strategies: Strategy[] = [];
 	let loading = true;
 	let error = '';
+	let walletState = $walletStore;
+	let authState = $authStore;
+	let walletButtonRef: any;
+
+	// Subscribe to wallet and auth state changes
+	walletStore.subscribe(value => {
+		walletState = value;
+		// Reload strategies when wallet connects
+		if (value.connected && !user) {
+			loadStrategies();
+		}
+	});
+
+	authStore.subscribe(value => {
+		authState = value;
+		// Reload strategies when user logs in
+		if (value.isAuthenticated && value.user && !user) {
+			loadStrategies();
+		}
+	});
+
+	function handleWalletConnect() {
+		// Simply navigate to home page where wallet connection is in navbar
+		window.location.href = '/';
+	}
 
 	onMount(async () => {
+		await loadStrategies();
+	});
+
+	async function loadStrategies() {
+		loading = true;
 		try {
-			// Check if user is logged in
+			// Check if user is logged in with Google
 			const userRes = await fetch('/api/auth/user');
 			const userData = await userRes.json();
 			user = userData.user;
 
-			if (user) {
+			// Check if wallet is connected OR Google is authenticated
+			const isAuthenticated = user || walletState.connected;
+
+			if (isAuthenticated) {
 				// Fetch user's strategies
 				const strategiesRes = await fetch('/api/strategies');
 				const strategiesData = await strategiesRes.json();
-				strategies = strategiesData.strategies;
+				strategies = strategiesData.strategies || [];
 			}
 		} catch (err: any) {
 			error = err.message;
 		} finally {
 			loading = false;
 		}
-	});
+	}
 
 	async function handleLogin() {
 		window.location.href = '/api/auth/login';
@@ -93,22 +128,29 @@
 	<div class="container">
 		<div class="header">
 			<h1>My Backtest Strategies</h1>
-			{#if user}
+			{#if user || walletState.connected}
 				<div class="user-section">
-					{#if user.picture}
-						<img src={user.picture} alt={user.name} class="avatar" />
-					{:else}
-						<div class="avatar-placeholder">{user.name.charAt(0).toUpperCase()}</div>
+					{#if user}
+						{#if user.picture}
+							<img src={user.picture} alt={user.name} class="avatar" />
+						{:else}
+							<div class="avatar-placeholder">{user.name.charAt(0).toUpperCase()}</div>
+						{/if}
+						<span>{user.name}</span>
+						<button on:click={handleLogout} class="btn-logout">Logout</button>
+					{:else if walletState.connected && walletState.publicKey}
+						<div class="avatar-placeholder">
+							{walletState.publicKey.toString().charAt(0).toUpperCase()}
+						</div>
+						<span>{walletState.publicKey.toString().slice(0, 4)}...{walletState.publicKey.toString().slice(-4)}</span>
 					{/if}
-					<span>{user.name}</span>
-					<button on:click={handleLogout} class="btn-logout">Logout</button>
 				</div>
 			{/if}
 		</div>
 
 		{#if loading}
 			<div class="loading">Loading...</div>
-		{:else if !user}
+		{:else if !user && !walletState.connected}
 			<div class="login-prompt">
 				<h2>Connect to Save and View Your Strategies</h2>
 				<p>Connect with your Google account or Solana wallet to save your backtest results and access them anytime.</p>
@@ -125,7 +167,7 @@
 							<div class="connect-subtitle">Sign in with Google</div>
 						</div>
 					</button>
-					<a href="/" class="btn-connect">
+					<button on:click={handleWalletConnect} class="btn-connect">
 						<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
 							<rect x="2" y="5" width="16" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/>
 							<path d="M14 10h1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -135,7 +177,7 @@
 							<div class="connect-title">Wallet</div>
 							<div class="connect-subtitle">Connect with Solana wallet</div>
 						</div>
-					</a>
+					</button>
 				</div>
 			</div>
 		{:else if strategies.length === 0}
@@ -385,7 +427,6 @@
 
 	.strategy-card:hover {
 		border-color: #3b82f6;
-		transform: translateY(-4px);
 	}
 
 	.card-header {

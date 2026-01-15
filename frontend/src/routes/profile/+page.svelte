@@ -121,9 +121,12 @@
 				if (isClosed || isFullySold || isPartiallySold) {
 					if (pos.averageSellPrice && pos.averageSellPrice.toNumber() > 0) {
 						closedPrice = pos.averageSellPrice.toNumber() / 1_000_000;
-						console.log(`Position ${pos.positionId.toString()}: averageSellPrice = ${closedPrice}`);
 					} else {
-						console.warn(`Position ${pos.positionId.toString()} is closed but averageSellPrice is 0 or missing`);
+						// Position is closed but has no valid averageSellPrice
+						// This happens with old positions closed via close_position instruction
+						// Skip this position entirely to avoid incorrect PnL calculations
+						console.warn(`Skipping position ${pos.positionId.toString()} - closed but missing averageSellPrice`);
+						return null;
 					}
 				}
 
@@ -147,14 +150,14 @@
 							currentPrice = fetchedPrice;
 						}
 					} else {
-						// For closed/sold positions, MUST use closedPrice if available
+						// For closed/sold positions, MUST use closedPrice
+						// If closedPrice is not available, the position was already filtered out above
 						if (closedPrice !== undefined && closedPrice > 0) {
 							currentPrice = closedPrice;
 						} else {
-							// Fallback: if no closedPrice, this is likely an old position closed via close_position
-							// In this case, we can't determine the actual close price, so skip it from PnL
-							console.warn(`Skipping position ${pos.positionId.toString()} from PnL - no valid close price`);
-							currentPrice = pricePerShare; // Use entry price as fallback
+							// This shouldn't happen since we filter these positions out above
+							// But as a safeguard, use entry price
+							currentPrice = pricePerShare;
 						}
 					}
 				} catch (error) {
@@ -197,8 +200,6 @@
 				const currentValue = shares * priceForPnL;
 				const pnl = currentValue - amountUsdc;
 
-				console.log(`Position ${pos.positionId.toString()}: shares=${shares}, priceForPnL=${priceForPnL}, amountUsdc=${amountUsdc}, pnl=${pnl}`);
-
 				return {
 					pnl,
 					currentValue,
@@ -212,7 +213,7 @@
 				};
 			});
 
-			const processedPositions = await Promise.all(positionsPromises);
+			const processedPositions = (await Promise.all(positionsPromises)).filter(pos => pos !== null);
 
 			// Filter open positions
 			openPositions = processedPositions.filter(pos => pos.isOpen);
