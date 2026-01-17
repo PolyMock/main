@@ -136,7 +136,7 @@
 			</div>
 
 			<!-- P&L Distribution -->
-			{#if strategy.pnlDistribution}
+			{#if strategy.pnlDistribution && Object.keys(strategy.pnlDistribution).length > 0}
 				<PnLDistributionChart distribution={strategy.pnlDistribution} />
 			{/if}
 
@@ -183,6 +183,7 @@
 			</div>
 
 			<!-- Trades Table -->
+			{#if strategy.tradesData && strategy.tradesData.length > 0}
 			<div class="section">
 				<h2>All Trades ({strategy.tradesData.length})</h2>
 				<div class="table-container">
@@ -220,6 +221,7 @@
 					</table>
 				</div>
 			</div>
+			{/if}
 
 			<div class="footer">
 				<p>Strategy saved on {formatDate(strategy.createdAt)}</p>

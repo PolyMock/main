@@ -987,13 +987,15 @@
 
 				// Position sizing
 				positionSizingType: config.positionSizing.type,
-				positionSizingValue: config.positionSizing.value,
-				maxPositionSize: config.positionSizing.maxPositionSize,
+				positionSizingValue: config.positionSizing.type === 'PERCENTAGE'
+					? config.positionSizing.percentageOfBankroll
+					: config.positionSizing.fixedAmount,
+				maxPositionSize: config.positionSizing.maxExposurePercent,
 
 				// Exit rules
-				stopLoss: config.stopLoss,
-				takeProfit: config.takeProfit,
-				timeBasedExit: config.timeBasedExit,
+				stopLoss: config.exitRules.stopLoss,
+				takeProfit: config.exitRules.takeProfit,
+				timeBasedExit: config.exitRules.maxHoldTime,
 
 				// Backtest results
 				backtestResult: {
@@ -1013,8 +1015,8 @@
 					maxDrawdown: backtestResult.metrics.maxDrawdown,
 					avgTradeDuration: backtestResult.metrics.avgTradeDuration || 0,
 					trades: backtestResult.trades || [],
-					equityCurve: backtestResult.equityCurve || [],
-					pnlDistribution: backtestResult.pnlDistribution || {}
+					equityCurve: backtestResult.metrics.equityCurve || [],
+					pnlDistribution: backtestResult.metrics.pnlDistribution || {}
 				}
 			};
 

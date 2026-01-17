@@ -304,9 +304,9 @@ export async function getStrategyById(
 		sharpeRatio: result.sharpe_ratio as number | undefined,
 		maxDrawdown: result.max_drawdown as number | undefined,
 		avgTradeDuration: result.avg_trade_duration as number | undefined,
-		tradesData: JSON.parse(result.trades_data as string),
-		equityCurve: JSON.parse(result.equity_curve as string),
-		pnlDistribution: JSON.parse(result.pnl_distribution as string),
+		tradesData: result.trades_data ? JSON.parse(result.trades_data as string) : [],
+		equityCurve: result.equity_curve && result.equity_curve !== '[]' ? JSON.parse(result.equity_curve as string) : [],
+		pnlDistribution: result.pnl_distribution && result.pnl_distribution !== '{}' ? JSON.parse(result.pnl_distribution as string) : {},
 		createdAt: result.created_at as string
 	};
 }
