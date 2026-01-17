@@ -291,7 +291,9 @@
 						<div class="metrics">
 							<div class="metric">
 								<span class="metric-label">WIN RATE</span>
-								<span class="metric-value">{strategy.winRate.toFixed(1)}%</span>
+								<span class="metric-value" class:positive={strategy.winRate > 50} class:negative={strategy.winRate < 50}>
+									{strategy.winRate.toFixed(1)}%
+								</span>
 							</div>
 
 							<div class="metric">
@@ -301,8 +303,29 @@
 
 							<div class="metric">
 								<span class="metric-label">PROFIT FACTOR</span>
-								<span class="metric-value">
+								<span class="metric-value" class:positive={strategy.profitFactor && strategy.profitFactor > 1} class:negative={strategy.profitFactor && strategy.profitFactor < 1}>
 									{strategy.profitFactor ? strategy.profitFactor.toFixed(2) : 'N/A'}
+								</span>
+							</div>
+
+							<div class="metric">
+								<span class="metric-label">MAX DRAWDOWN</span>
+								<span class="metric-value negative">
+									{strategy.maxDrawdown ? strategy.maxDrawdown.toFixed(2) + '%' : 'N/A'}
+								</span>
+							</div>
+
+							<div class="metric">
+								<span class="metric-label">AVG WIN</span>
+								<span class="metric-value positive">
+									{formatCurrency(strategy.avgWin)}
+								</span>
+							</div>
+
+							<div class="metric">
+								<span class="metric-label">AVG LOSS</span>
+								<span class="metric-value negative">
+									{formatCurrency(strategy.avgLoss)}
 								</span>
 							</div>
 						</div>
@@ -546,35 +569,17 @@
 	}
 
 	.strategy-card {
-		background: linear-gradient(135deg, #151B2E 0%, #1A1F32 100%);
+		background: #1A1F32;
 		border: 1px solid #2A2F45;
 		border-radius: 16px;
 		padding: 24px;
-		transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+		transition: background 0.2s;
 		cursor: pointer;
 		position: relative;
-		overflow: hidden;
-	}
-
-	.strategy-card::before {
-		content: '';
-		position: absolute;
-		top: 0;
-		left: 0;
-		right: 0;
-		height: 3px;
-		background: linear-gradient(90deg, #00D084, #3b82f6);
-		opacity: 0;
-		transition: opacity 0.3s;
 	}
 
 	.strategy-card:hover {
-		border-color: rgba(0, 208, 132, 0.4);
-		box-shadow: 0 8px 24px rgba(0, 208, 132, 0.15);
-	}
-
-	.strategy-card:hover::before {
-		opacity: 1;
+		background: rgba(0, 180, 255, 0.05);
 	}
 
 	.card-header {
@@ -692,7 +697,7 @@
 	.metrics {
 		display: grid;
 		grid-template-columns: repeat(3, 1fr);
-		gap: 16px;
+		gap: 12px;
 		margin-bottom: 20px;
 	}
 
@@ -716,10 +721,18 @@
 	}
 
 	.metric-value {
-		font-size: 20px;
+		font-size: 18px;
 		color: #E8E8E8;
 		font-weight: 700;
 		letter-spacing: -0.02em;
+	}
+
+	.metric-value.positive {
+		color: #10b981;
+	}
+
+	.metric-value.negative {
+		color: #ef4444;
 	}
 
 	.card-footer {

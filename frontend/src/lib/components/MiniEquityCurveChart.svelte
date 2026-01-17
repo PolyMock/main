@@ -1,5 +1,5 @@
 <script lang="ts">
-	export let equityCurve: Array<{ timestamp: string; capital: number }> = [];
+	export let equityCurve: Array<{ timestamp: string; capital?: number; equity?: number }> = [];
 	export let initialCapital: number = 0;
 	export let isPositive: boolean = true;
 
@@ -11,10 +11,10 @@
 	$: pathD = generatePath(points);
 	$: areaD = generateArea(points);
 
-	function generatePoints(curve: Array<{ timestamp: string; capital: number }>) {
+	function generatePoints(curve: Array<{ timestamp: string; capital?: number; equity?: number }>) {
 		if (!curve || curve.length === 0) return [];
 
-		const values = curve.map((d) => d.capital);
+		const values = curve.map((d) => d.capital ?? d.equity ?? 0);
 		const minValue = Math.min(...values, initialCapital);
 		const maxValue = Math.max(...values, initialCapital);
 		const range = maxValue - minValue || 1;
@@ -24,8 +24,9 @@
 
 		return curve.map((d, i) => {
 			const x = padding + (i / (curve.length - 1 || 1)) * chartWidth;
+			const value = d.capital ?? d.equity ?? 0;
 			const y =
-				padding + chartHeight - ((d.capital - minValue) / range) * chartHeight;
+				padding + chartHeight - ((value - minValue) / range) * chartHeight;
 			return { x, y };
 		});
 	}
