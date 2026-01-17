@@ -67,6 +67,9 @@ export const POST: RequestHandler = async (event) => {
 			// Entry rules
 			entryType: data.entryType || 'probability_threshold',
 			entryConfig: data.entryConfig || {},
+			buyThreshold: data.entryConfig?.buyThreshold,
+			sellThreshold: data.entryConfig?.sellThreshold,
+			entryTimeConstraints: data.entryConfig?.entryTimeConstraints,
 
 			// Position sizing
 			positionSizingType: data.positionSizingType || 'fixed_percentage',

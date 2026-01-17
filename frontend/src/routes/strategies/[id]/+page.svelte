@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import PnLDistributionChart from '$lib/components/PnLDistributionChart.svelte';
+	import EquityCurveChart from '$lib/components/EquityCurveChart.svelte';
 
 	let strategy: any = null;
 	let loading = true;
@@ -62,7 +63,12 @@
 			<!-- Header -->
 			<div class="header">
 				<div>
-					<a href="/strategies" class="back-link">← Back to Strategies</a>
+					<a href="/strategies" class="back-button">
+						<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+							<path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+						</svg>
+						Back to Strategies
+					</a>
 					<h1>{strategy.strategyName}</h1>
 					<p class="market-question">{strategy.marketQuestion}</p>
 				</div>
@@ -116,14 +122,18 @@
 						<span class="label">Avg Loss</span>
 						<span class="value negative">{strategy.avgLoss.toFixed(2)}%</span>
 					</div>
+					{#if strategy.largestWin && strategy.largestWin !== 0}
 					<div class="metric-card">
 						<span class="label">Largest Win</span>
 						<span class="value positive">+{strategy.largestWin.toFixed(2)}%</span>
 					</div>
+					{/if}
+					{#if strategy.largestLoss && strategy.largestLoss !== 0}
 					<div class="metric-card">
 						<span class="label">Largest Loss</span>
 						<span class="value negative">{strategy.largestLoss.toFixed(2)}%</span>
 					</div>
+					{/if}
 					<div class="metric-card">
 						<span class="label">Profit Factor</span>
 						<span class="value">{strategy.profitFactor ? strategy.profitFactor.toFixed(2) : 'N/A'}</span>
@@ -135,6 +145,17 @@
 				</div>
 			</div>
 
+			<!-- Equity Curve -->
+			{#if strategy.equityCurve && strategy.equityCurve.length > 0}
+			<div class="section">
+				<h2>Equity Curve</h2>
+				<EquityCurveChart
+					equityCurve={strategy.equityCurve}
+					initialCapital={strategy.initialCapital}
+				/>
+			</div>
+			{/if}
+
 			<!-- P&L Distribution -->
 			{#if strategy.pnlDistribution && Object.keys(strategy.pnlDistribution).length > 0}
 				<PnLDistributionChart distribution={strategy.pnlDistribution} />
@@ -144,41 +165,151 @@
 			<div class="section">
 				<h2>Strategy Configuration</h2>
 				<div class="config-grid">
-					<div class="config-section">
-						<h3>Time Period</h3>
-						<p><strong>Start:</strong> {formatDate(strategy.startDate)}</p>
-						<p><strong>End:</strong> {formatDate(strategy.endDate)}</p>
+					<div class="config-card">
+						<div class="config-header">
+							<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+								<path d="M10 2a8 8 0 100 16 8 8 0 000-16zM10 5v5l3 3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+							</svg>
+							<h3>Time Period</h3>
+						</div>
+						<div class="config-item">
+							<span class="config-label">Start Date</span>
+							<span class="config-value">{formatDate(strategy.startDate)}</span>
+						</div>
+						<div class="config-item">
+							<span class="config-label">End Date</span>
+							<span class="config-value">{formatDate(strategy.endDate)}</span>
+						</div>
 					</div>
 
-					<div class="config-section">
-						<h3>Entry Rules</h3>
-						<p><strong>Type:</strong> {strategy.entryType}</p>
-					</div>
-
-					<div class="config-section">
-						<h3>Position Sizing</h3>
-						<p><strong>Type:</strong> {strategy.positionSizingType}</p>
-						<p><strong>Value:</strong> {strategy.positionSizingValue}%</p>
-						{#if strategy.maxPositionSize}
-							<p><strong>Max Position:</strong> {strategy.maxPositionSize}%</p>
+					<div class="config-card">
+						<div class="config-header">
+							<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+								<path d="M10 3v14M3 10h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+							</svg>
+							<h3>Entry Rules</h3>
+						</div>
+						<div class="config-item">
+							<span class="config-label">Entry Type</span>
+							<span class="config-value">{strategy.entryType}</span>
+						</div>
+						{#if strategy.buyThreshold}
+						<div class="config-item">
+							<span class="config-label">Buy Threshold</span>
+							<span class="config-value">{strategy.buyThreshold}%</span>
+						</div>
+						{/if}
+						{#if strategy.sellThreshold}
+						<div class="config-item">
+							<span class="config-label">Sell Threshold</span>
+							<span class="config-value">{strategy.sellThreshold}%</span>
+						</div>
+						{/if}
+						{#if strategy.entryTimeConstraints}
+						<div class="config-item">
+							<span class="config-label">Time Constraints</span>
+							<span class="config-value">{strategy.entryTimeConstraints}</span>
+						</div>
 						{/if}
 					</div>
 
-					<div class="config-section">
-						<h3>Exit Rules</h3>
+					<div class="config-card">
+						<div class="config-header">
+							<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+								<rect x="3" y="5" width="14" height="10" rx="2" stroke="currentColor" stroke-width="2"/>
+								<path d="M7 9h6M7 11h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+							</svg>
+							<h3>Position Sizing</h3>
+						</div>
+						<div class="config-item">
+							<span class="config-label">Sizing Type</span>
+							<span class="config-value">{strategy.positionSizingType}</span>
+						</div>
+						<div class="config-item">
+							<span class="config-label">Position Size</span>
+							<span class="config-value">{strategy.positionSizingValue}%</span>
+						</div>
+						{#if strategy.maxPositionSize}
+						<div class="config-item">
+							<span class="config-label">Max Position</span>
+							<span class="config-value">{strategy.maxPositionSize}%</span>
+						</div>
+						{/if}
+					</div>
+
+					<div class="config-card">
+						<div class="config-header">
+							<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+								<path d="M10 2L3 7v6c0 4.5 7 7 7 7s7-2.5 7-7V7l-7-5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+							</svg>
+							<h3>Exit Rules</h3>
+						</div>
 						{#if strategy.stopLoss}
-							<p><strong>Stop Loss:</strong> {strategy.stopLoss}%</p>
+						<div class="config-item">
+							<span class="config-label">Stop Loss</span>
+							<span class="config-value negative">{strategy.stopLoss}%</span>
+						</div>
 						{/if}
 						{#if strategy.takeProfit}
-							<p><strong>Take Profit:</strong> {strategy.takeProfit}%</p>
+						<div class="config-item">
+							<span class="config-label">Take Profit</span>
+							<span class="config-value positive">{strategy.takeProfit}%</span>
+						</div>
 						{/if}
 						{#if strategy.timeBasedExit}
-							<p><strong>Time Exit:</strong> {strategy.timeBasedExit}h</p>
+						<div class="config-item">
+							<span class="config-label">Time Exit</span>
+							<span class="config-value">{strategy.timeBasedExit}h</span>
+						</div>
 						{/if}
-						{#if !strategy.stopLoss && !strategy.takeProfit && !strategy.timeBasedExit}
-							<p>No exit rules configured</p>
+						{#if strategy.useTrailingStop}
+						<div class="config-item">
+							<span class="config-label">Trailing Stop</span>
+							<span class="config-value positive">Enabled</span>
+						</div>
+						{/if}
+						{#if strategy.usePartialExits}
+						<div class="config-item">
+							<span class="config-label">Partial Exits</span>
+							<span class="config-value positive">Enabled</span>
+						</div>
+						{/if}
+						{#if !strategy.stopLoss && !strategy.takeProfit && !strategy.timeBasedExit && !strategy.useTrailingStop && !strategy.usePartialExits}
+						<div class="config-item">
+							<span class="config-value-muted">No exit rules configured</span>
+						</div>
 						{/if}
 					</div>
+
+					{#if strategy.maxTradesPerDay || strategy.tradeTimeStart || strategy.tradeTimeEnd}
+					<div class="config-card">
+						<div class="config-header">
+							<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+								<circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="2"/>
+								<path d="M10 6v4l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+							</svg>
+							<h3>Trading Constraints</h3>
+						</div>
+						{#if strategy.maxTradesPerDay}
+						<div class="config-item">
+							<span class="config-label">Max Trades/Day</span>
+							<span class="config-value">{strategy.maxTradesPerDay}</span>
+						</div>
+						{/if}
+						{#if strategy.tradeTimeStart}
+						<div class="config-item">
+							<span class="config-label">Trading Start</span>
+							<span class="config-value">{strategy.tradeTimeStart}</span>
+						</div>
+						{/if}
+						{#if strategy.tradeTimeEnd}
+						<div class="config-item">
+							<span class="config-label">Trading End</span>
+							<span class="config-value">{strategy.tradeTimeEnd}</span>
+						</div>
+						{/if}
+					</div>
+					{/if}
 				</div>
 			</div>
 
@@ -208,7 +339,7 @@
 									<td>{new Date(trade.exitTime).toLocaleString()}</td>
 									<td>{trade.entryPrice.toFixed(4)}</td>
 									<td>{trade.exitPrice.toFixed(4)}</td>
-									<td>{formatCurrency(trade.positionSize)}</td>
+									<td>{formatCurrency(trade.amountInvested || 0)}</td>
 									<td class:positive={trade.pnl > 0} class:negative={trade.pnl < 0}>
 										{formatCurrency(trade.pnl)}
 									</td>
@@ -270,6 +401,36 @@
 		justify-content: space-between;
 		align-items: flex-start;
 		gap: 40px;
+	}
+
+	.back-button {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		color: #8b92ab;
+		text-decoration: none;
+		font-size: 14px;
+		margin-bottom: 16px;
+		padding: 8px 12px;
+		border-radius: 8px;
+		background: transparent;
+		border: 1px solid transparent;
+		transition: all 0.2s ease;
+		font-weight: 500;
+	}
+
+	.back-button:hover {
+		color: #3b82f6;
+		background: rgba(59, 130, 246, 0.1);
+		border-color: rgba(59, 130, 246, 0.3);
+	}
+
+	.back-button svg {
+		transition: transform 0.2s ease;
+	}
+
+	.back-button:hover svg {
+		transform: translateX(-2px);
 	}
 
 	.back-link {
@@ -374,21 +535,72 @@
 
 	.config-grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-		gap: 24px;
+		grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+		gap: 20px;
 	}
 
-	.config-section h3 {
+	.config-card {
+		background: #1a1f2e;
+		border: 1px solid #252d42;
+		border-radius: 12px;
+		padding: 20px;
+		transition: border-color 0.2s ease;
+	}
+
+	.config-card:hover {
+		border-color: #3b4b6b;
+	}
+
+	.config-header {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-bottom: 16px;
+		padding-bottom: 12px;
+		border-bottom: 1px solid #252d42;
+	}
+
+	.config-header svg {
+		color: #3b82f6;
+		flex-shrink: 0;
+	}
+
+	.config-header h3 {
 		color: white;
 		font-size: 16px;
 		font-weight: 600;
-		margin: 0 0 12px 0;
+		margin: 0;
 	}
 
-	.config-section p {
+	.config-item {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 10px 0;
+		border-bottom: 1px solid rgba(37, 45, 66, 0.3);
+	}
+
+	.config-item:last-child {
+		border-bottom: none;
+		padding-bottom: 0;
+	}
+
+	.config-label {
 		color: #8b92ab;
+		font-size: 13px;
+		font-weight: 500;
+	}
+
+	.config-value {
+		color: white;
 		font-size: 14px;
-		margin: 6px 0;
+		font-weight: 600;
+	}
+
+	.config-value-muted {
+		color: #6b7280;
+		font-size: 13px;
+		font-style: italic;
 	}
 
 	.table-container {

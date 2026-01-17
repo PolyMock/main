@@ -197,6 +197,7 @@ export async function getUserStrategies(
 				winning_trades, losing_trades, break_even_trades,
 				win_rate, avg_win, avg_loss, largest_win, largest_loss,
 				profit_factor, sharpe_ratio, max_drawdown, avg_trade_duration,
+				equity_curve,
 				created_at
 			FROM backtest_strategies
 			WHERE user_id = ?
@@ -230,9 +231,10 @@ export async function getUserStrategies(
 		maxDrawdown: row.max_drawdown,
 		avgTradeDuration: row.avg_trade_duration,
 		createdAt: row.created_at,
+		// Parse equity curve for list view
+		equityCurve: row.equity_curve ? JSON.parse(row.equity_curve) : [],
 		// These will be loaded separately when viewing details
 		tradesData: [],
-		equityCurve: [],
 		pnlDistribution: {},
 		entryType: '',
 		entryConfig: {},
