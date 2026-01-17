@@ -910,12 +910,6 @@
 
 	// Show save modal or auth modal
 	async function showSaveStrategyModal() {
-			canSave: canSave(),
-			currentUser,
-			walletConnected: $walletStore.connected,
-			walletAddress: $walletStore.publicKey?.toBase58()
-		});
-
 		if (!canSave()) {
 			showAuthModal = true;
 			saveError = '';
