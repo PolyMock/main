@@ -28,6 +28,7 @@
 		walletState = value;
 	});
 
+
 	onMount(() => {
 		// Wait a bit for wallet extensions to load
 		const initWallets = () => {
@@ -138,13 +139,13 @@
 							disconnect: async () => {
 								await provider.disconnect();
 								setWalletAdapter(null);
-								updateWalletConnection();
+								await updateWalletConnection();
 							},
 							name: 'Phantom'
 						};
 
 						setWalletAdapter(directWallet as any);
-						updateWalletConnection();
+						await updateWalletConnection();
 
 						// Initialize user account
 						try {
@@ -324,24 +325,47 @@ Would you like to try again?`;
 	<div class="wallet-modal-overlay" on:click={closeWalletModal} on:keydown={(e) => e.key === 'Escape' && closeWalletModal()} role="button" tabindex="0">
 		<div class="wallet-modal" on:click|stopPropagation on:keydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
 			<div class="wallet-modal-header">
-				<h3>Connect Wallet</h3>
-				<button class="close-btn" on:click={closeWalletModal}>✕</button>
+				<h3>Connect a wallet</h3>
+				<button class="close-btn" on:click={closeWalletModal}>
+					<svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+						<path d="M1 1L13 13M1 13L13 1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+					</svg>
+				</button>
 			</div>
+
+			<p class="wallet-modal-description">
+				Connect your Solana wallet to get started
+			</p>
+
 			<div class="wallet-list">
 				{#each availableWallets as wallet}
-					<button class="wallet-option" on:click={() => selectWallet(wallet)}>
-						<span class="wallet-name">{wallet.name}</span>
-						<span class="wallet-status">
+					<button
+						class="wallet-option"
+						on:click={() => selectWallet(wallet)}
+						disabled={wallet.readyState === 'NotDetected'}
+					>
+						<div class="wallet-option-left">
+							<span class="wallet-name">{wallet.name}</span>
+						</div>
+
+						<div class="wallet-option-right">
 							{#if wallet.readyState === 'Installed'}
-								Ready
+								<span class="wallet-status-badge detected">Detected</span>
 							{:else if wallet.readyState === 'NotDetected'}
-								Not Detected
+								<span class="wallet-status-badge not-detected">Not Installed</span>
 							{:else}
-								{wallet.readyState}
+								<span class="wallet-status-badge">{wallet.readyState}</span>
 							{/if}
-						</span>
+						</div>
 					</button>
 				{/each}
+			</div>
+
+			<div class="wallet-modal-footer">
+				<p class="wallet-modal-help">
+					Don't have a wallet?
+					<a href="https://phantom.app/" target="_blank" rel="noopener noreferrer">Get Phantom</a>
+				</p>
 			</div>
 		</div>
 	</div>
@@ -471,87 +495,196 @@ Would you like to try again?`;
 		left: 0;
 		width: 100%;
 		height: 100%;
-		background: rgba(0, 0, 0, 0.8);
+		background: rgba(0, 0, 0, 0.7);
+		backdrop-filter: blur(4px);
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		z-index: 1000;
+		animation: fadeIn 0.2s ease-out;
+	}
+
+	@keyframes fadeIn {
+		from {
+			opacity: 0;
+		}
+		to {
+			opacity: 1;
+		}
 	}
 
 	.wallet-modal {
-		background: #1a1a1a;
-		border: 2px solid #4785ff;
-		padding: 20px;
-		min-width: 300px;
-		max-width: 400px;
+		background: #1a1f35;
+		border: 1px solid #2a2f45;
+		border-radius: 16px;
+		padding: 0;
+		min-width: 420px;
+		max-width: 480px;
+		box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+		animation: slideUp 0.3s ease-out;
+		max-height: 85vh;
+		overflow: hidden;
+		display: flex;
+		flex-direction: column;
+	}
+
+	@keyframes slideUp {
+		from {
+			opacity: 0;
+			transform: translateY(20px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
 	}
 
 	.wallet-modal-header {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		margin-bottom: 20px;
-		border-bottom: 1px solid #333;
-		padding-bottom: 10px;
+		padding: 24px 28px;
+		border-bottom: 1px solid #2a2f45;
 	}
 
 	.wallet-modal-header h3 {
-		color: #4785ff;
-		font-size: 16px;
-		font-weight: bold;
+		color: white;
+		font-size: 20px;
+		font-weight: 600;
 		margin: 0;
-		font-family: 'Courier New', monospace;
+		letter-spacing: -0.5px;
 	}
 
 	.close-btn {
-		background: none;
+		background: transparent;
 		border: none;
-		color: #666;
-		font-size: 20px;
+		color: #8b92ab;
 		cursor: pointer;
-		padding: 0;
-		width: 24px;
-		height: 24px;
+		padding: 8px;
+		width: 32px;
+		height: 32px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
+		border-radius: 6px;
+		transition: all 0.2s;
 	}
 
 	.close-btn:hover {
-		color: #fff;
+		color: white;
+		background: rgba(255, 255, 255, 0.05);
+	}
+
+	.wallet-modal-description {
+		color: #8b92ab;
+		font-size: 14px;
+		margin: 0;
+		padding: 0 28px 20px 28px;
+		line-height: 1.5;
 	}
 
 	.wallet-list {
 		display: flex;
 		flex-direction: column;
-		gap: 10px;
+		gap: 0;
+		padding: 0 16px 16px 16px;
+		overflow-y: auto;
+		flex: 1;
 	}
 
 	.wallet-option {
-		background: #0a0a0a;
-		border: 1px solid #333;
+		background: transparent;
+		border: 1px solid #2a2f45;
+		border-radius: 12px;
 		color: #fff;
-		padding: 15px;
+		padding: 16px 20px;
 		cursor: pointer;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		transition: all 0.2s ease;
-		font-family: 'Courier New', monospace;
+		margin-bottom: 8px;
 	}
 
-	.wallet-option:hover {
-		border-color: #4785ff;
-		background: rgba(71, 133, 255, 0.1);
+	.wallet-option:hover:not(:disabled) {
+		border-color: #3b82f6;
+		background: rgba(59, 130, 246, 0.05);
+	}
+
+	.wallet-option:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+		transform: none;
+	}
+
+	.wallet-option-left {
+		display: flex;
+		align-items: center;
 	}
 
 	.wallet-name {
-		font-size: 14px;
+		font-size: 15px;
 		font-weight: bold;
 	}
 
 	.wallet-status {
 		font-size: 10px;
 		color: #666;
+	}
+
+	.wallet-option-right {
+		display: flex;
+		align-items: center;
+	}
+
+	.wallet-status-badge {
+		font-size: 12px;
+		padding: 4px 10px;
+		border-radius: 6px;
+		font-weight: 600;
+		background: rgba(139, 146, 171, 0.1);
+		color: #8b92ab;
+	}
+
+	.wallet-status-badge.detected {
+		background: rgba(16, 185, 129, 0.1);
+		color: #10b981;
+	}
+
+	.wallet-status-badge.not-detected {
+		background: rgba(239, 68, 68, 0.1);
+		color: #ef4444;
+	}
+
+	.wallet-modal-footer {
+		padding: 16px 28px 24px 28px;
+		border-top: 1px solid #2a2f45;
+	}
+
+	.wallet-modal-help {
+		margin: 0;
+		font-size: 13px;
+		color: #8b92ab;
+		text-align: center;
+		line-height: 1.5;
+	}
+
+	.wallet-modal-help a {
+		color: #3b82f6;
+		text-decoration: none;
+		font-weight: 600;
+		transition: color 0.2s;
+	}
+
+	.wallet-modal-help a:hover {
+		color: #2563eb;
+		text-decoration: underline;
+	}
+
+	@media (max-width: 500px) {
+		.wallet-modal {
+			min-width: 90vw;
+			max-width: 90vw;
+		}
 	}
 </style>

@@ -51,28 +51,65 @@ export function setWalletDisconnecting(disconnecting: boolean) {
 	}));
 }
 
-export function updateWalletConnection() {
-	walletStore.update(state => {
-		if (!state.adapter) return state;
+export async function updateWalletConnection() {
+	const state = get(walletStore);
+	if (!state.adapter) return;
 
-		const newState = {
-			...state,
-			connected: state.adapter.connected ?? false,
-			publicKey: state.adapter.publicKey ?? null,
-			connecting: false,
-			disconnecting: false
-		};
+	const newState = {
+		...state,
+		connected: state.adapter.connected ?? false,
+		publicKey: state.adapter.publicKey ?? null,
+		connecting: false,
+		disconnecting: false
+	};
 
-		// Link wallet to Google account if authenticated
-		if (newState.connected && newState.publicKey) {
-			const auth = get(authStore);
-			if (auth.isAuthenticated && !auth.user?.walletAddress) {
-				authStore.linkWallet(newState.publicKey.toString());
+	walletStore.set(newState);
+
+	// Authenticate wallet and create session when connected
+	if (newState.connected && newState.publicKey && state.adapter) {
+		try {
+			const walletAddress = newState.publicKey.toString();
+
+			// Check if already authenticated
+			const userResponse = await fetch('/api/auth/user', { credentials: 'include' });
+			const userData = await userResponse.json();
+
+			// Only authenticate if not already authenticated with this wallet
+			if (!userData.user || userData.user.solanaAddress !== walletAddress) {
+				// Create authentication message
+				const message = `Sign this message to authenticate with Polymock.\n\nWallet: ${walletAddress}\nTimestamp: ${Date.now()}`;
+				const messageBytes = new TextEncoder().encode(message);
+
+				// Request signature from wallet
+				const signature = await state.adapter.signMessage!(messageBytes);
+
+				// Send to backend for verification and session creation
+				const response = await fetch('/api/auth/wallet', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					credentials: 'include',
+					body: JSON.stringify({
+						walletAddress,
+						signature: Array.from(signature),
+						message
+					})
+				});
+
+				if (response.ok) {
+					console.log('Wallet authenticated successfully');
+
+					// Link wallet to Google account if authenticated
+					const auth = get(authStore);
+					if (auth.isAuthenticated && !auth.user?.walletAddress) {
+						authStore.linkWallet(walletAddress);
+					}
+				}
 			}
+		} catch (error) {
+			console.error('Error authenticating wallet:', error);
+			// Continue even if authentication fails - user can still use wallet without server session
 		}
-
-		return newState;
-	});
+	}
 }
 
 export function setUserBalance(usdcBalance: number) {

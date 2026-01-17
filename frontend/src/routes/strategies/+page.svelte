@@ -33,19 +33,37 @@
 	let authState = $authStore;
 	let walletButtonRef: any;
 
+	// Track previous connection state to detect changes
+	let previousConnected = walletState.connected;
+	let previousAddress = walletState.publicKey?.toString();
+
 	// Subscribe to wallet and auth state changes
 	walletStore.subscribe(value => {
+		const currentAddress = value.publicKey?.toString();
+		const connectionChanged = value.connected !== previousConnected;
+		const addressChanged = currentAddress !== previousAddress;
+
 		walletState = value;
-		// Reload strategies when wallet connects
-		if (value.connected && !user) {
+
+		// Reload strategies when wallet connects or changes
+		if (value.connected && (connectionChanged || addressChanged)) {
 			loadStrategies();
 		}
+
+		// Clear strategies when wallet disconnects (but not if Google user is still logged in)
+		if (!value.connected && previousConnected && !user?.googleId) {
+			user = null;
+			strategies = [];
+		}
+
+		previousConnected = value.connected;
+		previousAddress = currentAddress;
 	});
 
 	authStore.subscribe(value => {
 		authState = value;
 		// Reload strategies when user logs in
-		if (value.isAuthenticated && value.user && !user) {
+		if (value.isAuthenticated && value.user) {
 			loadStrategies();
 		}
 	});
@@ -61,23 +79,40 @@
 
 	async function loadStrategies() {
 		loading = true;
+		error = '';
+
 		try {
-			// Check if user is logged in with Google
-			const userRes = await fetch('/api/auth/user');
+			// Check if user is logged in with Google or Wallet
+			const userRes = await fetch('/api/auth/user', {
+				credentials: 'include' // Ensure cookies are sent
+			});
 			const userData = await userRes.json();
 			user = userData.user;
 
-			// Check if wallet is connected OR Google is authenticated
-			const isAuthenticated = user || walletState.connected;
-
-			if (isAuthenticated) {
+			// Only fetch strategies if we have a valid session
+			if (user) {
 				// Fetch user's strategies
-				const strategiesRes = await fetch('/api/strategies');
-				const strategiesData = await strategiesRes.json();
-				strategies = strategiesData.strategies || [];
+				const strategiesRes = await fetch('/api/strategies', {
+					credentials: 'include'
+				});
+
+				if (strategiesRes.ok) {
+					const strategiesData = await strategiesRes.json();
+					strategies = strategiesData.strategies || [];
+				} else if (strategiesRes.status === 401) {
+					// Session expired or invalid
+					user = null;
+					strategies = [];
+				} else {
+					throw new Error('Failed to fetch strategies');
+				}
+			} else {
+				strategies = [];
 			}
 		} catch (err: any) {
-			error = err.message;
+			console.error('Error loading strategies:', err);
+			error = err.message || 'Failed to load strategies';
+			strategies = [];
 		} finally {
 			loading = false;
 		}
@@ -128,29 +163,11 @@
 	<div class="container">
 		<div class="header">
 			<h1>My Backtest Strategies</h1>
-			{#if user || walletState.connected}
-				<div class="user-section">
-					{#if user}
-						{#if user.picture}
-							<img src={user.picture} alt={user.name} class="avatar" />
-						{:else}
-							<div class="avatar-placeholder">{user.name.charAt(0).toUpperCase()}</div>
-						{/if}
-						<span>{user.name}</span>
-						<button on:click={handleLogout} class="btn-logout">Logout</button>
-					{:else if walletState.connected && walletState.publicKey}
-						<div class="avatar-placeholder">
-							{walletState.publicKey.toString().charAt(0).toUpperCase()}
-						</div>
-						<span>{walletState.publicKey.toString().slice(0, 4)}...{walletState.publicKey.toString().slice(-4)}</span>
-					{/if}
-				</div>
-			{/if}
 		</div>
 
 		{#if loading}
 			<div class="loading">Loading...</div>
-		{:else if !user && !walletState.connected}
+		{:else if !user}
 			<div class="login-prompt">
 				<h2>Connect to Save and View Your Strategies</h2>
 				<p>Connect with your Google account or Solana wallet to save your backtest results and access them anytime.</p>

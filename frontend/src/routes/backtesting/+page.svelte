@@ -3094,7 +3094,7 @@
 						id="strategy-name"
 						type="text"
 						bind:value={strategyName}
-						placeholder=""
+						placeholder="Enter a name for your strategy"
 						maxlength="100"
 						disabled={savingStrategy}
 					/>
@@ -6052,27 +6052,29 @@
 }
 
 .modal-content {
-	background: #141824;
+	background: #1a1f35;
 	border: 1px solid #2a2f45;
 	border-radius: 16px;
 	max-width: 500px;
 	width: 100%;
 	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+	position: relative;
 }
 
 .modal-header {
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
-	padding: 24px 24px 16px 24px;
+	padding: 28px 28px 20px 28px;
 	border-bottom: 1px solid #2a2f45;
 }
 
 .modal-header h2 {
 	margin: 0;
-	font-size: 20px;
+	font-size: 22px;
 	font-weight: 600;
 	color: white;
+	letter-spacing: -0.5px;
 }
 
 .modal-close {
@@ -6092,12 +6094,12 @@
 }
 
 .modal-body {
-	padding: 24px;
+	padding: 28px;
 }
 
 .modal-description {
 	color: #8b92ab;
-	margin: 0 0 24px 0;
+	margin: 0 0 28px 0;
 	font-size: 14px;
 	line-height: 1.6;
 }
@@ -6109,9 +6111,11 @@
 .form-group label {
 	display: block;
 	color: #8b92ab;
-	font-size: 14px;
+	font-size: 12px;
 	font-weight: 600;
 	margin-bottom: 8px;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
 }
 
 .form-group input {
@@ -6121,18 +6125,25 @@
 	border-radius: 8px;
 	padding: 12px 16px;
 	color: white;
-	font-size: 14px;
-	transition: border-color 0.2s;
+	font-size: 15px;
+	transition: all 0.2s;
+	box-sizing: border-box;
 }
 
 .form-group input:focus {
 	outline: none;
 	border-color: #3b82f6;
+	box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 .form-group input:disabled {
 	opacity: 0.5;
 	cursor: not-allowed;
+}
+
+.form-group input::placeholder {
+	color: #4a5066;
+	opacity: 1;
 }
 
 .error-message {
@@ -6155,7 +6166,7 @@
 	background: transparent;
 	border: 1px solid #2a2f45;
 	color: #8b92ab;
-	padding: 10px 24px;
+	padding: 12px 28px;
 	border-radius: 8px;
 	cursor: pointer;
 	font-size: 14px;
@@ -6164,7 +6175,8 @@
 }
 
 .btn-cancel:hover:not(:disabled) {
-	border-color: #8b92ab;
+	border-color: #3f455f;
+	background: rgba(59, 130, 246, 0.05);
 	color: white;
 }
 
@@ -6175,24 +6187,27 @@
 
 .btn-save-confirm {
 	background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-	border: 1px solid #3b82f6;
+	border: none;
 	color: white;
-	padding: 10px 24px;
+	padding: 12px 32px;
 	border-radius: 8px;
 	cursor: pointer;
 	font-size: 14px;
 	font-weight: 600;
 	transition: all 0.2s;
+	box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
 }
 
 .btn-save-confirm:hover:not(:disabled) {
 	background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
 	transform: translateY(-1px);
+	box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
 }
 
 .btn-save-confirm:disabled {
 	opacity: 0.5;
 	cursor: not-allowed;
+	transform: none;
 }
 
 /* Auth Modal Styles */
