@@ -94,7 +94,6 @@ export class EphemeralRollupsService {
 				lastValidBlockHeight,
 			});
 
-			console.log('Account delegated to ER:', signature);
 			return signature;
 		} catch (error) {
 			console.error('Error delegating account:', error);
@@ -159,7 +158,6 @@ export class EphemeralRollupsService {
 				lastValidBlockHeight,
 			});
 
-			console.log('ER transaction sent:', signature);
 			return signature;
 		} catch (error) {
 			console.error('Error sending ER transaction:', error);
@@ -195,7 +193,6 @@ export class EphemeralRollupsService {
 				lastValidBlockHeight,
 			});
 
-			console.log('Main chain transaction sent:', signature);
 			return signature;
 		} catch (error) {
 			console.error('Error sending main chain transaction:', error);

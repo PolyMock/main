@@ -167,7 +167,6 @@ export const POST: RequestHandler = async ({ request }) => {
 
     // Log sample market for debugging
     if (filteredMarkets.length > 0) {
-      console.log('Sample market:', JSON.stringify(filteredMarkets[0], null, 2));
     }
 
     // Sort by end time (most recent first)
@@ -177,7 +176,6 @@ export const POST: RequestHandler = async ({ request }) => {
       return bEndTime - aEndTime;
     });
 
-    console.log(`Returning ${filteredMarkets.length} markets (filtered from ${allMarkets.length})`);
     return json({ markets: filteredMarkets });
   } catch (error: any) {
     console.error('Error fetching markets:', error);

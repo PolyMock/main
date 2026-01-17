@@ -234,23 +234,12 @@ export class ERVerification {
 
 		const verification = await this.verifyERTransaction(signature, accountPDA);
 
-		console.log('Transaction:', signature);
-		console.log('Account:', accountPDA.toString());
-		console.log('\n Results:');
-		console.log('   Used ER:', verification.usedER ? 'YES' : 'NO');
-		console.log('   Transaction Location:', verification.evidence.txLocation);
-		console.log('   Account on ER:', verification.evidence.accountOnER ? 'YES' : 'NO');
-		console.log('   Account Status:', verification.evidence.accountStatus);
 
 		if (verification.evidence.commitmentSignature) {
-			console.log('   Commitment Signature:', verification.evidence.commitmentSignature);
-			console.log('   PROOF: Transaction committed from ER to main chain!');
 		}
 
 		if (verification.usedER) {
-			console.log('\n CONFIRMED: This transaction used Ephemeral Rollups! 🚀');
 		} else {
-			console.log('\n  This transaction did NOT use Ephemeral Rollups');
 		}
 
 		console.groupEnd();

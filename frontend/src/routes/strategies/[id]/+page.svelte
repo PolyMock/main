@@ -9,6 +9,28 @@
 	let loading = true;
 	let error = '';
 
+	// Pagination for trades
+	let currentPage = 1;
+	let tradesPerPage = 25;
+
+	$: totalPages = strategy?.tradesData ? Math.ceil(strategy.tradesData.length / tradesPerPage) : 1;
+	$: paginatedTrades = strategy?.tradesData
+		? strategy.tradesData.slice((currentPage - 1) * tradesPerPage, currentPage * tradesPerPage)
+		: [];
+	$: startIndex = (currentPage - 1) * tradesPerPage;
+
+	function nextPage() {
+		if (currentPage < totalPages) currentPage++;
+	}
+
+	function prevPage() {
+		if (currentPage > 1) currentPage--;
+	}
+
+	function goToPage(pageNum: number) {
+		currentPage = pageNum;
+	}
+
 	onMount(async () => {
 		const strategyId = $page.params.id;
 
@@ -167,9 +189,6 @@
 				<div class="config-grid">
 					<div class="config-card">
 						<div class="config-header">
-							<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-								<path d="M10 2a8 8 0 100 16 8 8 0 000-16zM10 5v5l3 3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-							</svg>
 							<h3>Time Period</h3>
 						</div>
 						<div class="config-item">
@@ -184,9 +203,6 @@
 
 					<div class="config-card">
 						<div class="config-header">
-							<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-								<path d="M10 3v14M3 10h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-							</svg>
 							<h3>Entry Rules</h3>
 						</div>
 						<div class="config-item">
@@ -215,10 +231,6 @@
 
 					<div class="config-card">
 						<div class="config-header">
-							<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-								<rect x="3" y="5" width="14" height="10" rx="2" stroke="currentColor" stroke-width="2"/>
-								<path d="M7 9h6M7 11h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-							</svg>
 							<h3>Position Sizing</h3>
 						</div>
 						<div class="config-item">
@@ -239,9 +251,6 @@
 
 					<div class="config-card">
 						<div class="config-header">
-							<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-								<path d="M10 2L3 7v6c0 4.5 7 7 7 7s7-2.5 7-7V7l-7-5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-							</svg>
 							<h3>Exit Rules</h3>
 						</div>
 						{#if strategy.stopLoss}
@@ -284,10 +293,6 @@
 					{#if strategy.maxTradesPerDay || strategy.tradeTimeStart || strategy.tradeTimeEnd}
 					<div class="config-card">
 						<div class="config-header">
-							<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-								<circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="2"/>
-								<path d="M10 6v4l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-							</svg>
 							<h3>Trading Constraints</h3>
 						</div>
 						{#if strategy.maxTradesPerDay}
@@ -316,7 +321,14 @@
 			<!-- Trades Table -->
 			{#if strategy.tradesData && strategy.tradesData.length > 0}
 			<div class="section">
-				<h2>All Trades ({strategy.tradesData.length})</h2>
+				<div class="trades-header">
+					<h2>All Trades ({strategy.tradesData.length})</h2>
+					{#if totalPages > 1}
+						<div class="pagination-info">
+							Showing {startIndex + 1}-{Math.min(startIndex + tradesPerPage, strategy.tradesData.length)} of {strategy.tradesData.length}
+						</div>
+					{/if}
+				</div>
 				<div class="table-container">
 					<table class="trades-table">
 						<thead>
@@ -332,9 +344,9 @@
 							</tr>
 						</thead>
 						<tbody>
-							{#each strategy.tradesData as trade, i}
+							{#each paginatedTrades as trade, i}
 								<tr>
-									<td>{i + 1}</td>
+									<td>{startIndex + i + 1}</td>
 									<td>{new Date(trade.entryTime).toLocaleString()}</td>
 									<td>{new Date(trade.exitTime).toLocaleString()}</td>
 									<td>{trade.entryPrice.toFixed(4)}</td>
@@ -351,6 +363,41 @@
 						</tbody>
 					</table>
 				</div>
+
+				<!-- Pagination Controls -->
+				{#if totalPages > 1}
+					<div class="pagination">
+						<button class="pagination-btn" on:click={prevPage} disabled={currentPage === 1}>
+							<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+								<path d="M10 12L6 8l4-4"/>
+							</svg>
+							Previous
+						</button>
+
+						<div class="pagination-pages">
+							{#each Array(totalPages) as _, i}
+								{#if totalPages <= 7 || i < 3 || i > totalPages - 4 || (i >= currentPage - 2 && i <= currentPage)}
+									<button
+										class="pagination-page"
+										class:active={currentPage === i + 1}
+										on:click={() => goToPage(i + 1)}
+									>
+										{i + 1}
+									</button>
+								{:else if i === 3 || i === totalPages - 4}
+									<span class="pagination-dots">...</span>
+								{/if}
+							{/each}
+						</div>
+
+						<button class="pagination-btn" on:click={nextPage} disabled={currentPage === totalPages}>
+							Next
+							<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+								<path d="M6 4l4 4-4 4"/>
+							</svg>
+						</button>
+					</div>
+				{/if}
 			</div>
 			{/if}
 
@@ -552,17 +599,9 @@
 	}
 
 	.config-header {
-		display: flex;
-		align-items: center;
-		gap: 10px;
 		margin-bottom: 16px;
 		padding-bottom: 12px;
 		border-bottom: 1px solid #252d42;
-	}
-
-	.config-header svg {
-		color: #3b82f6;
-		flex-shrink: 0;
 	}
 
 	.config-header h3 {
@@ -641,6 +680,96 @@
 
 	.negative {
 		color: #ef4444 !important;
+	}
+
+	.trades-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 24px;
+	}
+
+	.trades-header h2 {
+		margin: 0;
+	}
+
+	.pagination-info {
+		color: #8b92ab;
+		font-size: 14px;
+	}
+
+	.pagination {
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		gap: 8px;
+		margin-top: 24px;
+		padding-top: 24px;
+		border-top: 1px solid #1e2537;
+	}
+
+	.pagination-btn {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 8px 16px;
+		background: transparent;
+		border: 1px solid #2a2f45;
+		color: #8b92ab;
+		border-radius: 6px;
+		cursor: pointer;
+		font-size: 14px;
+		font-weight: 500;
+		transition: all 0.2s;
+	}
+
+	.pagination-btn:hover:not(:disabled) {
+		border-color: #3b82f6;
+		color: #3b82f6;
+		background: rgba(59, 130, 246, 0.05);
+	}
+
+	.pagination-btn:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+
+	.pagination-pages {
+		display: flex;
+		gap: 4px;
+	}
+
+	.pagination-page {
+		min-width: 36px;
+		height: 36px;
+		padding: 0 8px;
+		background: transparent;
+		border: 1px solid #2a2f45;
+		color: #8b92ab;
+		border-radius: 6px;
+		cursor: pointer;
+		font-size: 14px;
+		font-weight: 500;
+		transition: all 0.2s;
+	}
+
+	.pagination-page:hover {
+		border-color: #3b82f6;
+		color: #3b82f6;
+		background: rgba(59, 130, 246, 0.05);
+	}
+
+	.pagination-page.active {
+		background: #3b82f6;
+		border-color: #3b82f6;
+		color: white;
+	}
+
+	.pagination-dots {
+		display: flex;
+		align-items: center;
+		padding: 0 8px;
+		color: #6b7280;
 	}
 
 	.footer {

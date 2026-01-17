@@ -49,7 +49,6 @@ export class PolymarketService {
 	constructor() {
 		// MagicBlock RPC handles ER automatically - no need for separate connections
 		this.connection = new Connection(RPC_ENDPOINT, 'confirmed');
-		console.log('Using MagicBlock RPC:', RPC_ENDPOINT);
 	}
 
 	/**
@@ -57,7 +56,6 @@ export class PolymarketService {
 	 */
 	setERVerification(enabled: boolean) {
 		this.verifyEREnabled = enabled;
-		console.log(`ER verification ${enabled ? 'enabled' : 'disabled'}`);
 	}
 
 	/**
@@ -74,7 +72,6 @@ export class PolymarketService {
 				throw new Error('Wallet public key is not available');
 			}
 
-			console.log('Creating AnchorProvider with wallet:', wallet.publicKey.toString());
 
 			const provider = new AnchorProvider(
 				this.connection,
@@ -84,7 +81,6 @@ export class PolymarketService {
 
 			// Use the local IDL file
 			this.program = new Program(IDL as Idl, provider);
-			console.log('Program initialized with MagicBlock RPC successfully');
 		} catch (error: any) {
 			console.error('Failed to initialize program:', error);
 			console.error('Error details:', {
@@ -198,7 +194,6 @@ export class PolymarketService {
 				})
 				.rpc();
 
-			console.log('User account initialized:', tx);
 			return tx;
 		} catch (error) {
 			console.error('Error initializing user account:', error);
@@ -246,7 +241,6 @@ export class PolymarketService {
 				})
 				.rpc();
 
-			console.log('YES position created:', tx);
 
 			// Verify ER usage
 			if (this.verifyEREnabled) {
@@ -302,7 +296,6 @@ export class PolymarketService {
 				})
 				.rpc();
 
-			console.log('NO position created:', tx);
 
 			// Verify ER usage
 			if (this.verifyEREnabled) {
@@ -349,7 +342,6 @@ export class PolymarketService {
 				})
 				.rpc();
 
-			console.log('YES shares sold:', tx);
 
 			// Verify ER usage
 			if (this.verifyEREnabled) {
@@ -396,7 +388,6 @@ export class PolymarketService {
 				})
 				.rpc();
 
-			console.log('NO shares sold:', tx);
 
 			// Verify ER usage
 			if (this.verifyEREnabled) {
@@ -494,7 +485,6 @@ export class PolymarketService {
 				})
 				.rpc();
 
-			console.log('Position closed:', tx);
 			return tx;
 		} catch (error) {
 			console.error('Error closing position:', error);

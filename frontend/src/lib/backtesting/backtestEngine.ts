@@ -276,12 +276,10 @@ export class BacktestEngine {
       if (candlesticks.length > 0) {
         const first = candlesticks[0];
         const last = candlesticks[candlesticks.length - 1];
-        console.log(`   📈 First candlestick:`, {
           timestamp: first.timestamp.toISOString(),
           close: first.close,
           volume: first.volume
         });
-        console.log(`   📈 Last candlestick:`, {
           timestamp: last.timestamp.toISOString(),
           close: last.close,
           volume: last.volume
@@ -301,7 +299,6 @@ export class BacktestEngine {
       let invalidCandles = 0;
       let processedCandles = 0;
       
-      console.log(`   📋 Entry config:`, {
         entryType: config.entryType,
         entryPriceThreshold: JSON.stringify(config.entryPriceThreshold),
         positionSizing: config.positionSizing,

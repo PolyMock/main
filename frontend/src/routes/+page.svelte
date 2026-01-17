@@ -177,10 +177,8 @@
 		const clientHeight = target.clientHeight;
 		const scrolledToBottom = scrollHeight - scrollTop <= clientHeight + 200;
 
-		console.log('Scroll event:', { scrollHeight, scrollTop, clientHeight, scrolledToBottom, isLoadingMore, hasMore });
 
 		if (scrolledToBottom && !isLoadingMore && hasMore && !searchQuery) {
-			console.log('Fetching more events...');
 			fetchPolymarkets(true);
 		}
 	}
@@ -257,11 +255,9 @@
 			const scrollHeight = scrollContainer.scrollHeight;
 			const clientHeight = scrollContainer.clientHeight;
 
-			console.log('Checking if needs more:', { scrollHeight, clientHeight, canScroll: scrollHeight > clientHeight, attempts: checkAttempts });
 
 			// If content doesn't exceed viewport height, load more
 			if (scrollHeight <= clientHeight + 50) {
-				console.log('Container not scrollable, loading more events...');
 				checkAttempts++;
 				fetchPolymarkets(true);
 			}

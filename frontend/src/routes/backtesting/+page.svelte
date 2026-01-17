@@ -810,13 +810,6 @@
 			progress = 100;
 			strategyTab = 'results';
 
-			if (backtestResult) {
-				console.log('Backtest completed:', {
-					trades: backtestResult.trades?.length || 0,
-					metrics: backtestResult.metrics,
-					firstTrade: backtestResult.trades?.[0]
-				});
-			}
 		} catch (err: any) {
 			error = err.message || 'An error occurred';
 		} finally {
@@ -877,19 +870,15 @@
 			}
 
 			const publicKey = wallet.publicKey.toBase58();
-			console.log('Starting wallet authentication for:', publicKey);
 
 			// Create message to sign
 			const message = `Sign this message to authenticate with Polymock.\n\nWallet: ${publicKey}\nTimestamp: ${Date.now()}`;
 			const messageBytes = new TextEncoder().encode(message);
 
-			console.log('Requesting signature from wallet...');
 			// Request signature from wallet adapter
 			const signature = await wallet.adapter.signMessage(messageBytes);
-			console.log('Signature received');
 
 			// Send to backend
-			console.log('Sending auth request to backend...');
 			const response = await fetch('/api/auth/wallet', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -901,16 +890,13 @@
 			});
 
 			const data = await response.json();
-			console.log('Backend response:', { status: response.status, data });
 
 			if (response.ok && data.success) {
-				console.log('Authentication successful, setting currentUser:', data.user);
 				currentUser = data.user;
 				showAuthModal = false;
 				showSaveModal = true;
 				strategyName = '';
 				saveError = '';
-				console.log('Save modal should now be open');
 			} else {
 				throw new Error(data.error || 'Authentication failed');
 			}
@@ -924,7 +910,6 @@
 
 	// Show save modal or auth modal
 	async function showSaveStrategyModal() {
-		console.log('Save button clicked', {
 			canSave: canSave(),
 			currentUser,
 			walletConnected: $walletStore.connected,
@@ -932,7 +917,6 @@
 		});
 
 		if (!canSave()) {
-			console.log('Opening auth modal - no auth');
 			showAuthModal = true;
 			saveError = '';
 			return;
@@ -941,13 +925,11 @@
 		// Always re-authenticate with wallet to ensure fresh session
 		// This handles cases where the session cookie may have expired
 		if ($walletStore.connected) {
-			console.log('Re-authenticating wallet to ensure fresh session');
 			await authenticateWallet();
 			return;
 		}
 
 		// If user is logged in with Google (has currentUser but no wallet)
-		console.log('Opening save modal');
 		showSaveModal = true;
 		strategyName = '';
 		saveError = '';

@@ -58,14 +58,12 @@
 
 	async function fetchMarketData(id: string): Promise<PolyMarket | null> {
 		try {
-			console.log('Fetching market data for ID:', id);
 			const response = await fetch(`/api/markets/${id}`);
 			if (!response.ok) {
 				const errorData = await response.json().catch(() => ({}));
 				throw new Error(`HTTP ${response.status}: ${errorData.error || response.statusText}`);
 			}
 			const data = await response.json();
-			console.log('Market data received:', data);
 			return data;
 		} catch (err) {
 			console.error('Failed to fetch market data:', err);
@@ -75,14 +73,12 @@
 
 	async function fetchChartData(id: string, interval: string): Promise<any[]> {
 		try {
-			console.log('Fetching chart data for:', id, 'interval:', interval);
 			const response = await fetch(`/api/markets/${id}/chart?interval=${interval.toLowerCase()}`);
 			if (!response.ok) {
 				const errorData = await response.json().catch(() => ({}));
 				throw new Error(`HTTP ${response.status}: ${errorData.error || response.statusText}`);
 			}
 			const data = await response.json();
-			console.log('Chart data received:', data);
 			return data.history || [];
 		} catch (err) {
 			console.error('Failed to fetch chart data:', err);

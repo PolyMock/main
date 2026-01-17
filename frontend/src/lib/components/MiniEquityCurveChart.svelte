@@ -46,11 +46,11 @@
 
 <div class="mini-equity-curve">
 	{#if points.length > 0}
-		<svg width={svgWidth} height={svgHeight} class="chart-svg">
+		<svg viewBox="0 0 {svgWidth} {svgHeight}" preserveAspectRatio="none" class="chart-svg">
 			<!-- Area fill -->
 			<path
 				d={areaD}
-				fill={isPositive ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)'}
+				fill={isPositive ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)'}
 				class="area"
 			/>
 			<!-- Line -->
@@ -58,14 +58,14 @@
 				d={pathD}
 				fill="none"
 				stroke={isPositive ? '#10b981' : '#ef4444'}
-				stroke-width="2"
+				stroke-width="2.5"
 				stroke-linecap="round"
 				stroke-linejoin="round"
 				class="line"
 			/>
 		</svg>
 	{:else}
-		<div class="no-data">No data</div>
+		<div class="no-data">No equity data</div>
 	{/if}
 </div>
 

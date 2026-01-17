@@ -37,7 +37,6 @@ export const GET: RequestHandler = async ({ params, url }) => {
       new Date(parseInt(endTime) * 1000)
     );
 
-    console.log(`Fetched ${candlesticks.length} candlesticks for ${conditionId}`);
 
     return json({ candlesticks });
   } catch (error: any) {

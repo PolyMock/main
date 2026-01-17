@@ -21,10 +21,8 @@ export const GET: RequestHandler = async ({ url }) => {
 
 			// Always return cached data if available
 			if (!isExpired) {
-				console.log('Returning fresh cached news data for:', cacheKey);
 				return json(cached.data);
 			} else {
-				console.log('Cached data expired, but will use as fallback if API fails:', cacheKey);
 			}
 		}
 
@@ -39,7 +37,6 @@ export const GET: RequestHandler = async ({ url }) => {
 			apiUrl.searchParams.set('category', category);
 		}
 
-		console.log('Fetching news from NewsData API:', category);
 		const response = await fetch(apiUrl.toString());
 
 		if (!response.ok) {
@@ -48,7 +45,6 @@ export const GET: RequestHandler = async ({ url }) => {
 
 			// If rate limited and we have cached data, return it even if expired
 			if (response.status === 429 && cached) {
-				console.log('Rate limited - returning stale cached data for:', cacheKey);
 				return json(cached.data, {
 					headers: {
 						'X-Cache-Status': 'stale-due-to-rate-limit'

@@ -32,12 +32,10 @@ function getAllLinkedUsers(): Map<string, { name: string; picture: string; email
  */
 async function getLeaderboardData(timeframe: string): Promise<LeaderboardEntry[]> {
 	try {
-		console.log('Fetching all user accounts from blockchain...');
 
 		// Get all user accounts from the blockchain
 		const userAccounts = await polymarketService.getAllUserAccounts();
 
-		console.log(`Found ${userAccounts.length} user accounts on blockchain`);
 
 		if (userAccounts.length === 0) {
 			return [];
@@ -111,7 +109,6 @@ async function getLeaderboardData(timeframe: string): Promise<LeaderboardEntry[]
 			...entry,
 		}));
 
-		console.log(`Leaderboard generated with ${rankedLeaderboard.length} traders`);
 
 		return rankedLeaderboard;
 	} catch (error) {

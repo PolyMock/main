@@ -24,7 +24,6 @@ export const GET: RequestHandler = async ({ params, url }) => {
 		
 		// If no real data available, return empty array
 		if (!chartData || chartData.length === 0) {
-			console.log('No historical price data available for market:', id);
 			chartData = [];
 		}
 
@@ -88,7 +87,6 @@ async function getMarketById(marketId: string): Promise<any | null> {
 
 async function fetchHistoricalPriceData(market: any, interval: string): Promise<any[]> {
 	try {
-		console.log('Fetching historical price data for market:', market.id);
 		
 		// Try to fetch historical price data from Polymarket APIs
 		const endpoints = [
@@ -102,7 +100,6 @@ async function fetchHistoricalPriceData(market: any, interval: string): Promise<
 		
 		for (const endpoint of endpoints) {
 			try {
-				console.log('Trying endpoint:', endpoint);
 				const response = await fetch(endpoint, {
 					headers: {
 						'Accept': 'application/json',
@@ -112,21 +109,16 @@ async function fetchHistoricalPriceData(market: any, interval: string): Promise<
 
 				if (response.ok) {
 					const data = await response.json();
-					console.log('Response data keys:', Object.keys(data));
 					
 					// Transform the data based on response structure
 					if (Array.isArray(data)) {
-						console.log('Got array data with', data.length, 'items');
 						return transformPriceData(data, interval);
 					} else if (data.prices && Array.isArray(data.prices)) {
-						console.log('Got prices array with', data.prices.length, 'items');
 						return transformPriceData(data.prices, interval);
 					} else if (data.history && Array.isArray(data.history)) {
-						console.log('Got history array with', data.history.length, 'items');
 						return transformPriceData(data.history, interval);
 					} else if (data.outcomePrices && Array.isArray(data.outcomePrices)) {
 						// Create a single data point from current prices
-						console.log('Using current outcome prices as single data point');
 						const timestamp = Math.floor(Date.now() / 1000);
 						const yesPrice = parseFloat(data.outcomePrices[0]) || 0.5;
 						return [{
@@ -140,17 +132,13 @@ async function fetchHistoricalPriceData(market: any, interval: string): Promise<
 							outcome: 'Yes'
 						}];
 					}
-					console.log('No usable price data found in response');
 				} else {
-					console.log('Failed request:', response.status, response.statusText);
 				}
 			} catch (err: any) {
-				console.log('Failed endpoint:', endpoint, err.message || err);
 				continue;
 			}
 		}
 		
-		console.log('No historical price data found');
 		return [];
 	} catch (error) {
 		console.error('Error fetching historical price data:', error);
@@ -175,7 +163,6 @@ function transformPriceData(rawData: any[], interval: string): any[] {
 
 async function fetchAndAggregateTradeData(marketId: string, interval: string): Promise<any[]> {
 	try {
-		console.log('Fetching trade data for aggregation:', marketId);
 		
 		// Try multiple endpoints for trade data
 		const endpoints = [
@@ -197,17 +184,14 @@ async function fetchAndAggregateTradeData(marketId: string, interval: string): P
 					const trades = data.trades || data || [];
 					
 					if (trades.length > 0) {
-						console.log('Got trade data, aggregating:', trades.length, 'trades');
 						return aggregateTradesToCandles(trades, interval);
 					}
 				}
 			} catch (err: any) {
-				console.log('Failed trade endpoint:', endpoint, err.message || err);
 				continue;
 			}
 		}
 		
-		console.log('No trade data found');
 		return [];
 	} catch (error) {
 		console.error('Failed to fetch trade data:', error);

@@ -41,7 +41,6 @@
 	async function handleConnectAccount() {
 		try {
 			const user = await loginWithGoogle();
-			console.log('Login successful:', user);
 		} catch (error: any) {
 			console.error('Login failed:', error);
 			if (error.message !== 'Authentication cancelled') {

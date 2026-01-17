@@ -91,7 +91,6 @@
 	}
 
 	onMount(async () => {
-		console.log('[POLYMOCK] Initializing competition page...');
 
 		updateTime();
 		const timeInterval = setInterval(updateTime, 1000);

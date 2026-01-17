@@ -35,6 +35,12 @@
 	let authState = $authStore;
 	let walletButtonRef: any;
 
+	// Delete modal state
+	let showDeleteModal = false;
+	let strategyToDelete: Strategy | null = null;
+	let isDeleting = false;
+	let deleteError = '';
+
 	// Track previous connection state to detect changes
 	let previousConnected = walletState.connected;
 	let previousAddress = walletState.publicKey?.toString();
@@ -134,14 +140,38 @@
 		goto(`/strategies/${strategyId}`);
 	}
 
-	async function deleteStrategy(strategyId: number) {
-		if (!confirm('Are you sure you want to delete this strategy?')) return;
+	function openDeleteModal(strategy: Strategy) {
+		strategyToDelete = strategy;
+		showDeleteModal = true;
+		deleteError = '';
+	}
+
+	function closeDeleteModal() {
+		showDeleteModal = false;
+		strategyToDelete = null;
+		deleteError = '';
+		isDeleting = false;
+	}
+
+	async function confirmDelete() {
+		if (!strategyToDelete) return;
+
+		isDeleting = true;
+		deleteError = '';
 
 		try {
-			await fetch(`/api/strategies/${strategyId}`, { method: 'DELETE' });
-			strategies = strategies.filter(s => s.id !== strategyId);
-		} catch (err) {
-			alert('Failed to delete strategy');
+			const response = await fetch(`/api/strategies/${strategyToDelete.id}`, { method: 'DELETE' });
+
+			if (!response.ok) {
+				throw new Error('Failed to delete strategy');
+			}
+
+			strategies = strategies.filter(s => s.id !== strategyToDelete.id);
+			closeDeleteModal();
+		} catch (err: any) {
+			deleteError = err.message || 'Failed to delete strategy';
+		} finally {
+			isDeleting = false;
 		}
 	}
 
@@ -225,7 +255,7 @@
 									</svg>
 								</button>
 								<button
-									on:click={() => deleteStrategy(strategy.id)}
+									on:click={() => openDeleteModal(strategy)}
 									class="btn-delete"
 									title="Delete"
 								>
@@ -289,10 +319,75 @@
 	</div>
 </div>
 
+<!-- Delete Confirmation Modal -->
+{#if showDeleteModal && strategyToDelete}
+	<div class="modal-overlay" on:click={closeDeleteModal}>
+		<div class="modal-content" on:click|stopPropagation>
+			<div class="modal-header">
+				<h2>Delete Strategy</h2>
+				<button class="modal-close" on:click={closeDeleteModal}>
+					<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<line x1="18" y1="6" x2="6" y2="18"/>
+						<line x1="6" y1="6" x2="18" y2="18"/>
+					</svg>
+				</button>
+			</div>
+
+			<div class="modal-body">
+				<div class="warning-icon">
+					<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<circle cx="12" cy="12" r="10"/>
+						<line x1="12" y1="8" x2="12" y2="12"/>
+						<line x1="12" y1="16" x2="12.01" y2="16"/>
+					</svg>
+				</div>
+
+				<p class="modal-description">
+					Are you sure you want to delete <strong>"{strategyToDelete.strategyName}"</strong>?
+				</p>
+
+				<div class="strategy-info">
+					<div class="info-row">
+						<span class="info-label">Market:</span>
+						<span class="info-value">{strategyToDelete.marketQuestion}</span>
+					</div>
+					<div class="info-row">
+						<span class="info-label">Return:</span>
+						<span class="info-value" class:positive={strategyToDelete.totalReturnPercent > 0} class:negative={strategyToDelete.totalReturnPercent < 0}>
+							{strategyToDelete.totalReturnPercent > 0 ? '+' : ''}{strategyToDelete.totalReturnPercent.toFixed(2)}%
+						</span>
+					</div>
+					<div class="info-row">
+						<span class="info-label">Trades:</span>
+						<span class="info-value">{strategyToDelete.totalTrades}</span>
+					</div>
+				</div>
+
+				<p class="warning-text">
+					This action cannot be undone. All backtest data and results will be permanently deleted.
+				</p>
+
+				{#if deleteError}
+					<div class="error-message">{deleteError}</div>
+				{/if}
+			</div>
+
+			<div class="modal-actions">
+				<button class="btn-cancel" on:click={closeDeleteModal} disabled={isDeleting}>
+					Cancel
+				</button>
+				<button class="btn-delete-confirm" on:click={confirmDelete} disabled={isDeleting}>
+					{isDeleting ? 'Deleting...' : 'Delete Strategy'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 <style>
 	.strategies-page {
 		min-height: 100vh;
-		background: #0a0e1a;
+		background: #0B0F1A;
 		padding: 40px 20px;
 	}
 
@@ -451,8 +546,8 @@
 	}
 
 	.strategy-card {
-		background: #141824;
-		border: 1px solid #1e2537;
+		background: linear-gradient(135deg, #151B2E 0%, #1A1F32 100%);
+		border: 1px solid #2A2F45;
 		border-radius: 16px;
 		padding: 24px;
 		transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -468,15 +563,14 @@
 		left: 0;
 		right: 0;
 		height: 3px;
-		background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+		background: linear-gradient(90deg, #00D084, #3b82f6);
 		opacity: 0;
 		transition: opacity 0.3s;
 	}
 
 	.strategy-card:hover {
-		border-color: #3b82f6;
-		transform: translateY(-4px);
-		box-shadow: 0 12px 24px rgba(59, 130, 246, 0.15);
+		border-color: rgba(0, 208, 132, 0.4);
+		box-shadow: 0 8px 24px rgba(0, 208, 132, 0.15);
 	}
 
 	.strategy-card:hover::before {
@@ -589,10 +683,10 @@
 
 	.equity-curve-container {
 		margin-bottom: 20px;
-		background: #0a0e1a;
+		background: linear-gradient(135deg, rgba(10, 14, 26, 0.8) 0%, rgba(20, 24, 36, 0.6) 100%);
 		border-radius: 10px;
-		padding: 12px;
-		border: 1px solid #1e2537;
+		padding: 16px;
+		border: 1px solid rgba(42, 47, 69, 0.6);
 	}
 
 	.metrics {
@@ -607,11 +701,15 @@
 		flex-direction: column;
 		gap: 6px;
 		text-align: center;
+		padding: 12px;
+		background: rgba(20, 24, 36, 0.4);
+		border-radius: 8px;
+		border: 1px solid rgba(42, 47, 69, 0.4);
 	}
 
 	.metric-label {
 		font-size: 10px;
-		color: #6b7280;
+		color: #8B92AB;
 		text-transform: uppercase;
 		letter-spacing: 0.5px;
 		font-weight: 700;
@@ -619,7 +717,7 @@
 
 	.metric-value {
 		font-size: 20px;
-		color: white;
+		color: #E8E8E8;
 		font-weight: 700;
 		letter-spacing: -0.02em;
 	}
@@ -639,6 +737,196 @@
 		color: #8b92ab;
 		font-weight: 600;
 		font-size: 14px;
+	}
+
+	/* Delete Modal Styles */
+	.modal-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0.75);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 1000;
+		padding: 20px;
+		backdrop-filter: blur(4px);
+	}
+
+	.modal-content {
+		background: #151B2E;
+		border: 1px solid #2A2F45;
+		border-radius: 16px;
+		max-width: 500px;
+		width: 100%;
+		max-height: 90vh;
+		overflow-y: auto;
+		box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+	}
+
+	.modal-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 24px 24px 20px 24px;
+		border-bottom: 1px solid #2A2F45;
+	}
+
+	.modal-header h2 {
+		color: white;
+		font-size: 20px;
+		font-weight: 700;
+		margin: 0;
+	}
+
+	.modal-close {
+		background: transparent;
+		border: none;
+		color: #8B92AB;
+		cursor: pointer;
+		padding: 4px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: all 0.2s;
+		border-radius: 6px;
+	}
+
+	.modal-close:hover {
+		color: #E8E8E8;
+		background: rgba(255, 255, 255, 0.05);
+	}
+
+	.modal-body {
+		padding: 24px;
+	}
+
+	.warning-icon {
+		display: flex;
+		justify-content: center;
+		margin-bottom: 20px;
+	}
+
+	.warning-icon svg {
+		color: #ef4444;
+	}
+
+	.modal-description {
+		color: #E8E8E8;
+		font-size: 16px;
+		text-align: center;
+		margin: 0 0 24px 0;
+		line-height: 1.5;
+	}
+
+	.modal-description strong {
+		color: white;
+		font-weight: 600;
+	}
+
+	.strategy-info {
+		background: rgba(20, 24, 36, 0.6);
+		border: 1px solid #2A2F45;
+		border-radius: 12px;
+		padding: 16px;
+		margin-bottom: 20px;
+	}
+
+	.info-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 8px 0;
+	}
+
+	.info-row:not(:last-child) {
+		border-bottom: 1px solid rgba(42, 47, 69, 0.5);
+	}
+
+	.info-label {
+		color: #8B92AB;
+		font-size: 13px;
+		font-weight: 500;
+	}
+
+	.info-value {
+		color: #E8E8E8;
+		font-size: 14px;
+		font-weight: 600;
+	}
+
+	.info-value.positive {
+		color: #10b981;
+	}
+
+	.info-value.negative {
+		color: #ef4444;
+	}
+
+	.warning-text {
+		color: #8B92AB;
+		font-size: 13px;
+		text-align: center;
+		margin: 0;
+		line-height: 1.5;
+	}
+
+	.error-message {
+		background: rgba(239, 68, 68, 0.1);
+		border: 1px solid rgba(239, 68, 68, 0.3);
+		color: #ef4444;
+		padding: 12px;
+		border-radius: 8px;
+		font-size: 14px;
+		margin-top: 16px;
+		text-align: center;
+	}
+
+	.modal-actions {
+		display: flex;
+		gap: 12px;
+		padding: 20px 24px 24px 24px;
+		border-top: 1px solid #2A2F45;
+	}
+
+	.btn-cancel,
+	.btn-delete-confirm {
+		flex: 1;
+		padding: 12px 24px;
+		border-radius: 8px;
+		font-size: 14px;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.2s;
+		border: none;
+	}
+
+	.btn-cancel {
+		background: transparent;
+		border: 1px solid #2A2F45;
+		color: #E8E8E8;
+	}
+
+	.btn-cancel:hover:not(:disabled) {
+		background: rgba(255, 255, 255, 0.05);
+		border-color: #3b4b6b;
+	}
+
+	.btn-delete-confirm {
+		background: #ef4444;
+		color: white;
+	}
+
+	.btn-delete-confirm:hover:not(:disabled) {
+		background: #dc2626;
+	}
+
+	.btn-cancel:disabled,
+	.btn-delete-confirm:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 
 	@media (max-width: 768px) {

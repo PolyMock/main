@@ -96,7 +96,6 @@
 
 				// If position is fully closed/sold and already in cache, return cached version immediately
 				if ((isClosed || isFullySold) && closedPositionsCache.has(positionId)) {
-					console.log(`Using cached data for closed position ${positionId}`);
 					return closedPositionsCache.get(positionId)!;
 				}
 
@@ -113,7 +112,6 @@
 				if (isClosed || isFullySold || isPartiallySold) {
 					if (pos.averageSellPrice && pos.averageSellPrice.toNumber() > 0) {
 						closedPrice = pos.averageSellPrice.toNumber() / 1_000_000;
-						console.log(`Position ${pos.positionId} closed/sold at average price: ${closedPrice}`);
 					} else {
 						console.warn(`Position ${pos.positionId} closed/sold but averageSellPrice is ${pos.averageSellPrice?.toNumber() || 0}`);
 					}
@@ -136,7 +134,6 @@
 							pos.marketId,
 							predictionType
 						);
-						console.log(`Fetched price for ${marketName} (${predictionType}): ${fetchedPrice}, Entry price: ${pricePerShare}`);
 						if (fetchedPrice !== null && fetchedPrice > 0) {
 							currentPrice = fetchedPrice;
 						} else {
@@ -179,7 +176,6 @@
 				const pnlPercentage = (pnl / amountUsdc) * 100;
 				const status: 'Active' | 'Closed' = (isClosed || isFullySold) ? 'Closed' : 'Active';
 
-				console.log(`Position ${marketName} (${status}): Entry=${pricePerShare}, CurrentPrice=${currentPrice}, Shares=${shares}, Remaining=${remainingShares}, PnL=${pnl}`);
 
 				const position: Position = {
 					id: positionId,
@@ -201,7 +197,6 @@
 				// Cache fully closed/sold positions so they NEVER get recalculated
 				if (isClosed || isFullySold) {
 					closedPositionsCache.set(positionId, position);
-					console.log(`Cached closed position ${positionId} with PnL: $${pnl.toFixed(2)}`);
 				}
 
 				return position;
@@ -345,7 +340,6 @@
 						closedAt: new Date()
 					};
 					closedPositionsCache.set(positionId, closedPosition);
-					console.log(`Cached fully sold position ${positionId} with close price: $${currentPrice.toFixed(4)}`);
 				}
 
 				// Show success modal

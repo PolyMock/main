@@ -37,19 +37,10 @@
 				const isPhantomAvailable = typeof window !== 'undefined' &&
 					(window.phantom?.solana?.isPhantom || window.solana?.isPhantom);
 
-				console.log('Phantom wallet available:', isPhantomAvailable);
-				console.log('window.phantom:', window.phantom);
-				console.log('window.solana:', window.solana);
-
 				availableWallets = [
 					new PhantomWalletAdapter(),
 					new SolflareWalletAdapter()
 				];
-
-				console.log('Wallets initialized:', availableWallets.map(w => ({
-					name: w.name,
-					readyState: w.readyState
-				})));
 			} catch (error) {
 				console.error('Error initializing wallets:', error);
 				availableWallets = [];

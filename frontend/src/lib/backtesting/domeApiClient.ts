@@ -153,7 +153,6 @@ export class DomeApiClient {
       }
 
       // Log timestamp conversion for debugging
-      console.log(`📡 API Call - Fetching candlesticks for ${conditionId}:`, {
         interval: `${interval} (${interval === 1 ? '1min' : interval === 60 ? '1hr' : '1day'})`,
         startTime: startTime.toISOString(),
         endTime: endTime.toISOString(),

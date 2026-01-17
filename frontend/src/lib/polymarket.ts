@@ -309,7 +309,6 @@ export class PolymarketClient {
   private async enrichMarketWithCLOBPrices(market: PolyMarket): Promise<void> {
     // Check if market has clobTokenIds
     if (!market.clobTokenIds || market.clobTokenIds.length < 2) {
-      console.log(`Market ${market.id} has no clobTokenIds, skipping price fetch`);
       return;
     }
 
@@ -348,7 +347,6 @@ export class PolymarketClient {
       market.yesPrice = yes;
       market.noPrice = no;
 
-      console.log(`Binary market ${market.id}: YES=${market.yesPrice}, NO=${market.noPrice}`);
     } catch (error) {
       console.error(`Error enriching market ${market.id} with CLOB prices:`, error);
     }
@@ -426,7 +424,6 @@ export class PolymarketClient {
             if (event.markets && Array.isArray(event.markets)) {
               const hasMarket = event.markets.some((market: PolyMarket) => market.id === marketId);
               if (hasMarket) {
-                console.log(`Found market ${marketId} in event ${event.slug}`);
                 return event.slug;
               }
             }
@@ -528,7 +525,6 @@ export class PolymarketClient {
             const priceIndex = predictionType === 'Yes' ? 0 : 1;
             const settledPrice = parseFloat(prices[priceIndex]);
 
-            console.log(`Market ${marketId} is closed. ${predictionType} settled at: ${settledPrice}`);
             return settledPrice;
           }
         } catch (error) {

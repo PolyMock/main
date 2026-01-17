@@ -79,7 +79,6 @@ export const GET: RequestHandler = async ({ params }) => {
 };
 
 async function enrichMarketWithPrices(market: any): Promise<any> {
-	console.log('Enriching market with prices:', market.id, 'closed:', market.closed);
 
 	try {
 		// If market is closed, use settlement prices from outcomePrices
@@ -91,7 +90,6 @@ async function enrichMarketWithPrices(market: any): Promise<any> {
 			if (Array.isArray(prices) && prices.length >= 2) {
 				market.yesPrice = parseFloat(prices[0]);
 				market.noPrice = parseFloat(prices[1]);
-				console.log('Closed market settlement prices:', { yes: market.yesPrice, no: market.noPrice });
 				return market;
 			}
 		}
@@ -103,7 +101,6 @@ async function enrichMarketWithPrices(market: any): Promise<any> {
 			: [];
 
 		if (!Array.isArray(tokenIds) || tokenIds.length < 2) {
-			console.log('No token IDs available');
 			return market;
 		}
 
@@ -130,7 +127,6 @@ async function enrichMarketWithPrices(market: any): Promise<any> {
 		market.yesPrice = yes;
 		market.noPrice = no;
 
-		console.log('Open market prices:', { yes: market.yesPrice, no: market.noPrice });
 	} catch (error) {
 		console.error('Error enriching market with prices:', error);
 		// Fallback

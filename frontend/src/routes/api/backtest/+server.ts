@@ -36,7 +36,6 @@ export const POST: RequestHandler = async ({ request }) => {
       return json({ error: 'Start date must be before end date' }, { status: 400 });
     }
     
-    console.log('Date range:', {
       startDate: strategyConfig.startDate.toISOString(),
       endDate: strategyConfig.endDate.toISOString(),
       startUnix: Math.floor(strategyConfig.startDate.getTime() / 1000),
@@ -54,11 +53,9 @@ export const POST: RequestHandler = async ({ request }) => {
     const engine = new BacktestEngine(apiKey);
 
     // Run backtest
-    console.log('Starting backtest with config:', JSON.stringify(strategyConfig, null, 2));
     const result = await engine.runBacktest(strategyConfig);
     
     // Add debug info to result
-    console.log('Backtest completed:', {
       marketsAnalyzed: result.marketsAnalyzed,
       totalTrades: result.trades.length,
       startingCapital: result.startingCapital,
