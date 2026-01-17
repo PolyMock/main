@@ -35,13 +35,6 @@ export const POST: RequestHandler = async ({ request }) => {
     if (strategyConfig.startDate >= strategyConfig.endDate) {
       return json({ error: 'Start date must be before end date' }, { status: 400 });
     }
-    
-      startDate: strategyConfig.startDate.toISOString(),
-      endDate: strategyConfig.endDate.toISOString(),
-      startUnix: Math.floor(strategyConfig.startDate.getTime() / 1000),
-      endUnix: Math.floor(strategyConfig.endDate.getTime() / 1000),
-      rangeDays: (strategyConfig.endDate.getTime() - strategyConfig.startDate.getTime()) / (1000 * 60 * 60 * 24)
-    });
 
     // Initialize backtest engine
     // Get API key from environment variable set in .env file
@@ -54,13 +47,6 @@ export const POST: RequestHandler = async ({ request }) => {
 
     // Run backtest
     const result = await engine.runBacktest(strategyConfig);
-    
-    // Add debug info to result
-      marketsAnalyzed: result.marketsAnalyzed,
-      totalTrades: result.trades.length,
-      startingCapital: result.startingCapital,
-      endingCapital: result.endingCapital
-    });
 
     return json(result);
   } catch (error: any) {

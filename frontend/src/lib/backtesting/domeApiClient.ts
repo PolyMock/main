@@ -152,16 +152,6 @@ export class DomeApiClient {
         );
       }
 
-      // Log timestamp conversion for debugging
-        interval: `${interval} (${interval === 1 ? '1min' : interval === 60 ? '1hr' : '1day'})`,
-        startTime: startTime.toISOString(),
-        endTime: endTime.toISOString(),
-        startTimeSeconds,
-        endTimeSeconds,
-        rangeDays: ((endTimeSeconds - startTimeSeconds) / (24 * 60 * 60)).toFixed(1),
-        url: `${DOME_API_BASE}/polymarket/candlesticks/${conditionId}?interval=${interval}&start_time=${startTimeSeconds}&end_time=${endTimeSeconds}`
-      });
-
       const response = await axios.get(
         `${DOME_API_BASE}/polymarket/candlesticks/${conditionId}`,
         {

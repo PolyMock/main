@@ -276,15 +276,7 @@ export class BacktestEngine {
       if (candlesticks.length > 0) {
         const first = candlesticks[0];
         const last = candlesticks[candlesticks.length - 1];
-          timestamp: first.timestamp.toISOString(),
-          close: first.close,
-          volume: first.volume
-        });
-          timestamp: last.timestamp.toISOString(),
-          close: last.close,
-          volume: last.volume
-        });
-        
+
         // Check price range
         const prices = candlesticks.map(c => c.close).filter(p => p > 0 && p <= 1);
         if (prices.length > 0) {
@@ -298,13 +290,7 @@ export class BacktestEngine {
       let entryAttempts = 0;
       let invalidCandles = 0;
       let processedCandles = 0;
-      
-        entryType: config.entryType,
-        entryPriceThreshold: JSON.stringify(config.entryPriceThreshold),
-        positionSizing: config.positionSizing,
-        currentCapital: this.currentCapital
-      });
-      
+
       for (let i = 0; i < candlesticks.length; i++) {
         const candle = candlesticks[i];
 
