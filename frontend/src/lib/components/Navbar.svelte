@@ -105,7 +105,10 @@
 <svelte:window on:click={handleClickOutside} />
 
 <div class="navbar">
-	<a href="/" class="logo">POLYMOCK</a>
+	<a href="/" class="logo">
+		<img src="/1.png" alt="Polymock Logo" class="logo-img" />
+		POLYMOCK
+	</a>
 	<div class="nav-links">
 		<a href="/" class="nav-link" class:active={currentPath === '/'}>TERMINAL</a>
 		<a href="/news" class="nav-link" class:active={currentPath === '/news'}>NEWS</a>
@@ -326,6 +329,15 @@
 		transition: color 0.2s;
 		flex-shrink: 0;
 		white-space: nowrap;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.logo-img {
+		width: 32px;
+		height: 32px;
+		object-fit: contain;
 	}
 
 	.logo:hover {
