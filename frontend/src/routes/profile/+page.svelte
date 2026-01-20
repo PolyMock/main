@@ -380,16 +380,9 @@
 				<!-- Quick Actions -->
 				<div class="quick-actions">
 					<a href="/strategies" class="action-btn">
-						<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-						</svg>
 						View My Strategies
 					</a>
 					<a href="/backtesting" class="action-btn">
-						<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<circle cx="12" cy="12" r="10"/>
-							<polyline points="12 6 12 12 16 14"/>
-						</svg>
 						Backtest Strategy
 					</a>
 				</div>
@@ -466,7 +459,7 @@
 				<div class="polymarket-badge">
 					<svg width="16" height="16" viewBox="0 0 16 16" fill="none">
 						<rect width="16" height="16" rx="3" fill="#2A2F45"/>
-						<path d="M4 8L7 11L12 5" stroke="#00B4FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+						<path d="M4 8L7 11L12 5" stroke="#F97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
 					</svg>
 					Polymock
 				</div>
@@ -481,11 +474,6 @@
 
 				{#if openPositions.length === 0}
 					<div class="empty-positions">
-						<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-							<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-							<line x1="9" y1="9" x2="15" y2="9"/>
-							<line x1="9" y1="15" x2="15" y2="15"/>
-						</svg>
 						<p>No open positions</p>
 						<a href="/" class="trade-btn">Start Trading</a>
 					</div>
@@ -533,7 +521,7 @@
 <style>
 	.profile-container {
 		min-height: 100vh;
-		background: #0A0E1A;
+		background: #000000;
 		color: white;
 		padding: 40px 20px;
 	}
@@ -550,8 +538,8 @@
 	.spinner {
 		width: 40px;
 		height: 40px;
-		border: 3px solid #2A2F45;
-		border-top-color: #00B4FF;
+		border: 3px solid #404040;
+		border-top-color: #F97316;
 		border-radius: 50%;
 		animation: spin 1s linear infinite;
 	}
@@ -583,8 +571,8 @@
 	}
 
 	.user-card {
-		background: #151B2F;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 12px;
 		padding: 24px;
 		display: flex;
@@ -609,7 +597,7 @@
 		height: 80px;
 		border-radius: 50%;
 		object-fit: cover;
-		border: 2px solid #2A2F45;
+		border: 2px solid #404040;
 	}
 
 	.user-avatar-placeholder {
@@ -619,8 +607,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: linear-gradient(135deg, #00B4FF 0%, #0094D6 100%);
-		border: 2px solid #2A2F45;
+		background: linear-gradient(135deg, #F97316 0%, #ea580c 100%);
+		border: 2px solid #404040;
 		font-size: 36px;
 		font-weight: 700;
 		color: white;
@@ -632,8 +620,8 @@
 		right: 0;
 		width: 32px;
 		height: 32px;
-		background: #00B4FF;
-		border: 2px solid #151B2F;
+		background: #F97316;
+		border: 2px solid #000000;
 		border-radius: 50%;
 		display: flex;
 		align-items: center;
@@ -644,7 +632,7 @@
 	}
 
 	.edit-avatar-btn:hover {
-		background: #0094D6;
+		background: #ea580c;
 		transform: scale(1.1);
 	}
 
@@ -684,7 +672,7 @@
 		align-items: center;
 		gap: 20px;
 		padding-top: 24px;
-		border-top: 1px solid #2A2F45;
+		border-top: 1px solid #404040;
 	}
 
 	.stat-item {
@@ -727,14 +715,14 @@
 	.stat-divider {
 		width: 1px;
 		height: 40px;
-		background: #2A2F45;
+		background: #000000;
 	}
 
 	.quick-actions {
 		display: flex;
 		gap: 12px;
 		padding-top: 20px;
-		border-top: 1px solid #2A2F45;
+		border-top: 1px solid #404040;
 	}
 
 	.action-btn {
@@ -744,10 +732,10 @@
 		justify-content: center;
 		gap: 8px;
 		padding: 12px 20px;
-		background: #2A2F45;
-		border: 1px solid #3A3F55;
+		background: #000000;
+		border: 1px solid #FFFFFF;
 		border-radius: 8px;
-		color: #E8E8E8;
+		color: #FFFFFF;
 		font-size: 14px;
 		font-weight: 600;
 		text-decoration: none;
@@ -755,18 +743,13 @@
 	}
 
 	.action-btn:hover {
-		background: #3A3F55;
-		border-color: #00B4FF;
-		color: #00B4FF;
-	}
-
-	.action-btn svg {
-		flex-shrink: 0;
+		border-color: #F97316;
+		color: #F97316;
 	}
 
 	.pnl-card {
-		background: #151B2F;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 12px;
 		padding: 24px;
 		display: flex;
@@ -803,7 +786,7 @@
 	.time-filter {
 		padding: 4px 12px;
 		background: transparent;
-		border: 1px solid #2A2F45;
+		border: 1px solid #404040;
 		border-radius: 6px;
 		color: #8B92AB;
 		font-size: 12px;
@@ -813,14 +796,14 @@
 	}
 
 	.time-filter:hover {
-		border-color: #00B4FF;
-		color: #00B4FF;
+		border-color: #F97316;
+		color: #F97316;
 	}
 
 	.time-filter.active {
-		background: rgba(0, 180, 255, 0.1);
-		border-color: #00B4FF;
-		color: #00B4FF;
+		background: rgba(249, 115, 22, 0.1);
+		border-color: #F97316;
+		color: #F97316;
 	}
 
 	.pnl-amount {
@@ -867,8 +850,8 @@
 
 	/* Open Positions Card */
 	.open-positions-card {
-		background: #151B2F;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 12px;
 		padding: 24px;
 		margin-top: 24px;
@@ -890,12 +873,12 @@
 
 	.position-count {
 		padding: 4px 12px;
-		background: rgba(0, 180, 255, 0.1);
-		border: 1px solid #00B4FF;
+		background: rgba(249, 115, 22, 0.1);
+		border: 1px solid #F97316;
 		border-radius: 6px;
 		font-size: 12px;
 		font-weight: 600;
-		color: #00B4FF;
+		color: #F97316;
 	}
 
 	.empty-positions {
@@ -917,9 +900,9 @@
 	.trade-btn {
 		display: inline-block;
 		padding: 10px 24px;
-		background: #2A2F45;
-		border: 1px solid #3A3F55;
-		color: #E8E8E8;
+		background: #000000;
+		border: 1px solid #FFFFFF;
+		color: #FFFFFF;
 		border-radius: 8px;
 		text-decoration: none;
 		font-weight: 600;
@@ -928,9 +911,8 @@
 	}
 
 	.trade-btn:hover {
-		background: #3A3F55;
-		border-color: #00B4FF;
-		color: #00B4FF;
+		border-color: #F97316;
+		color: #F97316;
 	}
 
 	.positions-list {
@@ -940,15 +922,15 @@
 	}
 
 	.position-item {
-		background: #1A1F2E;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 10px;
 		padding: 16px;
 		transition: all 0.2s;
 	}
 
 	.position-item:hover {
-		border-color: #3b82f6;
+		border-color: #F97316;
 	}
 
 	.position-main {
@@ -1158,8 +1140,8 @@
 	}
 
 	.modal-content {
-		background: #151B2F;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 12px;
 		min-width: 400px;
 		max-width: 500px;
@@ -1182,7 +1164,7 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 20px;
-		border-bottom: 1px solid #2A2F45;
+		border-bottom: 1px solid #404040;
 	}
 
 	.modal-header h3 {
@@ -1226,7 +1208,7 @@
 		aspect-ratio: 1;
 		border-radius: 12px;
 		overflow: hidden;
-		background: #0A0E1A;
+		background: #000000;
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -1241,7 +1223,7 @@
 	.upload-placeholder {
 		width: 100%;
 		aspect-ratio: 1;
-		border: 2px dashed #2A2F45;
+		border: 2px dashed #404040;
 		border-radius: 12px;
 		display: flex;
 		flex-direction: column;
@@ -1249,7 +1231,7 @@
 		justify-content: center;
 		gap: 12px;
 		color: #8B92AB;
-		background: #0A0E1A;
+		background: #000000;
 	}
 
 	.upload-placeholder svg {
@@ -1273,7 +1255,7 @@
 
 	.select-file-btn {
 		padding: 10px 20px;
-		background: #2A2F45;
+		background: #000000;
 		border: 1px solid #3A3F55;
 		border-radius: 8px;
 		color: #E8E8E8;
@@ -1285,14 +1267,14 @@
 
 	.select-file-btn:hover {
 		background: #3A3F55;
-		border-color: #00B4FF;
+		border-color: #F97316;
 	}
 
 	.modal-footer {
 		display: flex;
 		gap: 12px;
 		padding: 20px;
-		border-top: 1px solid #2A2F45;
+		border-top: 1px solid #404040;
 		justify-content: flex-end;
 	}
 
@@ -1307,7 +1289,7 @@
 	}
 
 	.cancel-btn {
-		background: #2A2F45;
+		background: #000000;
 		color: #E8E8E8;
 	}
 
@@ -1316,12 +1298,12 @@
 	}
 
 	.confirm-btn {
-		background: #00B4FF;
+		background: #F97316;
 		color: white;
 	}
 
 	.confirm-btn:hover:not(:disabled) {
-		background: #0094D6;
+		background: #ea580c;
 		transform: translateY(-1px);
 	}
 

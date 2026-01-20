@@ -435,7 +435,7 @@
 	.btn-back {
 		display: inline-block;
 		padding: 10px 20px;
-		background: #3b82f6;
+		background: #F97316;
 		color: white;
 		text-decoration: none;
 		border-radius: 6px;
@@ -467,7 +467,7 @@
 	}
 
 	.back-button:hover {
-		color: #3b82f6;
+		color: #F97316;
 		background: rgba(59, 130, 246, 0.1);
 		border-color: rgba(59, 130, 246, 0.3);
 	}
@@ -489,7 +489,7 @@
 	}
 
 	.back-link:hover {
-		color: #3b82f6;
+		color: #F97316;
 	}
 
 	h1 {
@@ -724,8 +724,8 @@
 	}
 
 	.pagination-btn:hover:not(:disabled) {
-		border-color: #3b82f6;
-		color: #3b82f6;
+		border-color: #F97316;
+		color: #F97316;
 		background: rgba(59, 130, 246, 0.05);
 	}
 
@@ -754,14 +754,14 @@
 	}
 
 	.pagination-page:hover {
-		border-color: #3b82f6;
-		color: #3b82f6;
+		border-color: #F97316;
+		color: #F97316;
 		background: rgba(59, 130, 246, 0.05);
 	}
 
 	.pagination-page.active {
-		background: #3b82f6;
-		border-color: #3b82f6;
+		background: #F97316;
+		border-color: #F97316;
 		color: white;
 	}
 

@@ -215,7 +215,7 @@
 	}
 
 	.main-section {
-		background: #151B2F;
+		background: #000000;
 		border: 1px solid #2A2F45;
 		border-radius: 12px;
 		padding: 24px;
@@ -249,9 +249,9 @@
 	}
 
 	.tab.active {
-		background: rgba(0, 180, 255, 0.1);
-		border-color: #00B4FF;
-		color: #00B4FF;
+		background: rgba(249, 115, 22, 0.1);
+		border-color: #F97316;
+		color: #F97316;
 	}
 
 	.search-container {
@@ -282,7 +282,7 @@
 
 	.search-input:focus {
 		outline: none;
-		border-color: #00B4FF;
+		border-color: #F97316;
 	}
 
 	.search-input::placeholder {
@@ -393,7 +393,7 @@
 	}
 
 	.sidebar-section {
-		background: #151B2F;
+		background: #000000;
 		border: 1px solid #2A2F45;
 		border-radius: 12px;
 		padding: 24px;
@@ -491,7 +491,7 @@
 		width: 40px;
 		height: 40px;
 		border: 3px solid #2A2F45;
-		border-top-color: #00B4FF;
+		border-top-color: #F97316;
 		border-radius: 50%;
 		animation: spin 0.8s linear infinite;
 		margin: 0 auto 16px;

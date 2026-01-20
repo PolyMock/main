@@ -598,7 +598,7 @@ Would you like to try again?`;
 	}
 
 	.wallet-option:hover:not(:disabled) {
-		border-color: #3b82f6;
+		border-color: #F97316;
 		background: rgba(59, 130, 246, 0.05);
 	}
 
@@ -661,14 +661,14 @@ Would you like to try again?`;
 	}
 
 	.wallet-modal-help a {
-		color: #3b82f6;
+		color: #F97316;
 		text-decoration: none;
 		font-weight: 600;
 		transition: color 0.2s;
 	}
 
 	.wallet-modal-help a:hover {
-		color: #2563eb;
+		color: #ea580c;
 		text-decoration: underline;
 	}
 

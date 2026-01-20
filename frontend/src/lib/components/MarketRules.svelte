@@ -58,8 +58,8 @@
 	}
 
 	.rules-card {
-		background: #0A0E1A;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 12px;
 		padding: 20px;
 		display: flex;
@@ -76,7 +76,7 @@
 	.rule-header {
 		font-size: 13px;
 		font-weight: 600;
-		color: #00B4FF;
+		color: #F97316;
 		margin: 0;
 		text-transform: uppercase;
 		letter-spacing: 0.5px;
@@ -84,7 +84,7 @@
 
 	.rule-text {
 		font-size: 14px;
-		color: #9BA3B4;
+		color: #FFFFFF;
 		line-height: 1.6;
 		margin: 0;
 	}
@@ -96,12 +96,12 @@
 	}
 
 	.category-tag {
-		background: rgba(0, 180, 255, 0.1);
-		color: #00B4FF;
+		background: rgba(249, 115, 22, 0.1);
+		color: #F97316;
 		padding: 4px 12px;
 		border-radius: 16px;
 		font-size: 12px;
 		font-weight: 500;
-		border: 1px solid rgba(0, 180, 255, 0.2);
+		border: 1px solid rgba(249, 115, 22, 0.2);
 	}
 </style>

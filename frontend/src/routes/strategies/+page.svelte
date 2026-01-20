@@ -410,7 +410,7 @@
 <style>
 	.strategies-page {
 		min-height: 100vh;
-		background: #0B0F1A;
+		background: #000000;
 		padding: 40px 20px;
 	}
 
@@ -444,15 +444,15 @@
 		width: 40px;
 		height: 40px;
 		border-radius: 50%;
-		border: 2px solid #3b82f6;
+		border: 2px solid #F97316;
 	}
 
 	.avatar-placeholder {
 		width: 40px;
 		height: 40px;
 		border-radius: 50%;
-		border: 2px solid #3b82f6;
-		background: #3b82f6;
+		border: 2px solid #F97316;
+		background: #F97316;
 		color: white;
 		display: flex;
 		align-items: center;
@@ -521,7 +521,7 @@
 	}
 
 	.btn-connect:hover {
-		border-color: #3b82f6;
+		border-color: #F97316;
 		background: #252A45;
 	}
 
@@ -549,7 +549,7 @@
 	.btn-primary {
 		display: inline-block;
 		padding: 14px 32px;
-		background: #3b82f6;
+		background: #F97316;
 		color: white;
 		border-radius: 8px;
 		text-decoration: none;
@@ -558,7 +558,7 @@
 	}
 
 	.btn-primary:hover {
-		background: #2563eb;
+		background: #ea580c;
 		transform: translateY(-2px);
 	}
 
@@ -579,7 +579,7 @@
 	}
 
 	.strategy-card:hover {
-		background: rgba(0, 180, 255, 0.05);
+		background: rgba(249, 115, 22, 0.05);
 	}
 
 	.card-header {
@@ -624,8 +624,8 @@
 	}
 
 	.btn-view:hover {
-		border-color: #3b82f6;
-		color: #3b82f6;
+		border-color: #F97316;
+		color: #F97316;
 	}
 
 	.btn-delete:hover {

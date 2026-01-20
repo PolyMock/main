@@ -116,57 +116,41 @@ export class BacktestEngine {
    * Fetch markets that match strategy filters
    */
   private async fetchRelevantMarkets(config: StrategyConfig): Promise<any[]> {
-    // If specific market is targeted, create a synthetic market object
-    // We don't need full market metadata 
-    if (config.specificMarket?.conditionId) {
+    // If specific markets are targeted, create synthetic market objects
+    // We don't need full market metadata
+    if (config.specificMarkets && config.specificMarkets.length > 0) {
+      console.log('Processing specific markets:', config.specificMarkets.length);
+      const syntheticMarkets: any[] = [];
 
-      // Create a minimal market object - the actual data will come from candlesticks
-      const syntheticMarket = {
-        market_id: config.specificMarket.conditionId,
-        condition_id: config.specificMarket.conditionId,
-        question: config.specificMarket.conditionId,
-        title: config.specificMarket.conditionId,
-        end_time: Math.floor(config.endDate.getTime() / 1000),
-        end_date_iso: config.endDate.toISOString(),
-        outcome: undefined // Will be determined from candlestick data if available
-      };
-
-      return [syntheticMarket];
-    }
-
-    // If market slug is provided, try to find it
-    if (config.specificMarket?.marketSlug) {
-      const allMarkets: any[] = [];
-      let offset = 0;
-      const limit = 100;
-
-      // Fetch markets and find the specific one
-      while (true) {
-        const batch = await this.domeClient.getMarkets({
-          startDate: config.startDate,
-          endDate: config.endDate,
-          limit,
-          offset,
-          status: 'closed' // Only backtest closed markets
-        });
-
-        if (batch.length === 0) break;
-
-        // Look for the specific market
-        const specificMarket = batch.find((market: any) => {
-          return market.market_slug === config.specificMarket!.marketSlug;
-        });
-
-        if (specificMarket) {
-          return [specificMarket];
+      for (const market of config.specificMarkets) {
+        if (market.conditionId) {
+          console.log('Adding market with conditionId:', market.conditionId);
+          // Create a minimal market object - the actual data will come from candlesticks
+          // Use individual market times if available, otherwise fall back to config dates
+          syntheticMarkets.push({
+            market_id: market.conditionId,
+            condition_id: market.conditionId,
+            question: market.conditionId,
+            title: market.conditionId,
+            start_time: market.startTime || Math.floor(config.startDate.getTime() / 1000),
+            end_time: market.endTime || Math.floor(config.endDate.getTime() / 1000),
+            end_date_iso: config.endDate.toISOString(),
+            outcome: undefined // Will be determined from candlestick data if available
+          });
+        } else if (market.marketSlug) {
+          console.log('Fetching market by slug:', market.marketSlug);
+          // Need to fetch this market by slug
+          const foundMarket = await this.fetchMarketBySlug(market.marketSlug, config);
+          if (foundMarket) {
+            syntheticMarkets.push(foundMarket);
+          }
         }
-
-        offset += limit;
-        if (offset >= 500) break; // Safety limit
       }
 
-      return [];
+      console.log('Total synthetic markets created:', syntheticMarkets.length);
+      return syntheticMarkets;
     }
+
 
     // Otherwise, fetch all markets matching filters
     const allMarkets: any[] = [];
@@ -220,13 +204,61 @@ export class BacktestEngine {
   }
 
   /**
+   * Helper method to fetch a market by its slug
+   */
+  private async fetchMarketBySlug(marketSlug: string, config: StrategyConfig): Promise<any | null> {
+    let offset = 0;
+    const limit = 100;
+
+    // Fetch markets and find the specific one
+    while (true) {
+      const batch = await this.domeClient.getMarkets({
+        startDate: config.startDate,
+        endDate: config.endDate,
+        limit,
+        offset,
+        status: 'closed' // Only backtest closed markets
+      });
+
+      if (batch.length === 0) break;
+
+      // Look for the specific market
+      const specificMarket = batch.find((market: any) => {
+        return market.market_slug === marketSlug;
+      });
+
+      if (specificMarket) {
+        return specificMarket;
+      }
+
+      offset += limit;
+      if (offset >= 500) break; // Safety limit
+    }
+
+    return null;
+  }
+
+  /**
    * Process a single market: fetch historical data and simulate trades
    */
   private async processMarket(market: any, config: StrategyConfig): Promise<void> {
     try {
+      // Use individual market date range if available, otherwise use config dates
+      const marketStartDate = market.start_time
+        ? new Date(market.start_time * 1000)
+        : config.startDate;
+      const marketEndDate = market.end_time
+        ? new Date(market.end_time * 1000)
+        : config.endDate;
+
+      // But constrain to the user-selected backtest range
+      const backtestStart = marketStartDate > config.startDate ? marketStartDate : config.startDate;
+      const backtestEnd = marketEndDate < config.endDate ? marketEndDate : config.endDate;
+
+      console.log(`Processing market ${market.condition_id} from ${backtestStart.toISOString()} to ${backtestEnd.toISOString()}`);
 
       // Calculate date range and choose appropriate interval
-      const rangeDays = (config.endDate.getTime() - config.startDate.getTime()) / (1000 * 60 * 60 * 24);
+      const rangeDays = (backtestEnd.getTime() - backtestStart.getTime()) / (1000 * 60 * 60 * 24);
 
       // Choose interval based on range (respecting API limits)
       // Start with hourly data for better granularity unless range is too long
@@ -249,8 +281,8 @@ export class BacktestEngine {
       let candlesticks = await this.domeClient.getCandlesticks(
         market.condition_id,
         interval,
-        config.startDate,
-        config.endDate
+        backtestStart,
+        backtestEnd
       );
 
       // If no data with current interval and it's not daily yet, try daily
@@ -258,8 +290,8 @@ export class BacktestEngine {
         candlesticks = await this.domeClient.getCandlesticks(
           market.condition_id,
           1440,
-          config.startDate,
-          config.endDate
+          backtestStart,
+          backtestEnd
         );
       }
 

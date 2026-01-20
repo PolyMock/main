@@ -55,8 +55,8 @@ export const POST: RequestHandler = async (event) => {
 			userId: user.id,
 			strategyName: data.strategyName || `Strategy ${new Date().toISOString()}`,
 
-			// Market
-			marketId: data.marketId || '',
+			// Market (supports multiple markets)
+			marketIds: data.marketIds || [],
 			marketQuestion: data.marketQuestion || '',
 
 			// Configuration

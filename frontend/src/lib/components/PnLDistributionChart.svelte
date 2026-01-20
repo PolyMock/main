@@ -133,11 +133,11 @@
 
 <style>
 	.pnl-distribution-section {
-		background: #141824;
+		background: #000000;
 		border-radius: 12px;
 		padding: 32px;
 		margin: 24px 0;
-		border: 1px solid #1e2537;
+		border: 1px solid #FFFFFF;
 	}
 
 	.section-header {
@@ -173,14 +173,14 @@
 		gap: 16px;
 		margin-bottom: 32px;
 		padding-bottom: 24px;
-		border-bottom: 1px solid #1e2537;
+		border-bottom: 1px solid #404040;
 	}
 
 	.stat-card {
-		background: #1a1f2e;
+		background: #000000;
 		padding: 16px;
 		border-radius: 8px;
-		border: 1px solid #252d42;
+		border: 1px solid #FFFFFF;
 	}
 
 	.stat-label {
@@ -226,7 +226,7 @@
 		height: 300px;
 		gap: 2px;
 		padding: 20px 0;
-		border-bottom: 2px solid #2a2f45;
+		border-bottom: 2px solid #404040;
 	}
 
 	.bar-wrapper {
@@ -307,7 +307,7 @@
 		transform: translateX(-50%);
 		font-size: 11px;
 		color: #6b7280;
-		background: #141824;
+		background: #000000;
 		padding: 2px 8px;
 		border-radius: 4px;
 	}
@@ -319,7 +319,7 @@
 		gap: 32px;
 		margin-top: 24px;
 		padding-top: 20px;
-		border-top: 1px solid #1e2537;
+		border-top: 1px solid #404040;
 	}
 
 	.legend-item {

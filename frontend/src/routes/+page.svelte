@@ -482,30 +482,30 @@
 	:global(body) {
 		margin: 0;
 		padding: 0;
-		background: #0A0E27;
-		color: #E8E8E8;
+		background: #000000;
+		color: #FFFFFF;
 		font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 		overflow: auto;
 	}
 
 	.polyMock {
 		min-height: 100vh;
-		background: #0A0E27;
+		background: #000000;
 		display: flex;
 		flex-direction: column;
 	}
 
 	.search-bar {
-		background: #151B2F;
+		background: #000000;
 		padding: 12px 24px;
-		border-bottom: 1px solid #2A2F45;
+		border-bottom: 1px solid #404040;
 	}
 
 	.search-input {
 		width: 100%;
-		background: #0A0E27;
-		border: 1px solid #2A2F45;
-		color: #E8E8E8;
+		background: #000000;
+		border: 1px solid #404040;
+		color: #FFFFFF;
 		padding: 12px 16px;
 		font-family: Inter, sans-serif;
 		font-size: 15px;
@@ -515,45 +515,45 @@
 	}
 
 	.command-bar {
-		background: #151B2F;
+		background: #000000;
 		padding: 12px 24px;
 		display: flex;
 		align-items: center;
 		gap: 10px;
-		border-bottom: 1px solid #2A2F45;
+		border-bottom: 1px solid #404040;
 		flex-wrap: nowrap;
 	}
 
 	.search-input:focus {
 		outline: none;
-		border-color: #00D084;
+		border-color: #F97316;
 	}
 
 	.search-input::placeholder {
-		color: #666;
+		color: #999;
 	}
 
 	.pyth-status {
 		display: flex;
 		align-items: center;
 		gap: 6px;
-		color: #A0A0A0;
+		color: #FFFFFF;
 		font-size: 12px;
 		padding: 6px 10px;
-		background: #1E2139;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 6px;
 		flex-shrink: 0;
 	}
 
 	.status-label {
-		color: #A0A0A0;
+		color: #FFFFFF;
 		font-size: 11px;
 		font-weight: 500;
 	}
 
 	.status-value {
-		color: #E8E8E8;
+		color: #FFFFFF;
 		font-weight: 600;
 		font-size: 12px;
 		font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
@@ -572,7 +572,7 @@
 	}
 
 	.status-confidence {
-		color: #8B92AB;
+		color: #FFFFFF;
 		font-size: 10px;
 		font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
 	}
@@ -591,8 +591,8 @@
 		align-items: center;
 		gap: 6px;
 		padding: 6px 10px;
-		background: #1E2139;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 6px;
 		text-decoration: none;
 		transition: border-color 200ms ease-out;
@@ -600,7 +600,7 @@
 	}
 
 	.polydata-link:hover {
-		border-color: #3b82f6;
+		border-color: #F97316;
 	}
 
 	.polydata-logo {
@@ -613,16 +613,16 @@
 
 	.polydata-text {
 		font-size: 11px;
-		color: #A0A0A0;
+		color: #FFFFFF;
 		white-space: nowrap;
 		font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
 	}
 
 	.ticker-bar {
-		background: #151B2F;
+		background: #000000;
 		padding: 12px 24px;
 		display: flex;
-		border-bottom: 1px solid #2A2F45;
+		border-bottom: 1px solid #404040;
 		align-items: center;
 	}
 
@@ -630,7 +630,7 @@
 		display: grid;
 		grid-template-columns: 320px 1fr;
 		gap: 24px;
-		background: #0A0E27;
+		background: #000000;
 		flex: 1;
 		overflow: hidden;
 		min-height: 0;
@@ -639,8 +639,8 @@
 	}
 
 	.panel {
-		background: #151B2F;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 12px;
 		display: flex;
 		flex-direction: column;
@@ -664,7 +664,7 @@
 		font-size: 16px;
 		font-weight: 600;
 		letter-spacing: 0;
-		border-bottom: 1px solid #2A2F45;
+		border-bottom: 1px solid #404040;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -704,7 +704,7 @@
 	.news-item {
 		display: block;
 		padding: 16px 0;
-		border-bottom: 1px solid #2A2F45;
+		border-bottom: 1px solid #404040;
 		transition: all 200ms ease-out;
 		cursor: pointer;
 		text-decoration: none;
@@ -716,8 +716,8 @@
 	}
 
 	.news-item:hover {
-		background: rgba(0, 180, 255, 0.05);
-		border-color: #00B4FF;
+		background: rgba(249, 115, 22, 0.05);
+		border-color: #F97316;
 	}
 
 	.news-meta {
@@ -741,20 +741,20 @@
 	}
 
 	.news-toggle {
-		color: #00D084;
+		color: #F97316;
 		cursor: pointer;
 		font-size: 10px;
 		font-weight: bold;
 		transition: all 0.2s ease;
 		padding: 4px 8px;
-		border: 1px solid #00D084;
-		background: rgba(0, 208, 132, 0.1);
+		border: 1px solid #F97316;
+		background: rgba(249, 115, 22, 0.1);
 		font-family: Inter, sans-serif;
 		border-radius: 4px;
 	}
 
 	.news-toggle:hover {
-		background: #00D084;
+		background: #F97316;
 		color: #000;
 		transform: scale(1.05);
 	}
@@ -762,14 +762,14 @@
 	.news-more {
 		text-align: center;
 		padding: 15px;
-		border-top: 1px solid #2A2F45;
+		border-top: 1px solid #404040;
 		margin-top: 10px;
 	}
 
 	.show-more-btn {
-		background: #1E2139;
-		color: #00B4FF;
-		border: 1px solid #00B4FF;
+		background: #000000;
+		color: #F97316;
+		border: 1px solid #F97316;
 		padding: 8px 16px;
 		font-family: Inter, sans-serif;
 		font-size: 11px;
@@ -781,7 +781,7 @@
 	}
 
 	.show-more-btn:hover {
-		background: #00B4FF;
+		background: #F97316;
 		color: #000;
 		transform: scale(1.05);
 	}
@@ -799,8 +799,8 @@
 	}
 
 	.event-card-wrapper {
-		background: #1E2139;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 12px;
 		overflow: hidden;
 		transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -809,7 +809,7 @@
 	}
 
 	.event-card-wrapper:hover {
-		border-color: #3A4055;
+		border-color: #F97316;
 		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 	}
 
@@ -817,7 +817,7 @@
 		padding: 12px 16px;
 		background: rgba(42, 47, 69, 0.3);
 		border: none;
-		border-bottom: 1px solid #2A2F45;
+		border-bottom: 1px solid #404040;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -976,7 +976,7 @@
 
 	.event-total-volume {
 		padding: 12px 0 0 0;
-		border-top: 1px solid #2A2F45;
+		border-top: 1px solid #404040;
 		margin-top: 8px;
 	}
 
@@ -1001,7 +1001,7 @@
 	.loading-spinner {
 		width: 32px;
 		height: 32px;
-		border: 3px solid #2A2F45;
+		border: 3px solid #FFFFFF;
 		border-top-color: #00D084;
 		border-radius: 50%;
 		animation: spin 0.8s linear infinite;

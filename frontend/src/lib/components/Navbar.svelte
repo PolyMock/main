@@ -107,7 +107,10 @@
 <div class="navbar">
 	<a href="/" class="logo">
 		<img src="/1.png" alt="Polymock Logo" class="logo-img" />
-		POLYMOCK
+		<div class="logo-text">
+			<span class="logo-title">POLYMOCK</span>
+			<span class="logo-subtitle">by Hash<span class="fox-text">Fox</span> Labs</span>
+		</div>
 	</a>
 	<div class="nav-links">
 		<a href="/" class="nav-link" class:active={currentPath === '/'}>TERMINAL</a>
@@ -306,12 +309,12 @@
 
 <style>
 	.navbar {
-		background: #151B2F;
+		background: #000000;
 		padding: 16px 24px;
 		display: flex;
 		align-items: center;
 		gap: 12px;
-		border-bottom: 1px solid #2A2F45;
+		border-bottom: 1px solid #404040;
 		flex-wrap: nowrap;
 		min-height: 64px;
 		position: sticky;
@@ -335,13 +338,38 @@
 	}
 
 	.logo-img {
-		width: 32px;
-		height: 32px;
+		width: 40px;
+		height: 40px;
 		object-fit: contain;
 	}
 
 	.logo:hover {
-		color: #00D084;
+		color: #F97316;
+	}
+
+	.logo-text {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.logo-title {
+		font-size: 18px;
+		font-weight: 700;
+		color: #E8E8E8;
+		letter-spacing: 1px;
+	}
+
+	.logo-subtitle {
+		font-size: 10px;
+		font-weight: 500;
+		color: #FFFFFF;
+		letter-spacing: 0.5px;
+	}
+
+	.fox-text {
+		color: #F97316;
+		font-weight: 700;
 	}
 
 	.nav-links {
@@ -352,7 +380,7 @@
 	}
 
 	.nav-link {
-		color: #A0A0A0;
+		color: #FFFFFF;
 		text-decoration: none;
 		font-size: 12px;
 		padding: 6px 10px;
@@ -364,15 +392,15 @@
 	}
 
 	.nav-link:hover {
-		color: #E8E8E8;
-		border-color: #3A4055;
-		background: rgba(255, 255, 255, 0.05);
+		color: #F97316;
+		border-color: #F97316;
+		background: rgba(249, 115, 22, 0.1);
 	}
 
 	.nav-link.active {
-		color: #00D084;
-		border-color: #00D084;
-		background: rgba(0, 208, 132, 0.1);
+		color: #F97316;
+		border-color: #F97316;
+		background: rgba(249, 115, 22, 0.1);
 	}
 
 	.navbar-right {
@@ -427,7 +455,7 @@
 
 	.initialize-btn {
 		padding: 8px 16px;
-		background: linear-gradient(135deg, #00B4FF 0%, #0094D6 100%);
+		background: linear-gradient(135deg, #F97316 0%, #ea580c 100%);
 		color: white;
 		border: none;
 		font-weight: 600;
@@ -441,9 +469,9 @@
 	}
 
 	.initialize-btn:hover:not(:disabled) {
-		background: linear-gradient(135deg, #00D4FF 0%, #00B4FF 100%);
+		background: linear-gradient(135deg, #00D4FF 0%, #F97316 100%);
 		transform: scale(1.02);
-		box-shadow: 0 4px 12px rgba(0, 180, 255, 0.3);
+		box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);
 	}
 
 	.initialize-btn:disabled {
@@ -472,8 +500,8 @@
 		align-items: center;
 		gap: 6px;
 		padding: 8px 14px;
-		background: linear-gradient(135deg, #1E2139 0%, #252A45 100%);
-		border: 1px solid #00D084;
+		background: #000000;
+		border: 1px solid #F97316;
 		border-radius: 8px;
 		font-size: 13px;
 		font-weight: 600;
@@ -481,13 +509,13 @@
 	}
 
 	.balance-label {
-		color: #8B92AB;
+		color: #FFFFFF;
 		font-size: 11px;
 		letter-spacing: 0.5px;
 	}
 
 	.balance-amount {
-		color: #00D084;
+		color: #FFFFFF;
 		font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
 		font-size: 14px;
 	}
@@ -509,7 +537,7 @@
 
 	.connect-account-btn:hover:not(:disabled) {
 		background: rgba(255, 255, 255, 0.05);
-		border-color: #00D084;
+		border-color: #F97316;
 		transform: scale(1.02);
 	}
 
@@ -542,7 +570,7 @@
 
 	.account-btn:hover {
 		background: #252A45;
-		border-color: #00D084;
+		border-color: #F97316;
 	}
 
 	.profile-pic {
@@ -565,10 +593,10 @@
 
 	.connect-btn {
 		padding: 8px 16px;
-		background: #1E2139;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 8px;
-		color: #E8E8E8;
+		color: #FFFFFF;
 		font-family: Inter, sans-serif;
 		font-size: 13px;
 		font-weight: 600;
@@ -591,8 +619,8 @@
 		right: auto;
 		margin-top: 8px;
 		min-width: 280px;
-		background: #151B2F;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 12px;
 		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 		z-index: 1000;
@@ -611,7 +639,7 @@
 		align-items: center;
 		gap: 12px;
 		text-align: left;
-		border-bottom: 1px solid #2A2F45;
+		border-bottom: 1px solid #404040;
 	}
 
 	.connect-option:last-child {
@@ -619,7 +647,7 @@
 	}
 
 	.connect-option:hover {
-		background: rgba(0, 208, 132, 0.1);
+		background: rgba(249, 115, 22, 0.1);
 	}
 
 	.connect-option svg {
@@ -645,10 +673,10 @@
 	/* Profile Button Styles */
 	.profile-btn {
 		padding: 6px 12px;
-		background: #1E2139;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #F97316;
 		border-radius: 8px;
-		color: #E8E8E8;
+		color: #FFFFFF;
 		font-family: Inter, sans-serif;
 		font-size: 13px;
 		font-weight: 600;
@@ -661,8 +689,8 @@
 	}
 
 	.profile-btn:hover {
-		background: #252A45;
-		border-color: #00D084;
+		background: #1A1A1A;
+		border-color: #F97316;
 	}
 
 	.profile-name {
@@ -675,7 +703,7 @@
 		width: 24px;
 		height: 24px;
 		border-radius: 50%;
-		background: linear-gradient(135deg, #00B4FF 0%, #0094D6 100%);
+		background: linear-gradient(135deg, #F97316 0%, #ea580c 100%);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -689,7 +717,7 @@
 		width: 48px;
 		height: 48px;
 		border-radius: 50%;
-		background: linear-gradient(135deg, #00B4FF 0%, #0094D6 100%);
+		background: linear-gradient(135deg, #F97316 0%, #ea580c 100%);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -706,8 +734,8 @@
 		right: auto;
 		margin-top: 8px;
 		min-width: 280px;
-		background: #151B2F;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 12px;
 		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 		z-index: 1000;
@@ -790,8 +818,8 @@
 	}
 
 	.dropdown-item:hover {
-		background: rgba(0, 208, 132, 0.1);
-		color: #00D084;
+		background: rgba(249, 115, 22, 0.1);
+		color: #F97316;
 	}
 
 	.dropdown-item:last-child:hover {
@@ -809,8 +837,8 @@
 
 	.settings-btn {
 		padding: 6px;
-		background: #1E2139;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 8px;
 		color: #E8E8E8;
 		cursor: pointer;
@@ -823,7 +851,7 @@
 
 	.settings-btn:hover {
 		background: #252A45;
-		border-color: #00D084;
+		border-color: #F97316;
 	}
 
 	.settings-dropdown {
@@ -832,8 +860,8 @@
 		right: 24px;
 		margin-top: 8px;
 		min-width: 200px;
-		background: #151B2F;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 12px;
 		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 		z-index: 1000;
@@ -856,7 +884,7 @@
 		align-items: center;
 		gap: 10px;
 		text-align: left;
-		border-bottom: 1px solid #2A2F45;
+		border-bottom: 1px solid #404040;
 	}
 
 	.settings-dropdown .dropdown-item:last-child {
@@ -864,8 +892,8 @@
 	}
 
 	.settings-dropdown .dropdown-item:hover:not(:disabled) {
-		background: rgba(0, 208, 132, 0.1);
-		color: #00D084;
+		background: rgba(249, 115, 22, 0.1);
+		color: #F97316;
 	}
 
 	.settings-dropdown .dropdown-item:disabled {

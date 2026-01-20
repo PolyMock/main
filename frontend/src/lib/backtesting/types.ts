@@ -4,10 +4,12 @@
 
 export interface StrategyConfig {
   // Market Filters
-  specificMarket?: {
+  specificMarkets?: Array<{
     conditionId?: string;
     marketSlug?: string;
-  };
+    startTime?: number; // Unix timestamp
+    endTime?: number; // Unix timestamp
+  }>;
   categories?: string[];
   minLiquidity?: number;
   maxLiquidity?: number;

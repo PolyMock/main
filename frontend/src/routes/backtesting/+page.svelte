@@ -354,10 +354,7 @@
 	let latestEntryStr: string | undefined = undefined;
 
 	let config: any = {
-		specificMarket: {
-			conditionId: undefined,
-			marketSlug: undefined
-		},
+		specificMarkets: [],
 		categories: [],
 		minTimeToResolution: undefined,
 		maxTimeToResolution: undefined,
@@ -433,12 +430,13 @@
 	const totalSteps = 5; // Markets (with date range & filters), Capital, Entry, Exit, Position Sizing
 
 	// Market browser state
-	let marketSelectionPhase: 1 | 2 = 1; // 1 = select market, 2 = select date range within market
+	let marketSelectionPhase: 1 | 2 = 1; // 1 = select markets, 2 = select date range
 	let marketStatus: 'closed' | 'open' = 'closed'; // closed = past, open = active
 	let availableMarkets: any[] = [];
 	let loadingMarkets = false;
 	let marketSearchQuery = '';
-	let selectedMarket: any | null = null; // Store the full selected market object
+	let selectedMarkets: any[] = []; // Store the full selected market objects (multi-select)
+	let selectedMarketIds: Set<string> = new Set(); // Track selected market IDs for quick lookup
 
 	// Advanced filters
 	let minVolume: number | null = null;
@@ -607,22 +605,71 @@
 		currentPage = 0;
 	}
 
-	// Select a market
-	function selectMarket(market: any) {
-		selectedMarketId = market.condition_id;
-		selectedMarket = market;
-		if (!config.specificMarket) {
-			config.specificMarket = {};
+	// Select/deselect a market (multi-select)
+	function toggleMarketSelection(market: any) {
+		console.log('toggleMarketSelection called', market);
+		const marketId = market.condition_id;
+
+		if (selectedMarketIds.has(marketId)) {
+			// Deselect
+			console.log('Deselecting market', marketId);
+			selectedMarketIds.delete(marketId);
+			selectedMarkets = selectedMarkets.filter(m => m.condition_id !== marketId);
+		} else {
+			// Select
+			console.log('Selecting market', marketId);
+			selectedMarketIds.add(marketId);
+			selectedMarkets = [...selectedMarkets, market];
 		}
-		config.specificMarket.conditionId = market.condition_id;
-		config.specificMarket.marketSlug = market.market_slug;
 
-		// Set initial date range to market's full lifetime
-		const marketStartTime = market.start_time ? new Date(market.start_time * 1000) : null;
-		const marketEndTime = market.end_time
-			? new Date(market.end_time * 1000)
-			: (market.close_time ? new Date(market.close_time * 1000) : null);
+		console.log('Selected markets count:', selectedMarkets.length);
 
+		// Update config with all selected markets, including their individual date ranges
+		config.specificMarkets = selectedMarkets.map(m => ({
+			conditionId: m.condition_id,
+			marketSlug: m.market_slug,
+			startTime: m.start_time,
+			endTime: m.end_time || m.close_time
+		}));
+
+		// Trigger reactivity
+		selectedMarketIds = new Set(selectedMarketIds);
+	}
+
+	// Calculate date range from selected markets (reactive)
+	$: marketStartTime = selectedMarkets.length > 0 ? (() => {
+		let earliest: Date | null = null;
+		selectedMarkets.forEach(market => {
+			const start = market.start_time ? new Date(market.start_time * 1000) : null;
+			if (start && (!earliest || start < earliest)) {
+				earliest = start;
+			}
+		});
+		return earliest;
+	})() : null;
+
+	$: marketEndTime = selectedMarkets.length > 0 ? (() => {
+		let latest: Date | null = null;
+		selectedMarkets.forEach(market => {
+			const end = market.end_time
+				? new Date(market.end_time * 1000)
+				: (market.close_time ? new Date(market.close_time * 1000) : null);
+			if (end && (!latest || end > latest)) {
+				latest = end;
+			}
+		});
+		return latest;
+	})() : null;
+
+	// Proceed to phase 2 with selected markets
+	function proceedToDateSelection() {
+		console.log('proceedToDateSelection called', selectedMarkets.length);
+		if (selectedMarkets.length === 0) {
+			console.log('No markets selected');
+			return;
+		}
+
+		// Set initial date range based on calculated market times
 		if (marketStartTime && marketEndTime) {
 			startDateStr = formatDateForInput(marketStartTime);
 			endDateStr = formatDateForInput(marketEndTime);
@@ -636,6 +683,7 @@
 			config.entryTimeConstraints.latestEntry = marketEndTime;
 		}
 
+		console.log('Moving to phase 2');
 		// Move to phase 2
 		marketSelectionPhase = 2;
 	}
@@ -738,13 +786,10 @@
 
 	// Clear market selection
 	function clearMarketSelection() {
-		selectedMarketId = null;
-		selectedMarket = null;
+		selectedMarkets = [];
+		selectedMarketIds = new Set();
 		marketSelectionPhase = 1;
-		if (config.specificMarket) {
-			config.specificMarket.conditionId = undefined;
-			config.specificMarket.marketSlug = undefined;
-		}
+		config.specificMarkets = [];
 	}
 
 
@@ -936,7 +981,7 @@
 			return;
 		}
 
-		if (!backtestResult || !selectedMarket) {
+		if (!backtestResult || selectedMarkets.length === 0) {
 			saveError = 'Missing backtest data';
 			return;
 		}
@@ -947,8 +992,10 @@
 		try {
 			const strategyData = {
 				strategyName: strategyName,
-				marketId: selectedMarket.condition_id,
-				marketQuestion: selectedMarket.question,
+				marketIds: selectedMarkets.map(m => m.condition_id),
+				marketQuestion: selectedMarkets.length === 1
+					? selectedMarkets[0].question
+					: `Multi-market backtest (${selectedMarkets.length} markets)`,
 				initialCapital: config.initialBankroll,
 				startDate: config.startDate?.toISOString() || '',
 				endDate: config.endDate?.toISOString() || '',
@@ -1600,6 +1647,15 @@
 												/>
 											</div>
 
+											<!-- Continue Button (Multi-select) -->
+											{#if selectedMarkets.length > 0}
+												<div class="continue-button-container">
+													<button class="continue-btn" on:click={proceedToDateSelection}>
+														Continue with {selectedMarkets.length} {selectedMarkets.length === 1 ? 'Market' : 'Markets'}
+													</button>
+												</div>
+											{/if}
+
 											<!-- Filters Toggle Button -->
 											<button class="filters-toggle-btn" on:click={() => showAdvancedFilters = !showAdvancedFilters}>
 												<span>Advanced Filters</span>
@@ -1699,7 +1755,7 @@
 													<tbody>
 														{#each paginatedEvents as event}
 															<!-- Event Row -->
-															<tr class="event-row" on:click={() => event.markets.length > 1 ? toggleEvent(event.eventSlug) : selectMarket(event.markets[0])}>
+															<tr class="event-row" on:click={() => event.markets.length > 1 ? toggleEvent(event.eventSlug) : toggleMarketSelection(event.markets[0])}>
 																<td class="event-cell">
 																	<div class="event-content">
 																		{#if event.markets.length > 1}
@@ -1767,7 +1823,7 @@
 																				<tbody>
 																					{#each event.markets as market}
 																						{@const marketVolume = market.volume_total || market.volume || market.volume_24h || market.total_volume || 0}
-																						<tr class:selected={selectedMarketId === market.condition_id} on:click|stopPropagation={() => selectMarket(market)}>
+																						<tr class:selected={selectedMarketIds.has(market.condition_id)} on:click|stopPropagation={() => toggleMarketSelection(market)}>
 																							<td class="market-question-cell">
 																								{market.title || market.question || 'Untitled'}
 																							</td>
@@ -1838,69 +1894,33 @@
 									</div>
 
 								{:else}
-									<!-- Phase 2: Select Date Range within Market -->
+									<!-- Phase 2: Select Date Range for Markets -->
 									<div class="step-header">
 										<h2>Select Date Range</h2>
-										<p>Choose the timeframe for backtesting within this market</p>
+										<p>Choose the timeframe for backtesting {selectedMarkets.length === 1 ? 'this market' : `these ${selectedMarkets.length} markets`}</p>
 									</div>
 
 									<div class="step-body">
-										<!-- Selected Market Display -->
-										{#if selectedMarket}
-											{@const selectedVolume = selectedMarket.volume_total || selectedMarket.volume || selectedMarket.volume_24h || selectedMarket.total_volume || 0}
-											{@const marketStartTime = selectedMarket.start_time ? new Date(selectedMarket.start_time * 1000) : null}
-											{@const marketEndTime = selectedMarket.end_time ? new Date(selectedMarket.end_time * 1000) : (selectedMarket.close_time ? new Date(selectedMarket.close_time * 1000) : null)}
-
+										<!-- Selected Markets Display -->
+										{#if selectedMarkets.length > 0}
 											<div class="selected-market-display">
 												<div class="selected-market-info">
-													<div class="selected-label">Selected Market:</div>
-													<div class="selected-market-title">{selectedMarket.title || selectedMarket.question}</div>
-													<div class="selected-market-meta">
-														<span>Volume: ${(selectedVolume / 1000000).toFixed(2)}M</span>
+													<div class="selected-label">Selected {selectedMarkets.length === 1 ? 'Market' : 'Markets'}: ({selectedMarkets.length})</div>
+													<div class="selected-markets-list">
+														{#each selectedMarkets as market, idx}
+															{@const selectedVolume = market.volume_total || market.volume || market.volume_24h || market.total_volume || 0}
+															<div class="selected-market-item">
+																<span class="market-number">{idx + 1}.</span>
+																<span class="market-title">{market.title || market.question}</span>
+																<span class="market-volume">${(selectedVolume / 1000000).toFixed(2)}M</span>
+																<button class="remove-market-btn" on:click={() => toggleMarketSelection(market)}>×</button>
+															</div>
+														{/each}
 													</div>
 												</div>
 												<button class="change-market-btn" on:click={clearMarketSelection}>
-													Change Market
+													Change Markets
 												</button>
-											</div>
-
-											<!-- Market Timeline -->
-											<div class="market-timeline">
-												<h3>Market Timeline</h3>
-												<div class="timeline-info">
-													<div class="timeline-item">
-														<span class="timeline-label">Created:</span>
-														<span class="timeline-value">
-															{#if marketStartTime}
-																{marketStartTime.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
-																at {marketStartTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-															{:else}
-																N/A
-															{/if}
-														</span>
-													</div>
-													<div class="timeline-item">
-														<span class="timeline-label">Finished:</span>
-														<span class="timeline-value">
-															{#if marketEndTime}
-																{marketEndTime.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
-																at {marketEndTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-															{:else}
-																N/A
-															{/if}
-														</span>
-													</div>
-													<div class="timeline-item">
-														<span class="timeline-label">Duration:</span>
-														<span class="timeline-value">
-															{#if marketStartTime && marketEndTime}
-																{Math.floor((marketEndTime.getTime() - marketStartTime.getTime()) / (1000 * 60 * 60 * 24))} days
-															{:else}
-																N/A
-															{/if}
-														</span>
-													</div>
-												</div>
 											</div>
 
 											<!-- Date Range Selector -->
@@ -3106,7 +3126,7 @@
 <style>
 	.backtesting-container {
 		min-height: 100vh;
-		background: #0a0e1a;
+		background: #000000;
 		color: white;
 		padding: 40px 20px;
 		max-width: 1600px;
@@ -3339,7 +3359,7 @@
 		display: flex;
 		gap: 12px;
 		margin-bottom: 32px;
-		border-bottom: 2px solid #2a2f45;
+		border-bottom: 2px solid #404040;
 		justify-content: center;
 	}
 
@@ -3362,7 +3382,7 @@
 
 	.main-tab.active {
 		color: white;
-		border-bottom-color: #00b4ff;
+		border-bottom-color: #F97316;
 	}
 
 	/* Sub Tabs */
@@ -3370,7 +3390,7 @@
 		display: flex;
 		gap: 8px;
 		margin-bottom: 24px;
-		border-bottom: 2px solid #2a2f45;
+		border-bottom: 2px solid #404040;
 	}
 
 	.tab {
@@ -3392,7 +3412,7 @@
 
 	.tab.active {
 		color: white;
-		border-bottom-color: #00b4ff;
+		border-bottom-color: #F97316;
 	}
 
 	.tab:disabled {
@@ -3402,8 +3422,8 @@
 
 	.section {
 		margin-bottom: 40px;
-		background: #151b2f;
-		border: 1px solid #2a2f45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 12px;
 		padding: 24px;
 	}
@@ -3422,8 +3442,8 @@
 	}
 
 	.metric-card {
-		background: #0a0e1a;
-		border: 1px solid #2a2f45;
+		background: #000000;
+		border: 1px solid #FFFFFF;
 		border-radius: 8px;
 		padding: 20px;
 	}
@@ -3462,14 +3482,14 @@
 	.metric-progress {
 		margin-top: 8px;
 		height: 4px;
-		background: #2a2f45;
+		background: #000000;
 		border-radius: 2px;
 		overflow: hidden;
 	}
 
 	.progress-bar {
 		height: 100%;
-		background: linear-gradient(90deg, #00b4ff 0%, #00d084 100%);
+		background: #F97316;
 		transition: width 0.5s ease;
 	}
 
@@ -3480,8 +3500,8 @@
 	}
 
 	.strategy-card {
-		background: #0a0e1a;
-		border: 1px solid #2a2f45;
+		background: #000000;
+		border: 1px solid #FFFFFF;
 		border-radius: 12px;
 		padding: 24px;
 	}
@@ -3554,7 +3574,7 @@
 
 	.strategy-bar {
 		height: 8px;
-		background: #2a2f45;
+		background: #000000;
 		border-radius: 4px;
 		overflow: hidden;
 	}
@@ -3579,8 +3599,8 @@
 	}
 
 	.trades-panel {
-		background: #0a0e1a;
-		border: 1px solid #2a2f45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 12px;
 		padding: 24px;
 	}
@@ -3602,8 +3622,8 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 12px;
-		background: #151b2f;
-		border: 1px solid #2a2f45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 8px;
 	}
 
@@ -3680,8 +3700,8 @@
 	}
 
 	.insight-card {
-		background: #0a0e1a;
-		border: 1px solid #2a2f45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-left: 3px solid #00b4ff;
 		border-radius: 8px;
 		padding: 16px 20px;
@@ -3703,7 +3723,7 @@
 	.spinner {
 		width: 40px;
 		height: 40px;
-		border: 3px solid #2a2f45;
+		border: 3px solid #404040;
 		border-top-color: #00b4ff;
 		border-radius: 50%;
 		animation: spin 1s linear infinite;
@@ -3741,8 +3761,8 @@
 	}
 
 	.config-section {
-		background: #151b2f;
-		border: 1px solid #2a2f45;
+		background: #000000;
+		border: 1px solid #FFFFFF;
 		border-radius: 12px;
 		padding: 24px;
 	}
@@ -3771,8 +3791,8 @@
 	.form-group input,
 	.form-group select {
 		width: 100%;
-		background: #0a0e1a;
-		border: 1px solid #2a2f45;
+		background: #000000;
+		border: 1px solid #FFFFFF;
 		border-radius: 8px;
 		padding: 12px;
 		color: white;
@@ -3782,7 +3802,7 @@
 	.form-group input:focus,
 	.form-group select:focus {
 		outline: none;
-		border-color: #00b4ff;
+		border-color: #F97316;
 	}
 
 	.form-grid {
@@ -3815,15 +3835,15 @@
 	}
 
 	.run-section {
-		background: #151b2f;
-		border: 1px solid #2a2f45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 12px;
 		padding: 24px;
 		text-align: center;
 	}
 
 	.btn-run {
-		background: linear-gradient(90deg, #00b4ff 0%, #00d084 100%);
+		background: #F97316;
 		border: none;
 		color: white;
 		padding: 16px 48px;
@@ -3839,7 +3859,7 @@
 
 	.btn-run:hover:not(:disabled) {
 		transform: translateY(-2px);
-		box-shadow: 0 8px 16px rgba(0, 180, 255, 0.3);
+		box-shadow: 0 8px 16px rgba(249, 115, 22, 0.3);
 	}
 
 	.btn-run:disabled {
@@ -3859,14 +3879,14 @@
 	.progress-bar-container {
 		margin-top: 16px;
 		height: 8px;
-		background: #2a2f45;
+		background: #000000;
 		border-radius: 4px;
 		overflow: hidden;
 	}
 
 	.progress-fill {
 		height: 100%;
-		background: #3b82f6;
+		background: #F97316;
 		transition: width 0.3s ease;
 	}
 
@@ -3894,8 +3914,8 @@
 	}
 
 	.btn-export {
-		background: #151b2f;
-		border: 1px solid #2a2f45;
+		background: #000000;
+		border: 1px solid #404040;
 		color: white;
 		padding: 10px 20px;
 		font-size: 14px;
@@ -3906,8 +3926,8 @@
 	}
 
 	.btn-export:hover {
-		background: #1f2637;
-		border-color: #00b4ff;
+		background: rgba(249, 115, 22, 0.1);
+		border-color: #F97316;
 		transform: translateY(-1px);
 	}
 
@@ -3918,8 +3938,8 @@
 	}
 
 	.result-card {
-		background: #151b2f;
-		border: 1px solid #2a2f45;
+		background: #000000;
+		border: 1px solid #FFFFFF;
 		border-radius: 12px;
 		padding: 20px;
 		text-align: center;
@@ -3957,7 +3977,7 @@
 	}
 
 	thead {
-		background: #0a0e1a;
+		background: #000000;
 	}
 
 	th {
@@ -3972,7 +3992,7 @@
 
 	td {
 		padding: 12px;
-		border-top: 1px solid #2a2f45;
+		border-top: 1px solid #404040;
 		color: #e8e8e8;
 	}
 
@@ -3986,7 +4006,7 @@
 	.exit-reason {
 		font-size: 11px;
 		padding: 2px 6px;
-		background: #2a2f45;
+		background: #000000;
 		border-radius: 4px;
 		color: #8b92ab;
 	}
@@ -4026,16 +4046,16 @@
 	/* Market Browser Styles */
 	.markets-container {
 		margin-top: 1rem;
-		border: 1px solid #334155;
+		border: 1px solid #404040;
 		border-radius: 8px;
 		overflow: hidden;
-		background: #1a1f2e;
+		background: #000000;
 	}
 
 	.markets-header {
 		padding: 0.75rem 1rem;
 		background: #0f1419;
-		border-bottom: 1px solid #334155;
+		border-bottom: 1px solid #404040;
 		font-size: 0.875rem;
 		color: #94a3b8;
 		font-weight: 500;
@@ -4049,9 +4069,9 @@
 	.market-item {
 		width: 100%;
 		padding: 1rem;
-		background: #1a1f2e;
+		background: #000000;
 		border: none;
-		border-bottom: 1px solid #334155;
+		border-bottom: 1px solid #404040;
 		cursor: pointer;
 		transition: all 0.2s;
 		display: flex;
@@ -4090,7 +4110,7 @@
 	}
 
 	.market-category {
-		background: #334155;
+		background: #000000;
 		padding: 0.125rem 0.5rem;
 		border-radius: 4px;
 		font-weight: 500;
@@ -4122,11 +4142,11 @@
 		color: #64748b;
 		font-size: 0.85rem;
 		background: #0f1419;
-		border-top: 1px solid #334155;
+		border-top: 1px solid #404040;
 	}
 
 	.btn-secondary {
-		background: #334155;
+		background: #000000;
 		color: white;
 		border: none;
 		border-radius: 8px;
@@ -4140,7 +4160,7 @@
 	}
 
 	.btn-secondary:hover:not(:disabled) {
-		background: #475569;
+		background: rgba(249, 115, 22, 0.1);
 	}
 
 	.btn-secondary:disabled {
@@ -4213,7 +4233,7 @@
 
 	.btn-load-markets {
 		width: 100%;
-		background: #3b82f6;
+		background: #F97316;
 		color: white;
 		border: none;
 		border-radius: 8px;
@@ -4229,7 +4249,7 @@
 	}
 
 	.btn-load-markets:hover:not(:disabled) {
-		background: #2563eb;
+		background: #ea580c;
 		transform: translateY(-1px);
 		box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
 	}
@@ -4242,15 +4262,15 @@
 	.market-filters {
 		margin-top: 1.5rem;
 		padding-top: 1.5rem;
-		border-top: 1px solid #334155;
+		border-top: 1px solid #404040;
 	}
 
 	.filter-results {
 		margin-top: 0.75rem;
 		padding: 0.75rem 1rem;
-		background: #1a1f2e;
+		background: #000000;
 		border-radius: 6px;
-		border: 1px solid #334155;
+		border: 1px solid #404040;
 	}
 
 .spinner-small {
@@ -4265,7 +4285,7 @@
 
 /* ============= WIZARD STYLES ============= */
 .wizard-container {
-	background: #141824;
+	background: #000000;
 	border-radius: 12px;
 	padding: 32px;
 	max-width: 100%;
@@ -4280,7 +4300,7 @@
 
 .progress-bar {
 	height: 4px;
-	background: #1e2537;
+	background: #000000;
 	border-radius: 2px;
 	overflow: hidden;
 	margin-bottom: 16px;
@@ -4288,7 +4308,7 @@
 
 .progress-fill {
 	height: 100%;
-	background: #3b82f6;
+	background: #F97316;
 	transition: width 0.3s ease;
 }
 
@@ -4301,30 +4321,30 @@
 .progress-step {
 	flex: 1;
 	height: 40px;
-	background: #1e2537;
-	border: 2px solid transparent;
+	background: #000000;
+	border: 2px solid #FFFFFF;
 	border-radius: 8px;
-	color: #64748b;
+	color: #FFFFFF;
 	font-weight: 600;
 	cursor: pointer;
 	transition: all 0.2s;
 }
 
 .progress-step:hover {
-	background: #252d42;
-	border-color: #3b82f6;
+	background: rgba(249, 115, 22, 0.1);
+	border-color: #F97316;
 }
 
 .progress-step.active {
-	background: #1e2537;
+	background: #000000;
 	color: white;
-	border-color: #3b82f6;
+	border-color: #F97316;
 }
 
 .progress-step.completed {
-	background: #1e2537;
+	background: #000000;
 	color: #8b92ab;
-	border-color: #2a2f45;
+	border-color: #FFFFFF;
 }
 
 .wizard-content {
@@ -4392,8 +4412,8 @@
 .date-input {
 	width: 100%;
 	padding: 12px 16px;
-	background: #1e2537;
-	border: 2px solid #2a2f45;
+	background: #000000;
+	border: 2px solid #FFFFFF;
 	border-radius: 8px;
 	color: white;
 	font-size: 16px;
@@ -4402,15 +4422,15 @@
 
 .date-input:focus {
 	outline: none;
-	border-color: #3b82f6;
-	background: #252d42;
+	border-color: #F97316;
+	background: rgba(249, 115, 22, 0.1);
 }
 
 
 .date-summary {
 	text-align: center;
 	padding: 12px;
-	background: #1e2537;
+	background: #000000;
 	border-radius: 8px;
 	color: #60a5fa;
 	font-size: 14px;
@@ -4424,9 +4444,9 @@
 	gap: 12px;
 	margin-bottom: 24px;
 	padding: 24px;
-	background: #1e2537;
+	background: #000000;
 	border-radius: 12px;
-	border: 2px solid #2a2f45;
+	border: 2px solid #FFFFFF;
 }
 
 .capital-input {
@@ -4458,8 +4478,8 @@
 
 .preset-btn {
 	padding: 12px 16px;
-	background: #1e2537;
-	border: 2px solid #2a2f45;
+	background: #000000;
+	border: 2px solid #FFFFFF;
 	border-radius: 8px;
 	color: #8b92ab;
 	font-weight: 600;
@@ -4468,8 +4488,8 @@
 }
 
 .preset-btn:hover {
-	background: #252d42;
-	border-color: #3b82f6;
+	background: rgba(249, 115, 22, 0.1);
+	border-color: #F97316;
 	color: white;
 }
 
@@ -4481,8 +4501,8 @@
 	gap: 16px;
 	margin-bottom: 24px;
 	padding: 20px;
-	background: #1e3a5f;
-	border: 2px solid #3b82f6;
+	background: #000000;
+	border: 2px solid #F97316;
 	border-radius: 8px;
 }
 
@@ -4508,9 +4528,9 @@
 .change-market-btn {
 	padding: 10px 24px;
 	background: transparent;
-	border: 2px solid #3b82f6;
+	border: 2px solid #F97316;
 	border-radius: 8px;
-	color: #3b82f6;
+	color: #F97316;
 	font-size: 14px;
 	font-weight: 600;
 	cursor: pointer;
@@ -4519,8 +4539,90 @@
 }
 
 .change-market-btn:hover {
-	background: #3b82f6;
+	background: #F97316;
 	color: white;
+}
+
+/* Multi-market selection styles */
+.selected-markets-list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-top: 12px;
+}
+
+.selected-market-item {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 10px 12px;
+	background: rgba(249, 115, 22, 0.1);
+	border-radius: 6px;
+	border: 1px solid rgba(249, 115, 22, 0.3);
+}
+
+.market-number {
+	font-size: 13px;
+	color: #8b92ab;
+	min-width: 20px;
+}
+
+.market-title {
+	flex: 1;
+	font-size: 14px;
+	color: white;
+	line-height: 1.4;
+}
+
+.market-volume {
+	font-size: 13px;
+	color: #8b92ab;
+	white-space: nowrap;
+}
+
+.remove-market-btn {
+	width: 24px;
+	height: 24px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: transparent;
+	border: 1px solid rgba(239, 68, 68, 0.5);
+	border-radius: 4px;
+	color: #ef4444;
+	font-size: 18px;
+	cursor: pointer;
+	transition: all 0.2s;
+	padding: 0;
+	line-height: 1;
+}
+
+.remove-market-btn:hover {
+	background: rgba(239, 68, 68, 0.2);
+	border-color: #ef4444;
+}
+
+.continue-button-container {
+	display: flex;
+	justify-content: center;
+	margin: 16px 0;
+}
+
+.continue-btn {
+	padding: 12px 24px;
+	background: transparent;
+	border: 2px solid #FFFFFF;
+	border-radius: 8px;
+	color: #8b92ab;
+	font-size: 14px;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.2s;
+}
+
+.continue-btn:hover {
+	border-color: #F97316;
+	color: #F97316;
 }
 
 .category-filter-grid {
@@ -4530,14 +4632,14 @@
 	gap: 8px;
 	margin-bottom: 24px;
 	padding: 16px;
-	background: #1e2537;
+	background: #000000;
 	border-radius: 8px;
 }
 
 .category-chip {
 	padding: 10px 18px;
 	background: transparent;
-	border: 2px solid #2a2f45;
+	border: 2px solid #FFFFFF;
 	border-radius: 8px;
 	color: #8b92ab;
 	font-size: 14px;
@@ -4548,14 +4650,14 @@
 }
 
 .category-chip:hover {
-	background: #252d42;
-	border-color: #3b82f6;
+	background: rgba(249, 115, 22, 0.1);
+	border-color: #F97316;
 	color: white;
 }
 
 .category-chip.selected {
-	background: #1e3a5f;
-	border-color: #3b82f6;
+	background: #000000;
+	border-color: #F97316;
 	color: white;
 }
 
@@ -4566,8 +4668,8 @@
 .search-input {
 	width: 100%;
 	padding: 12px 16px;
-	background: #1e2537;
-	border: 2px solid #2a2f45;
+	background: #000000;
+	border: 2px solid #FFFFFF;
 	border-radius: 8px;
 	color: white;
 	font-size: 16px;
@@ -4576,7 +4678,7 @@
 
 .search-input:focus {
 	outline: none;
-	border-color: #3b82f6;
+	border-color: #F97316;
 }
 
 .search-results-count {
@@ -4596,7 +4698,7 @@
 	width: 32px;
 	height: 32px;
 	border: 3px solid rgba(255, 255, 255, 0.1);
-	border-top-color: #3b82f6;
+	border-top-color: #F97316;
 	border-radius: 50%;
 	animation: spin 0.6s linear infinite;
 	margin-bottom: 16px;
@@ -4615,8 +4717,8 @@
 	width: 100%;
 	text-align: left;
 	padding: 16px;
-	background: #1e2537;
-	border: 2px solid #2a2f45;
+	background: #000000;
+	border: 2px solid #FFFFFF;
 	border-radius: 8px;
 	cursor: pointer;
 	transition: all 0.2s;
@@ -4624,14 +4726,14 @@
 }
 
 .market-card:hover {
-	background: #252d42;
-	border-color: #3b82f6;
+	background: rgba(249, 115, 22, 0.1);
+	border-color: #F97316;
 	transform: translateY(-2px);
 }
 
 .market-card.selected {
-	background: #1e3a5f;
-	border-color: #3b82f6;
+	background: #000000;
+	border-color: #F97316;
 }
 
 .market-title {
@@ -4652,7 +4754,7 @@
 .market-tag {
 	font-size: 12px;
 	padding: 4px 8px;
-	background: #2a2f45;
+	background: #000000;
 	border-radius: 4px;
 	color: #8b92ab;
 }
@@ -4681,7 +4783,7 @@
 	top: 12px;
 	right: 12px;
 	padding: 4px 12px;
-	background: #3b82f6;
+	background: #F97316;
 	color: white;
 	border-radius: 12px;
 	font-size: 12px;
@@ -4692,7 +4794,7 @@
 	width: 100%;
 	padding: 12px;
 	background: transparent;
-	border: 2px dashed #2a2f45;
+	border: 2px dashed #404040;
 	border-radius: 8px;
 	color: #64748b;
 	cursor: pointer;
@@ -4745,8 +4847,8 @@
 .filter-input-uniform {
 	width: 100%;
 	padding: 12px 16px;
-	background: #1e2537;
-	border: 2px solid #2a2f45;
+	background: #000000;
+	border: 2px solid #FFFFFF;
 	border-radius: 8px;
 	color: white;
 	font-size: 14px;
@@ -4757,8 +4859,8 @@
 
 .filter-input-uniform:focus {
 	outline: none;
-	border-color: #3b82f6;
-	background: #252d42;
+	border-color: #F97316;
+	background: rgba(249, 115, 22, 0.1);
 }
 
 .filter-input-uniform::placeholder {
@@ -4768,8 +4870,8 @@
 .duration-display {
 	width: 100%;
 	padding: 12px 16px;
-	background: #1e2537;
-	border: 2px solid #2a2f45;
+	background: #000000;
+	border: 2px solid #FFFFFF;
 	border-radius: 8px;
 	color: white;
 	font-size: 14px;
@@ -4782,8 +4884,8 @@
 .advanced-filters-panel {
 	margin-top: 16px;
 	padding: 16px;
-	background: #1e2537;
-	border: 2px solid #2a2f45;
+	background: #000000;
+	border: 2px solid #FFFFFF;
 	border-radius: 8px;
 }
 
@@ -4807,8 +4909,8 @@
 
 .filter-input {
 	padding: 10px 12px;
-	background: #1e2537;
-	border: 2px solid #2a2f45;
+	background: #000000;
+	border: 2px solid #FFFFFF;
 	border-radius: 6px;
 	color: white;
 	font-size: 14px;
@@ -4817,8 +4919,8 @@
 
 .filter-input:focus {
 	outline: none;
-	border-color: #3b82f6;
-	background: #252d42;
+	border-color: #F97316;
+	background: rgba(249, 115, 22, 0.1);
 }
 
 .filter-input::placeholder {
@@ -4848,7 +4950,7 @@
 }
 
 .events-table thead {
-	background: rgba(20, 24, 36, 0.5);
+	background: rgba(0, 0, 0, 0.5);
 }
 
 .events-table th {
@@ -4859,7 +4961,7 @@
 	color: #8b92ab;
 	text-transform: uppercase;
 	letter-spacing: 0.5px;
-	border-bottom: 1px solid #2a2f45;
+	border-bottom: 1px solid #404040;
 }
 
 .event-header {
@@ -4873,7 +4975,7 @@
 }
 
 .sortable-header:hover {
-	background: rgba(59, 130, 246, 0.1);
+	background: rgba(249, 115, 22, 0.1);
 }
 
 .sort-header-content {
@@ -4893,19 +4995,19 @@
 }
 
 .sort-indicator.active {
-	color: #3b82f6;
+	color: #F97316;
 }
 
 /* Event Row Styling */
 .event-row {
-	border-bottom: 1px solid #2a2f45;
+	border-bottom: 1px solid #404040;
 	transition: background 0.2s;
 	cursor: pointer;
-	background: rgba(20, 24, 36, 0.3);
+	background: rgba(0, 0, 0, 0.3);
 }
 
 .event-row:hover {
-	background: rgba(59, 130, 246, 0.08);
+	background: rgba(249, 115, 22, 0.08);
 }
 
 .event-row td {
@@ -4928,7 +5030,7 @@
 .expand-icon {
 	background: none;
 	border: none;
-	color: #3b82f6;
+	color: #F97316;
 	font-size: 14px;
 	cursor: pointer;
 	padding: 4px 8px;
@@ -4941,7 +5043,7 @@
 }
 
 .expand-icon:hover {
-	background: rgba(59, 130, 246, 0.1);
+	background: rgba(249, 115, 22, 0.1);
 }
 
 .expand-icon.expanded {
@@ -4953,7 +5055,7 @@
 	height: 36px;
 	border-radius: 50%;
 	object-fit: cover;
-	border: 2px solid #2a2f45;
+	border: 2px solid #FFFFFF;
 }
 
 .event-info {
@@ -5004,7 +5106,7 @@
 .tag-badge {
 	display: inline-block;
 	padding: 4px 10px;
-	background: #2a2f45;
+	background: #000000;
 	border-radius: 4px;
 	color: #8b92ab;
 	font-size: 12px;
@@ -5021,7 +5123,7 @@
 /* Nested Markets Table (Expanded Events) */
 .markets-expanded-row {
 	background: rgba(10, 14, 27, 0.5);
-	border-bottom: 1px solid #2a2f45;
+	border-bottom: 1px solid #404040;
 }
 
 .markets-expanded-cell {
@@ -5030,19 +5132,19 @@
 
 .nested-markets-container {
 	padding: 16px 16px 16px 56px; /* Extra left padding for indentation */
-	background: rgba(20, 24, 36, 0.3);
+	background: rgba(0, 0, 0, 0.3);
 }
 
 .nested-markets-table {
 	width: 100%;
 	border-collapse: collapse;
-	background: rgba(30, 37, 55, 0.5);
+	background: rgba(0, 0, 0, 0.5);
 	border-radius: 6px;
 	overflow: hidden;
 }
 
 .nested-markets-table thead {
-	background: rgba(20, 24, 36, 0.8);
+	background: rgba(0, 0, 0, 0.8);
 }
 
 .nested-markets-table th {
@@ -5053,11 +5155,11 @@
 	color: #64748b;
 	text-transform: uppercase;
 	letter-spacing: 0.5px;
-	border-bottom: 1px solid #2a2f45;
+	border-bottom: 1px solid #404040;
 }
 
 .nested-markets-table tbody tr {
-	border-bottom: 1px solid rgba(42, 47, 69, 0.5);
+	border-bottom: 1px solid rgba(64, 64, 64, 0.5);
 	transition: background 0.2s;
 	cursor: pointer;
 }
@@ -5067,12 +5169,12 @@
 }
 
 .nested-markets-table tbody tr:hover {
-	background: rgba(59, 130, 246, 0.08);
+	background: rgba(249, 115, 22, 0.08);
 }
 
 .nested-markets-table tbody tr.selected {
-	background: rgba(59, 130, 246, 0.15);
-	border-left: 3px solid #3b82f6;
+	background: rgba(249, 115, 22, 0.15);
+	border-left: 3px solid #F97316;
 }
 
 .nested-markets-table td {
@@ -5108,7 +5210,7 @@
 	align-items: center;
 	margin-top: 20px;
 	padding: 16px;
-	background: #1e2537;
+	background: #000000;
 	border-radius: 8px;
 }
 
@@ -5120,8 +5222,8 @@
 
 .pagination-btn {
 	padding: 8px 16px;
-	background: #252d42;
-	border: 1px solid #2a2f45;
+	background: rgba(249, 115, 22, 0.1);
+	border: 1px solid #404040;
 	border-radius: 6px;
 	color: white;
 	font-size: 13px;
@@ -5131,8 +5233,8 @@
 }
 
 .pagination-btn:hover:not(:disabled) {
-	background: #2a2f45;
-	border-color: #3b82f6;
+	background: #000000;
+	border-color: #F97316;
 }
 
 .pagination-btn:disabled {
@@ -5156,8 +5258,8 @@
 
 .rows-per-page select {
 	padding: 6px 12px;
-	background: #252d42;
-	border: 1px solid #2a2f45;
+	background: rgba(249, 115, 22, 0.1);
+	border: 1px solid #404040;
 	border-radius: 6px;
 	color: white;
 	font-size: 13px;
@@ -5174,7 +5276,7 @@
 
 .selected-market-meta span {
 	padding: 4px 12px;
-	background: #252d42;
+	background: rgba(249, 115, 22, 0.1);
 	border-radius: 4px;
 }
 
@@ -5199,8 +5301,8 @@
 
 .entry-btn {
 	padding: 12px 16px;
-	background: #1e2537;
-	border: 2px solid #2a2f45;
+	background: #000000;
+	border: 2px solid #FFFFFF;
 	border-radius: 8px;
 	color: #8b92ab;
 	font-weight: 600;
@@ -5209,13 +5311,13 @@
 }
 
 .entry-btn:hover {
-	background: #252d42;
-	border-color: #3b82f6;
+	background: rgba(249, 115, 22, 0.1);
+	border-color: #F97316;
 }
 
 .entry-btn.active {
-	background: #1e3a5f;
-	border-color: #3b82f6;
+	background: #000000;
+	border-color: #F97316;
 	color: white;
 }
 
@@ -5230,7 +5332,7 @@
 	align-items: center;
 	gap: 12px;
 	padding: 12px 16px;
-	background: #1e2537;
+	background: #000000;
 	border-radius: 8px;
 }
 
@@ -5244,7 +5346,7 @@
 .price-slider {
 	flex: 1;
 	height: 6px;
-	background: #2a2f45;
+	background: #FFFFFF;
 	border-radius: 3px;
 	outline: none;
 	-webkit-appearance: none;
@@ -5255,7 +5357,7 @@
 	appearance: none;
 	width: 18px;
 	height: 18px;
-	background: #3b82f6;
+	background: #F97316;
 	border-radius: 50%;
 	cursor: pointer;
 }
@@ -5263,7 +5365,7 @@
 .price-slider::-moz-range-thumb {
 	width: 18px;
 	height: 18px;
-	background: #3b82f6;
+	background: #F97316;
 	border-radius: 50%;
 	cursor: pointer;
 	border: none;
@@ -5281,8 +5383,8 @@
 .exit-input {
 	width: 100%;
 	padding: 12px 16px;
-	background: #1e2537;
-	border: 2px solid #2a2f45;
+	background: #000000;
+	border: 2px solid #FFFFFF;
 	border-radius: 8px;
 	color: white;
 	font-size: 16px;
@@ -5290,7 +5392,7 @@
 
 .exit-input:focus {
 	outline: none;
-	border-color: #3b82f6;
+	border-color: #F97316;
 }
 
 .checkbox-label {
@@ -5298,7 +5400,7 @@
 	align-items: center;
 	gap: 12px;
 	padding: 16px;
-	background: #1e2537;
+	background: #000000;
 	border-radius: 8px;
 	cursor: pointer;
 }
@@ -5306,7 +5408,7 @@
 .checkbox-label input[type="checkbox"] {
 	width: 20px;
 	height: 20px;
-	accent-color: #3b82f6;
+	accent-color: #F97316;
 }
 
 .checkbox-label span {
@@ -5334,8 +5436,8 @@
 	align-items: center;
 	gap: 10px;
 	padding: 14px 16px;
-	background: #1e2537;
-	border: 2px solid #2a2f45;
+	background: #000000;
+	border: 2px solid #FFFFFF;
 	border-radius: 8px;
 	color: #8b92ab;
 	font-weight: 600;
@@ -5345,13 +5447,13 @@
 }
 
 .toggle-feature-btn:hover {
-	background: #252d42;
-	border-color: #3b82f6;
+	background: rgba(249, 115, 22, 0.1);
+	border-color: #F97316;
 }
 
 .toggle-feature-btn.active {
-	background: #1e3a5f;
-	border-color: #3b82f6;
+	background: #000000;
+	border-color: #F97316;
 	color: white;
 }
 
@@ -5362,13 +5464,13 @@
 	width: 20px;
 	height: 20px;
 	border-radius: 4px;
-	background: #2a2f45;
+	background: #000000;
 	font-size: 14px;
 	transition: all 0.2s;
 }
 
 .toggle-feature-btn.active .toggle-icon {
-	background: #3b82f6;
+	background: #F97316;
 	color: white;
 }
 
@@ -5380,8 +5482,8 @@
 .feature-config {
 	margin-top: 16px;
 	padding: 20px;
-	background: #141824;
-	border: 1px solid #2a2f45;
+	background: #000000;
+	border: 1px solid #404040;
 	border-radius: 8px;
 }
 
@@ -5414,8 +5516,8 @@
 .date-input {
 	width: 100%;
 	padding: 12px 16px;
-	background: #1e2537;
-	border: 1px solid #2d3548;
+	background: #000000;
+	border: 1px solid #FFFFFF;
 	border-radius: 8px;
 	color: white;
 	font-size: 15px;
@@ -5423,7 +5525,7 @@
 
 .date-input:focus {
 	outline: none;
-	border-color: #3b82f6;
+	border-color: #F97316;
 }
 
 .help-text {
@@ -5459,8 +5561,8 @@
 .frequency-input {
 	width: 100%;
 	padding: 12px 16px;
-	background: #1e2537;
-	border: 1px solid #2d3548;
+	background: #000000;
+	border: 1px solid #FFFFFF;
 	border-radius: 8px;
 	color: white;
 	font-size: 15px;
@@ -5468,7 +5570,7 @@
 
 .frequency-input:focus {
 	outline: none;
-	border-color: #3b82f6;
+	border-color: #F97316;
 }
 
 .trailing-stop-config {
@@ -5477,7 +5579,7 @@
 	gap: 16px;
 	margin-top: 16px;
 	padding: 16px;
-	background: #141824;
+	background: #000000;
 	border-radius: 8px;
 }
 
@@ -5490,8 +5592,8 @@
 .trailing-input {
 	width: 100%;
 	padding: 12px 16px;
-	background: #1e2537;
-	border: 1px solid #2d3548;
+	background: #000000;
+	border: 1px solid #FFFFFF;
 	border-radius: 8px;
 	color: white;
 	font-size: 15px;
@@ -5499,13 +5601,13 @@
 
 .trailing-input:focus {
 	outline: none;
-	border-color: #3b82f6;
+	border-color: #F97316;
 }
 
 .partial-exits-config {
 	margin-top: 16px;
 	padding: 16px;
-	background: #141824;
+	background: #000000;
 	border-radius: 8px;
 	display: flex;
 	flex-direction: column;
@@ -5542,8 +5644,8 @@
 .partial-input {
 	flex: 1;
 	padding: 10px 12px;
-	background: #1e2537;
-	border: 1px solid #2d3548;
+	background: #000000;
+	border: 1px solid #FFFFFF;
 	border-radius: 6px;
 	color: white;
 	font-size: 14px;
@@ -5551,7 +5653,7 @@
 
 .partial-input:focus {
 	outline: none;
-	border-color: #3b82f6;
+	border-color: #F97316;
 }
 
 .unit-label {
@@ -5579,8 +5681,8 @@
 
 .sizing-btn {
 	padding: 12px 24px;
-	background: #1e2537;
-	border: 2px solid #2d3548;
+	background: #000000;
+	border: 2px solid #FFFFFF;
 	border-radius: 8px;
 	color: #9ca3af;
 	cursor: pointer;
@@ -5589,13 +5691,13 @@
 }
 
 .sizing-btn:hover {
-	border-color: #3b82f6;
+	border-color: #F97316;
 	color: white;
 }
 
 .sizing-btn.active {
-	background: #3b82f6;
-	border-color: #3b82f6;
+	background: #F97316;
+	border-color: #F97316;
 	color: white;
 }
 
@@ -5608,8 +5710,8 @@
 .sizing-input {
 	width: 100%;
 	padding: 12px 16px;
-	background: #1e2537;
-	border: 1px solid #2d3548;
+	background: #000000;
+	border: 1px solid #FFFFFF;
 	border-radius: 8px;
 	color: white;
 	font-size: 15px;
@@ -5617,12 +5719,12 @@
 
 .sizing-input:focus {
 	outline: none;
-	border-color: #3b82f6;
+	border-color: #F97316;
 }
 
 /* Review & Run Step */
 .config-summary {
-	background: #1e2537;
+	background: #000000;
 	border-radius: 12px;
 	padding: 24px;
 	margin-bottom: 24px;
@@ -5664,8 +5766,8 @@
 .btn-run-backtest {
 	width: 100%;
 	padding: 16px 32px;
-	background: #1e2537;
-	border: 2px solid #2a2f45;
+	background: #000000;
+	border: 2px solid #FFFFFF;
 	border-radius: 8px;
 	color: white;
 	font-size: 18px;
@@ -5679,8 +5781,8 @@
 }
 
 .btn-run-backtest:hover:not(:disabled) {
-	background: #252d42;
-	border-color: #3b82f6;
+	background: rgba(249, 115, 22, 0.1);
+	border-color: #F97316;
 }
 
 .btn-run-backtest:disabled {
@@ -5695,13 +5797,13 @@
 	gap: 16px;
 	margin-top: 32px;
 	padding-top: 24px;
-	border-top: 2px solid #2a2f45;
+	border-top: 2px solid #404040;
 }
 
 .nav-btn {
 	padding: 12px 32px;
-	background: #1e2537;
-	border: 2px solid #2a2f45;
+	background: #000000;
+	border: 2px solid #FFFFFF;
 	border-radius: 8px;
 	color: white;
 	font-size: 16px;
@@ -5711,8 +5813,8 @@
 }
 
 .nav-btn:hover:not(:disabled) {
-	background: #252d42;
-	border-color: #3b82f6;
+	background: rgba(249, 115, 22, 0.1);
+	border-color: #F97316;
 }
 
 .nav-btn:disabled {
@@ -5726,8 +5828,8 @@
 
 /* Market Timeline Styles */
 .market-timeline {
-	background: #1a1f2e;
-	border: 1px solid #2d3748;
+	background: #000000;
+	border: 1px solid #404040;
 	border-radius: 8px;
 	padding: 24px;
 	margin: 24px 0;
@@ -5752,7 +5854,7 @@
 	padding: 12px;
 	background: #0f1419;
 	border-radius: 6px;
-	border: 1px solid #2d3748;
+	border: 1px solid #404040;
 }
 
 .timeline-label {
@@ -5770,8 +5872,8 @@
 
 /* Date Range Selector Styles */
 .date-range-selector {
-	background: #1a1f2e;
-	border: 1px solid #2d3748;
+	background: #000000;
+	border: 1px solid #404040;
 	border-radius: 8px;
 	padding: 24px;
 	margin: 24px 0;
@@ -5802,8 +5904,8 @@
 .search-input {
 	width: 100%;
 	padding: 14px 20px;
-	background: #1a1f2e;
-	border: 2px solid #2d3748;
+	background: #000000;
+	border: 2px solid #FFFFFF;
 	border-radius: 12px;
 	color: #e2e8f0;
 	font-size: 16px;
@@ -5813,7 +5915,7 @@
 
 .search-input:focus {
 	outline: none;
-	border-color: #3b82f6;
+	border-color: #F97316;
 	background: #0f1419;
 }
 
@@ -5827,8 +5929,8 @@
 	align-items: center;
 	gap: 12px;
 	padding: 12px 20px;
-	background: #1a1f2e;
-	border: 2px solid #2d3748;
+	background: #000000;
+	border: 2px solid #FFFFFF;
 	border-radius: 12px;
 	color: #e2e8f0;
 	font-size: 14px;
@@ -5840,7 +5942,7 @@
 }
 
 .filters-toggle-btn:hover {
-	border-color: #3b82f6;
+	border-color: #F97316;
 	background: #0f1419;
 }
 
@@ -5851,8 +5953,8 @@
 
 /* Filters Panel (Below) */
 .filters-panel {
-	background: #1a1f2e;
-	border: 2px solid #2d3748;
+	background: #000000;
+	border: 2px solid #FFFFFF;
 	border-radius: 12px;
 	padding: 20px;
 	margin-bottom: 16px;
@@ -5881,7 +5983,7 @@
 	width: 100%;
 	padding: 10px 14px;
 	background: #0f1419;
-	border: 1px solid #2d3748;
+	border: 1px solid #404040;
 	border-radius: 8px;
 	color: #e2e8f0;
 	font-size: 14px;
@@ -5892,7 +5994,7 @@
 
 .filter-select:focus {
 	outline: none;
-	border-color: #3b82f6;
+	border-color: #F97316;
 }
 
 .volume-inputs-inline {
@@ -5905,7 +6007,7 @@
 	flex: 1;
 	padding: 10px 14px;
 	background: #0f1419;
-	border: 1px solid #2d3748;
+	border: 1px solid #404040;
 	border-radius: 8px;
 	color: #e2e8f0;
 	font-size: 14px;
@@ -5915,7 +6017,7 @@
 
 .volume-input-small:focus {
 	outline: none;
-	border-color: #3b82f6;
+	border-color: #F97316;
 }
 
 .volume-input-small::placeholder {
@@ -5938,7 +6040,7 @@
 	margin-top: 12px;
 	padding: 16px;
 	background: #0f1419;
-	border: 1px solid #2d3748;
+	border: 1px solid #404040;
 	border-radius: 8px;
 }
 
@@ -5957,8 +6059,8 @@
 
 .volume-input {
 	padding: 10px 14px;
-	background: #1a1f2e;
-	border: 1px solid #2d3748;
+	background: #000000;
+	border: 1px solid #404040;
 	border-radius: 6px;
 	color: #e2e8f0;
 	font-size: 14px;
@@ -5967,7 +6069,7 @@
 
 .volume-input:focus {
 	outline: none;
-	border-color: #3b82f6;
+	border-color: #F97316;
 }
 
 .volume-input::placeholder {
@@ -5990,8 +6092,8 @@
 
 /* Save Strategy Button */
 .btn-save {
-	background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-	border: 1px solid #3b82f6;
+	background: #F97316;
+	border: 1px solid #F97316;
 	color: white;
 	padding: 10px 20px;
 	border-radius: 8px;
@@ -6005,9 +6107,7 @@
 }
 
 .btn-save:hover {
-	background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-	transform: translateY(-2px);
-	box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+	background: #ea580c;
 }
 
 .btn-save svg {
@@ -6031,7 +6131,7 @@
 
 .modal-content {
 	background: #1a1f35;
-	border: 1px solid #2a2f45;
+	border: 1px solid #404040;
 	border-radius: 16px;
 	max-width: 500px;
 	width: 100%;
@@ -6044,7 +6144,7 @@
 	justify-content: space-between;
 	align-items: center;
 	padding: 28px 28px 20px 28px;
-	border-bottom: 1px solid #2a2f45;
+	border-bottom: 1px solid #404040;
 }
 
 .modal-header h2 {
@@ -6098,8 +6198,8 @@
 
 .form-group input {
 	width: 100%;
-	background: #0a0e1a;
-	border: 1px solid #2a2f45;
+	background: #000000;
+	border: 1px solid #FFFFFF;
 	border-radius: 8px;
 	padding: 12px 16px;
 	color: white;
@@ -6110,7 +6210,7 @@
 
 .form-group input:focus {
 	outline: none;
-	border-color: #3b82f6;
+	border-color: #F97316;
 	box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
@@ -6142,7 +6242,7 @@
 
 .btn-cancel {
 	background: transparent;
-	border: 1px solid #2a2f45;
+	border: 1px solid #404040;
 	color: #8b92ab;
 	padding: 12px 28px;
 	border-radius: 8px;
@@ -6153,8 +6253,8 @@
 }
 
 .btn-cancel:hover:not(:disabled) {
-	border-color: #3f455f;
-	background: rgba(59, 130, 246, 0.05);
+	border-color: #F97316;
+	background: rgba(249, 115, 22, 0.05);
 	color: white;
 }
 
@@ -6164,7 +6264,7 @@
 }
 
 .btn-save-confirm {
-	background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+	background: #F97316;
 	border: none;
 	color: white;
 	padding: 12px 32px;
@@ -6173,13 +6273,10 @@
 	font-size: 14px;
 	font-weight: 600;
 	transition: all 0.2s;
-	box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
 }
 
 .btn-save-confirm:hover:not(:disabled) {
-	background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-	transform: translateY(-1px);
-	box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+	background: #ea580c;
 }
 
 .btn-save-confirm:disabled {
@@ -6205,8 +6302,8 @@
 	align-items: center;
 	gap: 16px;
 	padding: 16px;
-	background: #0a0e1a;
-	border: 2px solid #2a2f45;
+	background: #000000;
+	border: 2px solid #FFFFFF;
 	border-radius: 12px;
 	cursor: pointer;
 	transition: all 0.2s;
@@ -6215,8 +6312,8 @@
 }
 
 .auth-option:hover:not(.disabled) {
-	border-color: #3b82f6;
-	background: #141824;
+	border-color: #F97316;
+	background: #000000;
 	transform: translateY(-2px);
 }
 
@@ -6269,11 +6366,11 @@
 
 /* Hero Summary Section */
 .hero-summary {
-	background: linear-gradient(135deg, #1a1f2e 0%, #141824 100%);
+	background: #000000;
 	border-radius: 16px;
 	padding: 32px;
 	margin-bottom: 32px;
-	border: 1px solid #2d3748;
+	border: 1px solid #404040;
 	box-shadow: 0 8px 24px rgba(0,0,0,0.4);
 }
 
@@ -6356,8 +6453,8 @@
 }
 
 .stat-pill {
-	background: #0a0e1a;
-	border: 1px solid #2d3748;
+	background: #000000;
+	border: 1px solid #404040;
 	border-radius: 12px;
 	padding: 12px 20px;
 	display: flex;
@@ -6427,8 +6524,8 @@
 	align-items: center;
 	gap: 8px;
 	padding: 8px 16px;
-	background: #1a1f2e;
-	border: 1px solid #2d3748;
+	background: #000000;
+	border: 1px solid #404040;
 	border-radius: 8px;
 	color: #e2e8f0;
 	font-size: 14px;
@@ -6438,7 +6535,7 @@
 
 .toggle-btn:hover {
 	background: #242b3d;
-	border-color: #3b82f6;
+	border-color: #F97316;
 }
 
 .toggle-btn svg {
@@ -6464,7 +6561,7 @@
 }
 
 .side-card {
-	background: #1a1f2e;
+	background: #000000;
 	border-radius: 12px;
 	padding: 24px;
 	border: 2px solid;
@@ -6484,7 +6581,7 @@
 	align-items: center;
 	margin-bottom: 20px;
 	padding-bottom: 16px;
-	border-bottom: 1px solid #2d3748;
+	border-bottom: 1px solid #404040;
 }
 
 .side-badge {
@@ -6525,7 +6622,7 @@
 	justify-content: space-between;
 	align-items: center;
 	padding: 12px;
-	background: #0a0e1a;
+	background: #000000;
 	border-radius: 8px;
 }
 
@@ -6556,10 +6653,10 @@
 }
 
 .trades-panel {
-	background: #1a1f2e;
+	background: #000000;
 	border-radius: 12px;
 	padding: 24px;
-	border: 1px solid #2d3748;
+	border: 1px solid #404040;
 }
 
 .trades-panel h3 {
@@ -6568,7 +6665,7 @@
 	font-weight: 600;
 	color: white;
 	padding-bottom: 12px;
-	border-bottom: 1px solid #2d3748;
+	border-bottom: 1px solid #404040;
 }
 
 .comparison-trade-item {
@@ -6576,10 +6673,10 @@
 	justify-content: space-between;
 	align-items: center;
 	padding: 12px;
-	background: #141824;
+	background: #000000;
 	border-radius: 8px;
 	margin-bottom: 12px;
-	border: 1px solid #2d3748;
+	border: 1px solid #404040;
 }
 
 .trade-info-compact {
@@ -6643,8 +6740,8 @@
 	flex: 1;
 	min-width: 200px;
 	padding: 10px 14px;
-	background: #1a1f2e;
-	border: 1px solid #2d3748;
+	background: #000000;
+	border: 1px solid #404040;
 	border-radius: 8px;
 	color: #e2e8f0;
 	font-size: 14px;
@@ -6653,7 +6750,7 @@
 
 .table-search:focus {
 	outline: none;
-	border-color: #3b82f6;
+	border-color: #F97316;
 }
 
 .table-search::placeholder {
@@ -6662,8 +6759,8 @@
 
 .table-filter-select {
 	padding: 10px 14px;
-	background: #1a1f2e;
-	border: 1px solid #2d3748;
+	background: #000000;
+	border: 1px solid #404040;
 	border-radius: 8px;
 	color: #e2e8f0;
 	font-size: 14px;
@@ -6672,20 +6769,20 @@
 }
 
 .table-filter-select:hover {
-	border-color: #3b82f6;
+	border-color: #F97316;
 }
 
 .table-filter-select:focus {
 	outline: none;
-	border-color: #3b82f6;
+	border-color: #F97316;
 }
 
 /* Enhanced Trade Table */
 .trades-table-wrapper {
 	overflow-x: auto;
-	background: #1a1f2e;
+	background: #000000;
 	border-radius: 12px;
-	border: 1px solid #2d3748;
+	border: 1px solid #404040;
 }
 
 .trades-table {
@@ -6694,7 +6791,7 @@
 }
 
 .trades-table thead {
-	background: #141824;
+	background: #000000;
 	position: sticky;
 	top: 0;
 	z-index: 10;
@@ -6708,7 +6805,7 @@
 	color: #9ca3af;
 	text-transform: uppercase;
 	letter-spacing: 0.05em;
-	border-bottom: 2px solid #2d3748;
+	border-bottom: 2px solid #404040;
 	white-space: nowrap;
 }
 
@@ -6719,15 +6816,15 @@
 }
 
 .trades-table th.sortable:hover {
-	color: #3b82f6;
-	background: #1a1f2e;
+	color: #F97316;
+	background: #000000;
 }
 
 .sort-indicator {
 	display: inline-block;
 	margin-left: 6px;
 	font-size: 12px;
-	color: #3b82f6;
+	color: #F97316;
 	font-weight: bold;
 }
 
@@ -6735,7 +6832,7 @@
 	padding: 14px 12px;
 	font-size: 13px;
 	color: #e2e8f0;
-	border-bottom: 1px solid #2d3748;
+	border-bottom: 1px solid #404040;
 }
 
 .trades-table tbody tr {
@@ -6743,7 +6840,7 @@
 }
 
 .trades-table tbody tr:hover {
-	background: #1e2537;
+	background: #000000;
 }
 
 .market-cell {
@@ -6813,15 +6910,15 @@
 	align-items: center;
 	gap: 20px;
 	padding: 20px;
-	background: #141824;
-	border-top: 1px solid #2d3748;
+	background: #000000;
+	border-top: 1px solid #404040;
 	border-radius: 0 0 12px 12px;
 }
 
 .pagination-btn {
 	padding: 8px 16px;
-	background: #1a1f2e;
-	border: 1px solid #2d3748;
+	background: #000000;
+	border: 1px solid #404040;
 	border-radius: 8px;
 	color: #e2e8f0;
 	font-size: 14px;
@@ -6832,8 +6929,8 @@
 
 .pagination-btn:hover:not(:disabled) {
 	background: #2d3748;
-	border-color: #3b82f6;
-	color: #3b82f6;
+	border-color: #F97316;
+	color: #F97316;
 }
 
 .pagination-btn:disabled {
@@ -6912,7 +7009,7 @@
 }
 
 .success-content {
-	background: #141824;
+	background: #000000;
 	border: 2px solid #10b981;
 	border-radius: 12px;
 	padding: 20px;

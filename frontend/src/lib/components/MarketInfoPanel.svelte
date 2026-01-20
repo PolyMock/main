@@ -139,7 +139,7 @@
 
 <style>
 	.market-info-panel {
-		background: #151B2F;
+		background: #000000;
 		border: 1px solid #2A2F45;
 		border-radius: 12px;
 		display: flex;

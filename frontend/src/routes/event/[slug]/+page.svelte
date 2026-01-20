@@ -8,7 +8,7 @@
 	import { PublicKey } from '@solana/web3.js';
 	import MarketRules from '$lib/components/MarketRules.svelte';
 	import MarketComments from '$lib/components/MarketComments.svelte';
-	import polymarketIcon from '$lib/assets/icon-black.png';
+	const polymockLogo = '/1.png';
 
 	let event: PolyEvent | null = null;
 	let loading = true;
@@ -434,7 +434,7 @@
 						<h1 class="event-title">{event.title}</h1>
 					</div>
 					<div class="event-header-right">
-						<img src={polymarketIcon} alt="Polymock" class="polymarket-icon" />
+						<img src={polymockLogo} alt="Polymock" class="polymarket-icon" />
 						<span class="polymarket-text">Polymock</span>
 					</div>
 				</div>
@@ -534,9 +534,6 @@
 						>
 							Sell
 						</button>
-						<div class="market-dropdown">
-							<button class="dropdown-btn">Market ▼</button>
-						</div>
 					</div>
 
 					<!-- Yes/No Selection -->
@@ -730,14 +727,14 @@
 	:global(body) {
 		margin: 0;
 		padding: 0;
-		background: #0A0E27;
+		background: #000000;
 		color: #E8E8E8;
 		font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 	}
 
 	.event-page {
 		min-height: 100vh;
-		background: #0A0E27;
+		background: #000000;
 		padding: 12px;
 		overflow-x: hidden;
 		max-width: 100vw;
@@ -749,8 +746,8 @@
 	}
 
 	.back-button {
-		background: #151B2F;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		color: #E8E8E8;
 		padding: 10px 20px;
 		border-radius: 8px;
@@ -763,12 +760,12 @@
 
 	.back-button:hover {
 		background: #1E2139;
-		border-color: #00D084;
-		color: #00D084;
+		border-color: #F97316;
+		color: #F97316;
 	}
 
 	.back-button-primary {
-		background: #00D084;
+		background: #F97316;
 		border: none;
 		color: #ffffff;
 		padding: 12px 24px;
@@ -782,7 +779,7 @@
 	}
 
 	.back-button-primary:hover {
-		background: #00B570;
+		background: #F97316;
 		transform: none;
 	}
 
@@ -823,8 +820,8 @@
 
 	/* LEFT PANEL: Markets List */
 	.markets-panel {
-		background: #151B2F;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 16px;
 		overflow-y: auto;
 		display: flex;
@@ -837,8 +834,8 @@
 		align-items: center;
 		justify-content: space-between;
 		padding: 24px;
-		border-bottom: 1px solid #2A2F45;
-		background: rgba(42, 47, 69, 0.3);
+		border-bottom: 1px solid #404040;
+		background: rgba(0, 0, 0, 0.5);
 	}
 
 	.event-header-left {
@@ -875,15 +872,14 @@
 	}
 
 	.polymarket-icon {
-		width: 24px;
-		height: 24px;
-		opacity: 0.7;
-		filter: brightness(0) invert(1);
+		width: 48px;
+		height: 48px;
+		object-fit: contain;
 	}
 
 	.polymarket-text {
 		font-size: 16px;
-		color: #9BA3B4;
+		color: #FFFFFF;
 		font-weight: 600;
 		font-family: 'Open Sauce', 'Inter', sans-serif;
 		letter-spacing: 0.3px;
@@ -900,7 +896,7 @@
 		display: flex;
 		align-items: center;
 		padding: 12px 16px;
-		border-bottom: 1px solid #2A2F45;
+		border-bottom: 1px solid #404040;
 		background: transparent;
 		border-left: 3px solid transparent;
 		transition: all 150ms ease-out;
@@ -916,7 +912,7 @@
 
 	.market-row.selected {
 		background: rgba(0, 208, 132, 0.05);
-		border-left-color: #00D084;
+		border-left-color: #F97316;
 	}
 
 	.market-info {
@@ -1007,9 +1003,9 @@
 	}
 
 	.yes-btn:hover {
-		background: rgba(0, 180, 255, 0.05);
-		border-color: #00B4FF;
-		color: #00B4FF;
+		background: rgba(0, 208, 132, 0.25);
+		border-color: #00D084;
+		color: #00D084;
 		transform: none;
 	}
 
@@ -1020,25 +1016,25 @@
 	}
 
 	.no-btn:hover {
-		background: rgba(0, 180, 255, 0.05);
-		border-color: #00B4FF;
-		color: #00B4FF;
+		background: rgba(255, 71, 87, 0.25);
+		border-color: #FF4757;
+		color: #FF4757;
 		transform: none;
 	}
 
 	.resolved-toggle-container {
 		padding: 16px 24px;
-		border-top: 1px solid #2A2F45;
-		background: rgba(42, 47, 69, 0.2);
+		border-top: 1px solid #404040;
+		background: rgba(0, 0, 0, 0.3);
 		display: flex;
 		justify-content: center;
 	}
 
 	.resolved-toggle-btn {
 		padding: 10px 24px;
-		background: #1E2139;
-		border: 1px solid #2A2F45;
-		color: #9BA3B4;
+		background: #000000;
+		border: 1px solid #404040;
+		color: #FFFFFF;
 		font-family: Inter, sans-serif;
 		font-size: 13px;
 		font-weight: 600;
@@ -1048,15 +1044,15 @@
 	}
 
 	.resolved-toggle-btn:hover {
-		background: #2A2F45;
-		border-color: #00D084;
-		color: #00D084;
+		background: #000000;
+		border-color: #F97316;
+		color: #F97316;
 	}
 
 	/* RIGHT PANEL: Trading Interface */
 	.trading-panel {
-		background: #151B2F;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 16px;
 		padding: 20px;
 		display: flex;
@@ -1072,7 +1068,7 @@
 		align-items: center;
 		gap: 12px;
 		padding-bottom: 20px;
-		border-bottom: 1px solid #2A2F45;
+		border-bottom: 1px solid #404040;
 	}
 
 	.trading-market-icon {
@@ -1113,28 +1109,7 @@
 
 	.trade-tab.active {
 		color: #E8E8E8;
-		border-bottom-color: #00D084;
-	}
-
-	.market-dropdown {
-		margin-left: auto;
-	}
-
-	.dropdown-btn {
-		padding: 8px 16px;
-		background: #1E2139;
-		border: 1px solid #2A2F45;
-		color: #E8E8E8;
-		font-family: Inter, sans-serif;
-		font-size: 13px;
-		font-weight: 500;
-		cursor: pointer;
-		border-radius: 6px;
-		transition: all 150ms ease-out;
-	}
-
-	.dropdown-btn:hover {
-		background: #2A2F45;
+		border-bottom-color: #F97316;
 	}
 
 	.outcome-selection {
@@ -1161,14 +1136,14 @@
 	}
 
 	.yes-outcome:hover:not(.active) {
-		background: rgba(0, 208, 132, 0.25);
+		background: rgba(0, 208, 132, 0.2);
 		border-color: #00D084;
 		transform: none;
 	}
 
 	.yes-outcome.active {
-		background: #00D084;
-		color: #000;
+		background: rgba(0, 208, 132, 0.3);
+		color: #00D084;
 		border-color: #00D084;
 	}
 
@@ -1179,14 +1154,14 @@
 	}
 
 	.no-outcome:hover:not(.active) {
-		background: rgba(255, 71, 87, 0.25);
+		background: rgba(255, 71, 87, 0.2);
 		border-color: #FF4757;
 		transform: none;
 	}
 
 	.no-outcome.active {
-		background: #FF4757;
-		color: #000;
+		background: rgba(255, 71, 87, 0.3);
+		color: #FF4757;
 		border-color: #FF4757;
 	}
 
@@ -1233,8 +1208,8 @@
 
 	.amount-input {
 		width: 100%;
-		background: #0A0E27;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		color: #E8E8E8;
 		padding: 20px;
 		padding-left: 48px;
@@ -1251,7 +1226,7 @@
 
 	.amount-input:focus {
 		outline: none;
-		border-color: #00D084;
+		border-color: #F97316;
 	}
 
 	.amount-input::placeholder {
@@ -1266,9 +1241,9 @@
 	.quick-btn {
 		flex: 1;
 		padding: 10px;
-		background: #1E2139;
-		border: 1px solid #2A2F45;
-		color: #E8E8E8;
+		background: #000000;
+		border: 1px solid #404040;
+		color: #FFFFFF;
 		font-family: Inter, sans-serif;
 		font-size: 13px;
 		font-weight: 600;
@@ -1278,8 +1253,9 @@
 	}
 
 	.quick-btn:hover {
-		background: #2A2F45;
-		border-color: #00B4FF;
+		background: #000000;
+		border-color: #F97316;
+		color: #F97316;
 		transform: none;
 	}
 
@@ -1287,7 +1263,7 @@
 		width: 100%;
 		padding: 16px;
 		background: transparent;
-		border: 1px solid #2A2F45;
+		border: 1px solid #404040;
 		color: #666;
 		font-family: Inter, sans-serif;
 		font-size: 16px;
@@ -1300,15 +1276,15 @@
 
 	.action-button.enabled {
 		background: transparent;
-		border: 1px solid #00B4FF;
-		color: #00B4FF;
+		border: 1px solid #F97316;
+		color: #F97316;
 		cursor: pointer;
 	}
 
 	.action-button.enabled:hover {
 		background: transparent;
-		border-color: #00B4FF;
-		color: #00B4FF;
+		border-color: #F97316;
+		color: #F97316;
 		transform: none;
 	}
 
@@ -1324,7 +1300,7 @@
 	}
 
 	.terms-text a {
-		color: #00D084;
+		color: #F97316;
 		text-decoration: none;
 	}
 
@@ -1357,16 +1333,16 @@
 	}
 
 	::-webkit-scrollbar-track {
-		background: #0A0E27;
+		background: #000000;
 	}
 
 	::-webkit-scrollbar-thumb {
-		background: #2A2F45;
+		background: #404040;
 		border-radius: 4px;
 	}
 
 	::-webkit-scrollbar-thumb:hover {
-		background: #00D084;
+		background: #F97316;
 	}
 
 	/* Modal Styles */
@@ -1390,8 +1366,8 @@
 	}
 
 	.modal-content {
-		background: #151B2F;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 12px;
 		min-width: 400px;
 		max-width: 500px;
@@ -1414,7 +1390,7 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 20px;
-		border-bottom: 1px solid #2A2F45;
+		border-bottom: 1px solid #404040;
 	}
 
 	.modal-header h3 {
@@ -1466,13 +1442,13 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 12px;
-		background: #0A0E1A;
+		background: #000000;
 		border-radius: 8px;
 	}
 
 	.summary-row.highlight {
-		background: rgba(0, 180, 255, 0.1);
-		border: 1px solid #00B4FF;
+		background: rgba(249, 115, 22, 0.1);
+		border: 1px solid #F97316;
 	}
 
 	.summary-label {
@@ -1506,7 +1482,7 @@
 		display: flex;
 		gap: 12px;
 		padding: 20px;
-		border-top: 1px solid #2A2F45;
+		border-top: 1px solid #404040;
 		justify-content: flex-end;
 	}
 
@@ -1521,7 +1497,7 @@
 	}
 
 	.cancel-btn {
-		background: #2A2F45;
+		background: #404040;
 		color: #E8E8E8;
 	}
 
@@ -1530,12 +1506,12 @@
 	}
 
 	.confirm-btn {
-		background: #00B4FF;
+		background: #F97316;
 		color: white;
 	}
 
 	.confirm-btn:hover:not(:disabled) {
-		background: #0094D6;
+		background: #ea580c;
 	}
 
 	.confirm-btn:disabled {

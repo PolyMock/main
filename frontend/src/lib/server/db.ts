@@ -38,8 +38,8 @@ export interface BacktestStrategy {
 	userId: number;
 	strategyName: string;
 
-	// Market selection
-	marketId: string;
+	// Market selection (supports multiple markets)
+	marketIds: string[]; // Array of market/condition IDs
 	marketQuestion: string;
 
 	// Configuration
@@ -105,7 +105,7 @@ export async function saveBacktestStrategy(
 	const result = await db
 		.prepare(
 			`INSERT INTO backtest_strategies (
-				user_id, strategy_name, market_id, market_question,
+				user_id, strategy_name, market_ids, market_question,
 				initial_capital, start_date, end_date,
 				entry_type, entry_config,
 				position_sizing_type, position_sizing_value, max_position_size,
@@ -137,7 +137,7 @@ export async function saveBacktestStrategy(
 		.bind(
 			strategy.userId,
 			strategy.strategyName,
-			strategy.marketId,
+			JSON.stringify(strategy.marketIds),
 			strategy.marketQuestion,
 			strategy.initialCapital,
 			strategy.startDate,
@@ -191,7 +191,7 @@ export async function getUserStrategies(
 	const result = await db
 		.prepare(
 			`SELECT
-				id, user_id, strategy_name, market_id, market_question,
+				id, user_id, strategy_name, market_ids, market_question,
 				initial_capital, start_date, end_date,
 				final_capital, total_return_percent, total_trades,
 				winning_trades, losing_trades, break_even_trades,
@@ -210,7 +210,7 @@ export async function getUserStrategies(
 		id: row.id,
 		userId: row.user_id,
 		strategyName: row.strategy_name,
-		marketId: row.market_id,
+		marketIds: row.market_ids ? JSON.parse(row.market_ids) : [],
 		marketQuestion: row.market_question,
 		initialCapital: row.initial_capital,
 		startDate: row.start_date,
@@ -267,7 +267,7 @@ export async function getStrategyById(
 		id: result.id as number,
 		userId: result.user_id as number,
 		strategyName: result.strategy_name as string,
-		marketId: result.market_id as string,
+		marketIds: result.market_ids ? JSON.parse(result.market_ids as string) : [],
 		marketQuestion: result.market_question as string,
 		initialCapital: result.initial_capital as number,
 		startDate: result.start_date as string,

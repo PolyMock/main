@@ -670,7 +670,7 @@
 <style>
 	.dashboard-container {
 		min-height: 100vh;
-		background: #0A0E1A;
+		background: #000000;
 		color: white;
 		padding: 20px;
 	}
@@ -937,8 +937,8 @@
 		max-width: 1400px;
 		margin: 0 auto 24px;
 		padding: 4px;
-		background: #151B2F;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 12px;
 	}
 
@@ -960,26 +960,26 @@
 	}
 
 	.filter-tab:hover {
-		background: rgba(0, 180, 255, 0.05);
+		background: rgba(249, 115, 22, 0.05);
 		color: #E8E8E8;
 	}
 
 	.filter-tab.active {
-		background: rgba(0, 180, 255, 0.1);
-		color: #00B4FF;
-		border: 1px solid #00B4FF;
+		background: rgba(249, 115, 22, 0.1);
+		color: #F97316;
+		border: 1px solid #F97316;
 	}
 
 	.tab-count {
 		padding: 2px 8px;
-		background: rgba(0, 180, 255, 0.15);
+		background: rgba(249, 115, 22, 0.15);
 		border-radius: 12px;
 		font-size: 12px;
 		font-weight: 700;
 	}
 
 	.filter-tab.active .tab-count {
-		background: #00B4FF;
+		background: #F97316;
 		color: #0A0E1A;
 	}
 
@@ -1010,8 +1010,8 @@
 	}
 
 	.stat-card {
-		background: #151B2F;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 12px;
 		padding: 24px;
 	}
@@ -1065,8 +1065,8 @@
 	.positions-section {
 		max-width: 1400px;
 		margin: 0 auto;
-		background: #151B2F;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 12px;
 		padding: 24px;
 	}
@@ -1086,9 +1086,9 @@
 
 	.refresh-btn {
 		padding: 8px 16px;
-		background: #2A2F45;
+		background: #000000;
 		color: white;
-		border: 1px solid #3A3F55;
+		border: 1px solid #FFFFFF;
 		border-radius: 8px;
 		cursor: pointer;
 		font-size: 14px;
@@ -1096,8 +1096,8 @@
 	}
 
 	.refresh-btn:hover:not(:disabled) {
-		background: #3A3F55;
-		border-color: #00B4FF;
+		background: rgba(249, 115, 22, 0.1);
+		border-color: #F97316;
 	}
 
 	.refresh-btn:disabled {
@@ -1114,7 +1114,7 @@
 		width: 40px;
 		height: 40px;
 		border: 3px solid #2A2F45;
-		border-top-color: #00B4FF;
+		border-top-color: #F97316;
 		border-radius: 50%;
 		animation: spin 1s linear infinite;
 		margin: 0 auto 16px;
@@ -1147,7 +1147,7 @@
 
 	.cta-button {
 		padding: 12px 24px;
-		background: #00B4FF;
+		background: #F97316;
 		color: white;
 		border: none;
 		border-radius: 8px;
@@ -1158,7 +1158,7 @@
 	}
 
 	.cta-button:hover {
-		background: #0094D6;
+		background: #ea580c;
 		transform: translateY(-1px);
 	}
 
@@ -1177,19 +1177,19 @@
 		font-size: 12px;
 		font-weight: 600;
 		color: #8B92AB;
-		border-bottom: 1px solid #2A2F45;
+		border-bottom: 1px solid #404040;
 		text-transform: uppercase;
 		letter-spacing: 0.5px;
 	}
 
 	.positions-table td {
 		padding: 16px 12px;
-		border-bottom: 1px solid #2A2F45;
+		border-bottom: 1px solid #404040;
 		font-size: 14px;
 	}
 
 	.positions-table tr:hover {
-		background: rgba(0, 180, 255, 0.05);
+		background: rgba(249, 115, 22, 0.05);
 	}
 
 	.market-cell {
@@ -1199,7 +1199,7 @@
 	.market-link {
 		background: none;
 		border: none;
-		color: #00B4FF;
+		color: #F97316;
 		cursor: pointer;
 		padding: 0;
 		font-size: 14px;
@@ -1252,8 +1252,8 @@
 	}
 
 	.status-badge.active {
-		background: rgba(0, 180, 255, 0.1);
-		color: #00B4FF;
+		background: rgba(249, 115, 22, 0.1);
+		color: #F97316;
 	}
 
 	.status-badge.closed {
@@ -1263,9 +1263,9 @@
 
 	.action-btn {
 		padding: 6px 12px;
-		background: #2A2F45;
+		background: #000000;
 		color: white;
-		border: 1px solid #3A3F55;
+		border: 1px solid #FFFFFF;
 		border-radius: 6px;
 		cursor: pointer;
 		font-size: 12px;
@@ -1320,8 +1320,8 @@
 	}
 
 	.modal-content {
-		background: #151B2F;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 12px;
 		min-width: 400px;
 		max-width: 500px;
@@ -1344,7 +1344,7 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 20px;
-		border-bottom: 1px solid #2A2F45;
+		border-bottom: 1px solid #404040;
 	}
 
 	.modal-header h3 {
@@ -1396,13 +1396,13 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 12px;
-		background: #0A0E1A;
+		background: #000000;
 		border-radius: 8px;
 	}
 
 	.summary-row.highlight {
-		background: rgba(0, 180, 255, 0.1);
-		border: 1px solid #00B4FF;
+		background: rgba(249, 115, 22, 0.1);
+		border: 1px solid #F97316;
 	}
 
 	.summary-label {
@@ -1427,7 +1427,7 @@
 		display: flex;
 		gap: 12px;
 		padding: 20px;
-		border-top: 1px solid #2A2F45;
+		border-top: 1px solid #404040;
 		justify-content: flex-end;
 	}
 
@@ -1442,21 +1442,21 @@
 	}
 
 	.cancel-btn {
-		background: #2A2F45;
+		background: #000000;
 		color: #E8E8E8;
 	}
 
 	.cancel-btn:hover {
-		background: #3A3F55;
+		background: rgba(249, 115, 22, 0.1);
 	}
 
 	.confirm-btn {
-		background: #00B4FF;
+		background: #F97316;
 		color: white;
 	}
 
 	.confirm-btn:hover:not(:disabled) {
-		background: #0094D6;
+		background: #ea580c;
 		transform: translateY(-1px);
 	}
 
@@ -1468,9 +1468,9 @@
 	.shares-input-section {
 		margin-top: 20px;
 		padding: 16px;
-		background: #0A0E1A;
+		background: #000000;
 		border-radius: 8px;
-		border: 1px solid #2A2F45;
+		border: 1px solid #404040;
 	}
 
 	.shares-label {
@@ -1490,8 +1490,8 @@
 	.shares-input {
 		flex: 1;
 		padding: 10px 12px;
-		background: #151B2F;
-		border: 1px solid #3A3F55;
+		background: #000000;
+		border: 1px solid #FFFFFF;
 		border-radius: 6px;
 		color: white;
 		font-size: 16px;
@@ -1500,15 +1500,15 @@
 
 	.shares-input:focus {
 		outline: none;
-		border-color: #00B4FF;
+		border-color: #F97316;
 	}
 
 	.max-btn {
 		padding: 10px 16px;
-		background: rgba(0, 180, 255, 0.1);
-		border: 1px solid #00B4FF;
+		background: rgba(249, 115, 22, 0.1);
+		border: 1px solid #F97316;
 		border-radius: 6px;
-		color: #00B4FF;
+		color: #F97316;
 		font-size: 12px;
 		font-weight: 700;
 		cursor: pointer;
@@ -1516,7 +1516,7 @@
 	}
 
 	.max-btn:hover {
-		background: #00B4FF;
+		background: #F97316;
 		color: #0A0E1A;
 	}
 

@@ -25,8 +25,8 @@
 		font-family: Arial, Helvetica, sans-serif;
 		margin: 0;
 		padding: 0;
-		background: #0A0E27;
-		color: #E8E8E8;
+		background: #000000;
+		color: #FFFFFF;
 		transition: background 0.3s ease, color 0.3s ease;
 	}
 

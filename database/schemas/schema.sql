@@ -17,8 +17,8 @@ CREATE TABLE IF NOT EXISTS backtest_strategies (
   user_id INTEGER NOT NULL,
   strategy_name TEXT NOT NULL,
 
-  -- Market selection
-  market_id TEXT NOT NULL,
+  -- Market selection (supports multiple markets)
+  market_ids TEXT NOT NULL, -- JSON array: ["market1", "market2", ...]
   market_question TEXT,
 
   -- Backtest configuration

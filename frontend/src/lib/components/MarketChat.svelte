@@ -250,7 +250,7 @@
 		display: flex;
 		flex-direction: column;
 		height: 600px;
-		background: #151B2F;
+		background: #000000;
 		border: 1px solid #2A2F45;
 		border-radius: 12px;
 		overflow: hidden;
@@ -362,7 +362,7 @@
 	}
 
 	.message-avatar:hover {
-		border-color: #00B4FF;
+		border-color: #F97316;
 		transform: scale(1.05);
 	}
 
@@ -378,7 +378,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: linear-gradient(135deg, #00B4FF, #0094D6);
+		background: linear-gradient(135deg, #F97316, #ea580c);
 		color: white;
 		font-weight: 700;
 		font-size: 14px;
@@ -411,7 +411,7 @@
 	}
 
 	.message-author:hover {
-		color: #00B4FF;
+		color: #F97316;
 		text-decoration: underline;
 	}
 
@@ -464,9 +464,9 @@
 	}
 
 	.action-btn:hover {
-		background: rgba(0, 180, 255, 0.1);
-		border-color: #00B4FF;
-		color: #00B4FF;
+		background: rgba(249, 115, 22, 0.1);
+		border-color: #F97316;
+		color: #F97316;
 	}
 
 	.action-btn.delete:hover {
@@ -496,7 +496,7 @@
 
 	.edit-input:focus {
 		outline: none;
-		border-color: #00B4FF;
+		border-color: #F97316;
 	}
 
 	.edit-actions {
@@ -515,12 +515,12 @@
 	}
 
 	.edit-btn.save {
-		background: #00B4FF;
+		background: #F97316;
 		color: white;
 	}
 
 	.edit-btn.save:hover {
-		background: #0094D6;
+		background: #ea580c;
 	}
 
 	.edit-btn.cancel {
@@ -608,7 +608,7 @@
 
 	.chat-input:focus {
 		outline: none;
-		border-color: #00B4FF;
+		border-color: #F97316;
 	}
 
 	.chat-input::placeholder {
@@ -617,7 +617,7 @@
 
 	.send-btn {
 		padding: 10px 20px;
-		background: #00B4FF;
+		background: #F97316;
 		border: none;
 		border-radius: 8px;
 		color: white;
@@ -632,7 +632,7 @@
 	}
 
 	.send-btn:hover:not(:disabled) {
-		background: #0094D6;
+		background: #ea580c;
 		transform: translateY(-1px);
 	}
 
@@ -701,7 +701,7 @@
 	}
 
 	:global(.light-mode) .action-btn:hover {
-		background: rgba(0, 180, 255, 0.1);
+		background: rgba(249, 115, 22, 0.1);
 		border-color: #00B570;
 		color: #00B570;
 	}

@@ -96,8 +96,8 @@
 	.news-ticker {
 		flex: 1;
 		overflow: hidden;
-		background: rgba(10, 14, 26, 0.6);
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #404040;
 		border-radius: 8px;
 		padding: 8px 12px;
 		position: relative;
@@ -139,12 +139,12 @@
 		height: 28px;
 		object-fit: cover;
 		border-radius: 4px;
-		border: 1px solid #2A2F45;
+		border: 1px solid #404040;
 		flex-shrink: 0;
 	}
 
 	.bullet {
-		color: #00B4FF;
+		color: #F97316;
 		font-size: 14px;
 		font-weight: bold;
 	}

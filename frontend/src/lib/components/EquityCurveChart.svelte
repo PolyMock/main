@@ -29,7 +29,7 @@
 		const padding = { top: 30, right: 10, bottom: 50, left: 70 };
 
 		// Clear canvas
-		ctx.fillStyle = '#0A0E1A';
+		ctx.fillStyle = "#000000";
 		ctx.fillRect(0, 0, width, height);
 
 		// Calculate bounds
@@ -41,7 +41,7 @@
 		const equityRange = maxEquity - minEquity;
 
 		// Draw grid lines
-		ctx.strokeStyle = '#1e2537';
+		ctx.strokeStyle = '#404040';
 		ctx.lineWidth = 1;
 
 		// Horizontal grid lines (5 lines)
@@ -73,7 +73,7 @@
 		ctx.setLineDash([]);
 
 		// Draw equity curve
-		ctx.strokeStyle = '#3b82f6';
+		ctx.strokeStyle = '#F97316';
 		ctx.lineWidth = 2.5;
 		ctx.beginPath();
 
@@ -122,8 +122,8 @@
 
 <style>
 	.chart-container {
-		background: #141824;
-		border: 1px solid #2d3748;
+		background: #000000;
+		border: 1px solid #FFFFFF;
 		border-radius: 12px;
 		padding: 20px;
 		overflow: hidden;
