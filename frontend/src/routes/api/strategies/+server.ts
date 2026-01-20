@@ -5,24 +5,55 @@ import type { RequestHandler } from './$types';
 
 /**
  * GET - Retrieve all strategies for logged-in user
+ * Supports both session-based auth and wallet address query parameter
  */
 export const GET: RequestHandler = async (event) => {
-	const user = await getUserFromSession(event);
-
-	if (!user) {
-		throw error(401, 'Unauthorized');
-	}
-
 	const db = event.platform?.env?.DB as D1Database;
 	if (!db) {
+		console.error('[GET /api/strategies] Database not available');
 		throw error(500, 'Database not available');
+	}
+
+	// Try to get user from session first
+	let user = await getUserFromSession(event);
+	console.log('[GET /api/strategies] User from session:', user ? `ID: ${user.id}, Wallet: ${user.solanaAddress}` : 'null');
+
+	// If no session, check for wallet address in query params (read-only mode)
+	if (!user) {
+		const walletAddress = event.url.searchParams.get('wallet');
+		console.log('[GET /api/strategies] No session, checking wallet param:', walletAddress);
+
+		if (walletAddress) {
+			// Look up user by wallet address
+			const result = await db
+				.prepare('SELECT id, solana_address, name FROM users WHERE solana_address = ?')
+				.bind(walletAddress)
+				.first<{ id: number; solana_address: string; name: string }>();
+
+			if (result) {
+				user = {
+					id: result.id,
+					solanaAddress: result.solana_address,
+					name: result.name,
+					email: null,
+					picture: null
+				};
+				console.log('[GET /api/strategies] Found user by wallet:', user.id);
+			}
+		}
+	}
+
+	if (!user) {
+		console.error('[GET /api/strategies] No user found - rejecting request');
+		throw error(401, 'Unauthorized');
 	}
 
 	try {
 		const strategies = await getUserStrategies(db, user.id);
+		console.log(`[GET /api/strategies] Found ${strategies.length} strategies for user ${user.id}`);
 		return json({ strategies });
 	} catch (err) {
-		console.error('Error fetching strategies:', err);
+		console.error('[GET /api/strategies] Error fetching strategies:', err);
 		throw error(500, 'Failed to fetch strategies');
 	}
 };
@@ -33,17 +64,22 @@ export const GET: RequestHandler = async (event) => {
 export const POST: RequestHandler = async (event) => {
 	const user = await getUserFromSession(event);
 
+	console.log('[POST /api/strategies] User from session:', user ? `ID: ${user.id}, Wallet: ${user.solanaAddress}` : 'null');
+
 	if (!user) {
+		console.error('[POST /api/strategies] No user in session - rejecting request');
 		throw error(401, 'Unauthorized');
 	}
 
 	const db = event.platform?.env?.DB as D1Database;
 	if (!db) {
+		console.error('[POST /api/strategies] Database not available');
 		throw error(500, 'Database not available');
 	}
 
 	try {
 		const data = await event.request.json();
+		console.log('[POST /api/strategies] Saving strategy for user:', user.id);
 
 		// Validate that backtest is complete
 		if (!data.backtestResult || !data.backtestResult.trades || data.backtestResult.trades.length === 0) {
@@ -115,9 +151,10 @@ export const POST: RequestHandler = async (event) => {
 
 		const strategyId = await saveBacktestStrategy(db, strategy);
 
+		console.log('[POST /api/strategies] Strategy saved successfully, ID:', strategyId);
 		return json({ success: true, strategyId });
 	} catch (err: any) {
-		console.error('Error saving strategy:', err);
+		console.error('[POST /api/strategies] Error saving strategy:', err);
 		throw error(500, err.message || 'Failed to save strategy');
 	}
 };

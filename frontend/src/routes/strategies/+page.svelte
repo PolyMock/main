@@ -97,9 +97,9 @@
 			const userData = await userRes.json();
 			user = userData.user;
 
-			// Only fetch strategies if we have a valid session
+			// Fetch strategies if we have a session OR a connected wallet
 			if (user) {
-				// Fetch user's strategies
+				// Fetch user's strategies (session-based)
 				const strategiesRes = await fetch('/api/strategies', {
 					credentials: 'include'
 				});
@@ -113,6 +113,27 @@
 					strategies = [];
 				} else {
 					throw new Error('Failed to fetch strategies');
+				}
+			} else if (walletState.connected && walletState.publicKey) {
+				// No session but wallet is connected - fetch by wallet address (read-only mode)
+				const walletAddress = walletState.publicKey.toString();
+				console.log('Fetching strategies for wallet (no session):', walletAddress);
+
+				const strategiesRes = await fetch(`/api/strategies?wallet=${walletAddress}`);
+
+				if (strategiesRes.ok) {
+					const strategiesData = await strategiesRes.json();
+					strategies = strategiesData.strategies || [];
+					// Set user object for display purposes
+					user = {
+						id: 0,
+						name: `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`,
+						email: '',
+						picture: '',
+						solanaAddress: walletAddress
+					};
+				} else {
+					strategies = [];
 				}
 			} else {
 				strategies = [];

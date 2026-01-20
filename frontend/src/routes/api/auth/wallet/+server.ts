@@ -10,7 +10,10 @@ export const POST: RequestHandler = async (event) => {
 	try {
 		const { walletAddress, signature, message } = await event.request.json();
 
+		console.log('[POST /api/auth/wallet] Authenticating wallet:', walletAddress);
+
 		if (!walletAddress || !signature || !message) {
+			console.error('[POST /api/auth/wallet] Missing required fields');
 			return json({ error: 'Missing required fields' }, { status: 400 });
 		}
 
@@ -20,18 +23,23 @@ export const POST: RequestHandler = async (event) => {
 
 		const db = event.platform?.env?.DB as D1Database;
 		if (!db) {
+			console.error('[POST /api/auth/wallet] Database not available');
 			return json({ error: 'Database not available' }, { status: 500 });
 		}
 
 		// Create or update user with wallet address
 		const user = await upsertWalletUser(db, walletAddress);
 
+		console.log('[POST /api/auth/wallet] User created/updated:', user.id, user.solanaAddress);
+
 		// Set session cookie
 		setSessionCookie(event, user);
 
+		console.log('[POST /api/auth/wallet] Session cookie set successfully');
+
 		return json({ success: true, user });
 	} catch (error: any) {
-		console.error('Wallet auth error:', error);
+		console.error('[POST /api/auth/wallet] Wallet auth error:', error);
 		return json({ error: error.message || 'Authentication failed' }, { status: 500 });
 	}
 };

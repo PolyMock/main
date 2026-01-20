@@ -224,12 +224,19 @@ export async function upsertWalletUser(db: D1Database, walletAddress: string): P
  */
 export async function getUserFromSession(event: RequestEvent): Promise<SessionUser | null> {
 	const session = event.cookies.get('session');
-	if (!session) return null;
+	console.log('[getUserFromSession] Session cookie value:', session ? 'exists' : 'NOT FOUND');
+
+	if (!session) {
+		console.log('[getUserFromSession] No session cookie found - all cookies:', event.cookies.getAll());
+		return null;
+	}
 
 	try {
 		const user = JSON.parse(session);
+		console.log('[getUserFromSession] Parsed user:', user.id, user.solanaAddress);
 		return user;
-	} catch {
+	} catch (error) {
+		console.error('[getUserFromSession] Failed to parse session cookie:', error);
 		return null;
 	}
 }
@@ -238,11 +245,14 @@ export async function getUserFromSession(event: RequestEvent): Promise<SessionUs
  * Set session cookie
  */
 export function setSessionCookie(event: RequestEvent, user: SessionUser) {
+	// Detect if we're in production by checking the URL
+	const isProduction = event.url.hostname !== 'localhost' && event.url.hostname !== '127.0.0.1';
+
 	event.cookies.set('session', JSON.stringify(user), {
 		path: '/',
 		httpOnly: true,
 		sameSite: 'lax',
-		secure: process.env.NODE_ENV === 'production',
+		secure: isProduction, // Use secure cookies in production (HTTPS)
 		maxAge: 60 * 60 * 24 * 30 // 30 days
 	});
 }
