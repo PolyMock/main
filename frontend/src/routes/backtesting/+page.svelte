@@ -1755,7 +1755,9 @@
 													<tbody>
 														{#each paginatedEvents as event}
 															<!-- Event Row -->
-															<tr class="event-row" on:click={() => event.markets.length > 1 ? toggleEvent(event.eventSlug) : toggleMarketSelection(event.markets[0])}>
+															<tr class="event-row"
+																class:selected={event.markets.length === 1 && selectedMarketIds.has(event.markets[0].condition_id)}
+																on:click={() => event.markets.length > 1 ? toggleEvent(event.eventSlug) : toggleMarketSelection(event.markets[0])}>
 																<td class="event-cell">
 																	<div class="event-content">
 																		{#if event.markets.length > 1}
@@ -5008,6 +5010,11 @@
 
 .event-row:hover {
 	background: rgba(249, 115, 22, 0.08);
+}
+
+.event-row.selected {
+	background: rgba(249, 115, 22, 0.15);
+	border-left: 3px solid #F97316;
 }
 
 .event-row td {

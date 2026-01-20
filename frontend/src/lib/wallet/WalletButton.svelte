@@ -417,9 +417,9 @@ Would you like to try again?`;
 	}
 
 	.connect-btn {
-		background: #1E2139;
+		background: #000000;
 		color: #E8E8E8;
-		border: 1px solid #2A2F45;
+		border: 1px solid #FFFFFF;
 		padding: 8px 16px;
 		font-family: Inter, sans-serif;
 		font-size: 12px;
@@ -431,7 +431,7 @@ Would you like to try again?`;
 
 	.connect-btn:hover:not(:disabled) {
 		background: rgba(255, 255, 255, 0.05);
-		border-color: #00D084;
+		border-color: #F97316;
 		transform: scale(1.02);
 	}
 
@@ -452,15 +452,15 @@ Would you like to try again?`;
 		font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
 		font-size: 12px;
 		padding: 6px 12px;
-		background: #1E2139;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #FFFFFF;
 		border-radius: 6px;
 	}
 
 	.disconnect-btn {
-		background: #1E2139;
+		background: #000000;
 		color: #A0A0A0;
-		border: 1px solid #2A2F45;
+		border: 1px solid #FFFFFF;
 		padding: 6px 12px;
 		font-family: Inter, sans-serif;
 		font-size: 11px;
@@ -505,8 +505,8 @@ Would you like to try again?`;
 	}
 
 	.wallet-modal {
-		background: #1a1f35;
-		border: 1px solid #2a2f45;
+		background: #000000;
+		border: 1px solid #FFFFFF;
 		border-radius: 16px;
 		padding: 0;
 		min-width: 420px;
@@ -535,7 +535,7 @@ Would you like to try again?`;
 		align-items: center;
 		justify-content: space-between;
 		padding: 24px 28px;
-		border-bottom: 1px solid #2a2f45;
+		border-bottom: 1px solid #404040;
 	}
 
 	.wallet-modal-header h3 {
@@ -585,7 +585,7 @@ Would you like to try again?`;
 
 	.wallet-option {
 		background: transparent;
-		border: 1px solid #2a2f45;
+		border: 1px solid #FFFFFF;
 		border-radius: 12px;
 		color: #fff;
 		padding: 16px 20px;
@@ -599,7 +599,7 @@ Would you like to try again?`;
 
 	.wallet-option:hover:not(:disabled) {
 		border-color: #F97316;
-		background: rgba(59, 130, 246, 0.05);
+		background: rgba(249, 115, 22, 0.05);
 	}
 
 	.wallet-option:disabled {
@@ -649,7 +649,7 @@ Would you like to try again?`;
 
 	.wallet-modal-footer {
 		padding: 16px 28px 24px 28px;
-		border-top: 1px solid #2a2f45;
+		border-top: 1px solid #404040;
 	}
 
 	.wallet-modal-help {

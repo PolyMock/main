@@ -233,7 +233,7 @@
 			<div class="empty-state">
 				<h2>No Strategies Yet</h2>
 				<p>Complete a backtest to save your first strategy.</p>
-				<a href="/backtesting" class="btn-primary">Start Backtesting</a>
+				<a href="/backtesting?tab=strategy" class="btn-primary">Start Backtesting</a>
 			</div>
 		{:else}
 			<div class="strategies-grid">
@@ -549,8 +549,9 @@
 	.btn-primary {
 		display: inline-block;
 		padding: 14px 32px;
-		background: #F97316;
+		background: #000000;
 		color: white;
+		border: 1px solid #FFFFFF;
 		border-radius: 8px;
 		text-decoration: none;
 		font-weight: 600;
@@ -558,8 +559,8 @@
 	}
 
 	.btn-primary:hover {
-		background: #ea580c;
-		transform: translateY(-2px);
+		border-color: #F97316;
+		color: #F97316;
 	}
 
 	.strategies-grid {
