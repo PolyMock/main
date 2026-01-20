@@ -96,17 +96,47 @@ export async function updateWalletConnection() {
 				});
 
 				if (response.ok) {
+					console.log('✅ Wallet authenticated successfully');
 
 					// Link wallet to Google account if authenticated
 					const auth = get(authStore);
 					if (auth.isAuthenticated && !auth.user?.walletAddress) {
 						authStore.linkWallet(walletAddress);
 					}
+				} else {
+					const errorData = await response.json();
+					throw new Error(errorData.error || 'Authentication failed');
 				}
 			}
-		} catch (error) {
+		} catch (error: any) {
 			console.error('Error authenticating wallet:', error);
-			// Continue even if authentication fails - user can still use wallet without server session
+
+			// Disconnect the wallet if authentication fails
+			if (state.adapter) {
+				try {
+					await state.adapter.disconnect();
+				} catch (disconnectError) {
+					console.error('Error disconnecting after auth failure:', disconnectError);
+				}
+			}
+
+			// Reset wallet state
+			walletStore.set({
+				...initialState,
+				connecting: false,
+				disconnecting: false
+			});
+
+			// Show user-friendly error message
+			let errorMessage = 'Wallet authentication failed.\n\n';
+			if (error?.message?.includes('User rejected') || error?.message?.includes('rejected')) {
+				errorMessage += 'You rejected the signature request. Please sign the message to authenticate and use Polymock features like saving strategies.\n\nWould you like to try connecting again?';
+			} else {
+				errorMessage += `Error: ${error?.message || 'Unknown error'}\n\nPlease try again.`;
+			}
+
+			alert(errorMessage);
+			return;
 		}
 	}
 }
