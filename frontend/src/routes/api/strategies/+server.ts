@@ -62,6 +62,11 @@ export const GET: RequestHandler = async (event) => {
  * POST - Save a completed backtest strategy
  */
 export const POST: RequestHandler = async (event) => {
+	console.log('[POST /api/strategies] Starting request processing');
+	console.log('[POST /api/strategies] Platform available:', !!event.platform);
+	console.log('[POST /api/strategies] Env available:', !!event.platform?.env);
+	console.log('[POST /api/strategies] DB available:', !!event.platform?.env?.DB);
+
 	const user = await getUserFromSession(event);
 
 	console.log('[POST /api/strategies] User from session:', user ? `ID: ${user.id}, Wallet: ${user.solanaAddress}` : 'null');
@@ -74,15 +79,23 @@ export const POST: RequestHandler = async (event) => {
 	const db = event.platform?.env?.DB as D1Database;
 	if (!db) {
 		console.error('[POST /api/strategies] Database not available');
+		console.error('[POST /api/strategies] Platform keys:', event.platform ? Object.keys(event.platform) : 'no platform');
+		console.error('[POST /api/strategies] Env keys:', event.platform?.env ? Object.keys(event.platform.env) : 'no env');
 		throw error(500, 'Database not available');
 	}
 
 	try {
 		const data = await event.request.json();
+		console.log('[POST /api/strategies] Received data keys:', Object.keys(data));
 		console.log('[POST /api/strategies] Saving strategy for user:', user.id);
 
 		// Validate that backtest is complete
 		if (!data.backtestResult || !data.backtestResult.trades || data.backtestResult.trades.length === 0) {
+			console.error('[POST /api/strategies] Incomplete backtest data:', {
+				hasBacktestResult: !!data.backtestResult,
+				hasTrades: !!data.backtestResult?.trades,
+				tradesLength: data.backtestResult?.trades?.length || 0
+			});
 			throw error(400, 'Cannot save incomplete backtest');
 		}
 
@@ -149,12 +162,20 @@ export const POST: RequestHandler = async (event) => {
 			pnlDistribution: data.backtestResult.pnlDistribution || {}
 		};
 
+		console.log('[POST /api/strategies] About to save strategy to database');
+		console.log('[POST /api/strategies] Strategy object keys:', Object.keys(strategy));
+
 		const strategyId = await saveBacktestStrategy(db, strategy);
 
 		console.log('[POST /api/strategies] Strategy saved successfully, ID:', strategyId);
 		return json({ success: true, strategyId });
 	} catch (err: any) {
 		console.error('[POST /api/strategies] Error saving strategy:', err);
-		throw error(500, err.message || 'Failed to save strategy');
+		console.error('[POST /api/strategies] Error name:', err.name);
+		console.error('[POST /api/strategies] Error message:', err.message);
+		console.error('[POST /api/strategies] Error stack:', err.stack);
+
+		// Return detailed error message for debugging
+		throw error(500, `Failed to save strategy: ${err.message || JSON.stringify(err)}`);
 	}
 };

@@ -102,83 +102,100 @@ export async function saveBacktestStrategy(
 	db: D1Database,
 	strategy: BacktestStrategy
 ): Promise<number> {
-	const result = await db
-		.prepare(
-			`INSERT INTO backtest_strategies (
-				user_id, strategy_name, market_ids, market_question,
-				initial_capital, start_date, end_date,
-				entry_type, entry_config,
-				position_sizing_type, position_sizing_value, max_position_size,
-				stop_loss, take_profit, time_based_exit,
-				use_trailing_stop, trailing_stop_config,
-				use_partial_exits, partial_exits_config,
-				max_trades_per_day, trade_time_start, trade_time_end,
-				final_capital, total_return_percent, total_trades,
-				winning_trades, losing_trades, break_even_trades,
-				win_rate, avg_win, avg_loss, largest_win, largest_loss,
-				profit_factor, sharpe_ratio, max_drawdown, avg_trade_duration,
-				trades_data, equity_curve, pnl_distribution
-			) VALUES (
-				?, ?, ?, ?,
-				?, ?, ?,
-				?, ?,
-				?, ?, ?,
-				?, ?, ?,
-				?, ?,
-				?, ?,
-				?, ?, ?,
-				?, ?, ?,
-				?, ?, ?,
-				?, ?, ?, ?, ?,
-				?, ?, ?, ?,
-				?, ?, ?
-			) RETURNING id`
-		)
-		.bind(
-			strategy.userId,
-			strategy.strategyName,
-			JSON.stringify(strategy.marketIds),
-			strategy.marketQuestion,
-			strategy.initialCapital,
-			strategy.startDate,
-			strategy.endDate,
-			strategy.entryType,
-			JSON.stringify(strategy.entryConfig),
-			strategy.positionSizingType,
-			strategy.positionSizingValue,
-			strategy.maxPositionSize ?? null,
-			strategy.stopLoss ?? null,
-			strategy.takeProfit ?? null,
-			strategy.timeBasedExit ?? null,
-			strategy.useTrailingStop ? 1 : 0,
-			strategy.trailingStopConfig ? JSON.stringify(strategy.trailingStopConfig) : null,
-			strategy.usePartialExits ? 1 : 0,
-			strategy.partialExitsConfig ? JSON.stringify(strategy.partialExitsConfig) : null,
-			strategy.maxTradesPerDay ?? null,
-			strategy.tradeTimeStart ?? null,
-			strategy.tradeTimeEnd ?? null,
-			strategy.finalCapital,
-			strategy.totalReturnPercent,
-			strategy.totalTrades,
-			strategy.winningTrades,
-			strategy.losingTrades,
-			strategy.breakEvenTrades,
-			strategy.winRate,
-			strategy.avgWin,
-			strategy.avgLoss,
-			strategy.largestWin,
-			strategy.largestLoss,
-			strategy.profitFactor ?? null,
-			strategy.sharpeRatio ?? null,
-			strategy.maxDrawdown ?? null,
-			strategy.avgTradeDuration ?? null,
-			JSON.stringify(strategy.tradesData),
-			JSON.stringify(strategy.equityCurve),
-			JSON.stringify(strategy.pnlDistribution)
-		)
-		.first();
+	try {
+		console.log('[saveBacktestStrategy] Starting save operation');
+		console.log('[saveBacktestStrategy] Strategy user ID:', strategy.userId);
+		console.log('[saveBacktestStrategy] Strategy name:', strategy.strategyName);
+		console.log('[saveBacktestStrategy] Market IDs count:', strategy.marketIds?.length || 0);
+		console.log('[saveBacktestStrategy] Trades count:', strategy.tradesData?.length || 0);
 
-	return result?.id as number;
+		const result = await db
+			.prepare(
+				`INSERT INTO backtest_strategies (
+					user_id, strategy_name, market_ids, market_question,
+					initial_capital, start_date, end_date,
+					entry_type, entry_config,
+					position_sizing_type, position_sizing_value, max_position_size,
+					stop_loss, take_profit, time_based_exit,
+					use_trailing_stop, trailing_stop_config,
+					use_partial_exits, partial_exits_config,
+					max_trades_per_day, trade_time_start, trade_time_end,
+					final_capital, total_return_percent, total_trades,
+					winning_trades, losing_trades, break_even_trades,
+					win_rate, avg_win, avg_loss, largest_win, largest_loss,
+					profit_factor, sharpe_ratio, max_drawdown, avg_trade_duration,
+					trades_data, equity_curve, pnl_distribution
+				) VALUES (
+					?, ?, ?, ?,
+					?, ?, ?,
+					?, ?,
+					?, ?, ?,
+					?, ?, ?,
+					?, ?,
+					?, ?,
+					?, ?, ?,
+					?, ?, ?,
+					?, ?, ?,
+					?, ?, ?, ?, ?,
+					?, ?, ?, ?,
+					?, ?, ?
+				) RETURNING id`
+			)
+			.bind(
+				strategy.userId,
+				strategy.strategyName,
+				JSON.stringify(strategy.marketIds),
+				strategy.marketQuestion,
+				strategy.initialCapital,
+				strategy.startDate,
+				strategy.endDate,
+				strategy.entryType,
+				JSON.stringify(strategy.entryConfig),
+				strategy.positionSizingType,
+				strategy.positionSizingValue,
+				strategy.maxPositionSize ?? null,
+				strategy.stopLoss ?? null,
+				strategy.takeProfit ?? null,
+				strategy.timeBasedExit ?? null,
+				strategy.useTrailingStop ? 1 : 0,
+				strategy.trailingStopConfig ? JSON.stringify(strategy.trailingStopConfig) : null,
+				strategy.usePartialExits ? 1 : 0,
+				strategy.partialExitsConfig ? JSON.stringify(strategy.partialExitsConfig) : null,
+				strategy.maxTradesPerDay ?? null,
+				strategy.tradeTimeStart ?? null,
+				strategy.tradeTimeEnd ?? null,
+				strategy.finalCapital,
+				strategy.totalReturnPercent,
+				strategy.totalTrades,
+				strategy.winningTrades,
+				strategy.losingTrades,
+				strategy.breakEvenTrades,
+				strategy.winRate,
+				strategy.avgWin,
+				strategy.avgLoss,
+				strategy.largestWin,
+				strategy.largestLoss,
+				strategy.profitFactor ?? null,
+				strategy.sharpeRatio ?? null,
+				strategy.maxDrawdown ?? null,
+				strategy.avgTradeDuration ?? null,
+				JSON.stringify(strategy.tradesData),
+				JSON.stringify(strategy.equityCurve),
+				JSON.stringify(strategy.pnlDistribution)
+			)
+			.first();
+
+		console.log('[saveBacktestStrategy] Insert result:', result);
+
+		if (!result || !result.id) {
+			throw new Error('Failed to get strategy ID from database insert');
+		}
+
+		return result.id as number;
+	} catch (err) {
+		console.error('[saveBacktestStrategy] Database error:', err);
+		throw err;
+	}
 }
 
 /**
