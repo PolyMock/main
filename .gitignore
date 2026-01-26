@@ -57,6 +57,8 @@ test-ledger/
 # Package managers
 package-lock.json
 yarn.lock
+# But allow backtest-api package-lock.json for Railway deployment
+!backtest-api/package-lock.json
 
 # Contract build artifacts (entire target directory)
 contracts/target/
