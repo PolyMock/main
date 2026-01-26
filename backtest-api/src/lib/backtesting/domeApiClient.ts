@@ -3,7 +3,7 @@
  */
 
 import axios from 'axios';
-import type { Candlestick, MarketSnapshot } from './types';
+import type { Candlestick, MarketSnapshot } from './types.js';
 
 const DOME_API_BASE = 'https://api.domeapi.io/v1';
 

@@ -13,8 +13,8 @@ import type {
   DailyPnlPoint,
   DrawdownPoint,
   CapitalUtilizationPoint
-} from './types';
-import { DomeApiClient } from './domeApiClient';
+} from './types.js';
+import { DomeApiClient } from './domeApiClient.js';
 
 export class BacktestEngine {
   private domeClient: DomeApiClient;
