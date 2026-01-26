@@ -51,14 +51,14 @@
 			<!-- Area fill -->
 			<path
 				d={areaD}
-				fill={isPositive ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)'}
+				fill="rgba(249, 115, 22, 0.15)"
 				class="area"
 			/>
 			<!-- Line -->
 			<path
 				d={pathD}
 				fill="none"
-				stroke={isPositive ? '#10b981' : '#ef4444'}
+				stroke="#F97316"
 				stroke-width="2.5"
 				stroke-linecap="round"
 				stroke-linejoin="round"

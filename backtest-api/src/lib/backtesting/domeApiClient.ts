@@ -43,6 +43,8 @@ interface DomeMarketPrice {
 
 export class DomeApiClient {
   private apiKey: string;
+  private lastRequestTime: number = 0;
+  private minRequestInterval: number = 1100; // 1.1 seconds between requests to stay under 1 req/sec
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
@@ -53,6 +55,29 @@ export class DomeApiClient {
       'Authorization': `Bearer ${this.apiKey}`,
       'Content-Type': 'application/json'
     };
+  }
+
+  /**
+   * Sleep utility for rate limiting
+   */
+  private async sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Enforce rate limiting between requests
+   */
+  private async enforceRateLimit(): Promise<void> {
+    const now = Date.now();
+    const timeSinceLastRequest = now - this.lastRequestTime;
+
+    if (timeSinceLastRequest < this.minRequestInterval) {
+      const waitTime = this.minRequestInterval - timeSinceLastRequest;
+      console.log(`Rate limiting: waiting ${waitTime}ms before next request`);
+      await this.sleep(waitTime);
+    }
+
+    this.lastRequestTime = Date.now();
   }
 
   /**
@@ -138,20 +163,34 @@ export class DomeApiClient {
       const startTimeSeconds = Math.floor(startTime.getTime() / 1000);
       const endTimeSeconds = Math.floor(endTime.getTime() / 1000);
 
-      // Validate date range based on interval limits
-      const rangeSeconds = endTimeSeconds - startTimeSeconds;
-      const maxRangeSeconds = 
-        interval === 1 ? 7 * 24 * 60 * 60 :      // 1 week for 1 minute
-        interval === 60 ? 30 * 24 * 60 * 60 :    // 1 month for 1 hour
-        365 * 24 * 60 * 60;                      // 1 year for 1 day
+      // Make single request for the entire date range
+      return await this.fetchCandlesticksChunk(conditionId, interval, startTimeSeconds, endTimeSeconds);
+    } catch (error: any) {
+      console.error(`Error fetching candlesticks for ${conditionId}:`, {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        url: error.config?.url,
+        params: error.config?.params
+      });
+      return [];
+    }
+  }
 
-      if (rangeSeconds > maxRangeSeconds) {
-        console.warn(
-          `Date range (${rangeSeconds}s) exceeds limit for interval ${interval} (max ${maxRangeSeconds}s). ` +
-          `Truncating to valid range.`
-        );
-      }
+  /**
+   * Fetch candlesticks for a single chunk (internal helper)
+   */
+  private async fetchCandlesticksChunk(
+    conditionId: string,
+    interval: 1 | 60 | 1440,
+    startTimeSeconds: number,
+    endTimeSeconds: number,
+    retryCount: number = 0
+  ): Promise<Candlestick[]> {
+    const maxRetries = 3;
 
+    try {
       const response = await axios.get(
         `${DOME_API_BASE}/polymarket/candlesticks/${conditionId}`,
         {
@@ -160,7 +199,8 @@ export class DomeApiClient {
             interval,
             start_time: startTimeSeconds,
             end_time: endTimeSeconds
-          }
+          },
+          timeout: 60000 // 60 second timeout
         }
       );
 
@@ -232,28 +272,28 @@ export class DomeApiClient {
           // Try multiple sources for close price (YES token price)
           // Priority: price.close_dollars > yes_ask.close_dollars > yes_bid.close_dollars > price.close
           let closePrice = 0;
-          
+
           if (priceData.close_dollars) {
             closePrice = parsePrice(priceData.close_dollars);
           }
-          
+
           if (closePrice === 0 && candleData.yes_ask?.close_dollars) {
             closePrice = parsePrice(candleData.yes_ask.close_dollars);
           }
-          
+
           if (closePrice === 0 && candleData.yes_bid?.close_dollars) {
             closePrice = parsePrice(candleData.yes_bid.close_dollars);
           }
-          
+
           // Last resort: try numeric values
           if (closePrice === 0 && priceData.close) {
             closePrice = parsePrice(undefined, priceData.close);
           }
-          
+
           if (closePrice === 0 && candleData.yes_ask?.close) {
             closePrice = parsePrice(undefined, candleData.yes_ask.close);
           }
-          
+
           if (closePrice === 0 && candleData.yes_bid?.close) {
             closePrice = parsePrice(undefined, candleData.yes_bid.close);
           }
@@ -264,12 +304,12 @@ export class DomeApiClient {
             const open = parsePrice(priceData.open_dollars, priceData.open) || closePrice;
             const high = parsePrice(priceData.high_dollars, priceData.high) || closePrice;
             const low = parsePrice(priceData.low_dollars, priceData.low) || closePrice;
-            
+
             // Ensure all prices are in valid range
             const validOpen = (open > 0 && open <= 1) ? open : closePrice;
             const validHigh = (high > 0 && high <= 1) ? high : closePrice;
             const validLow = (low > 0 && low <= 1) ? low : closePrice;
-            
+
             candlesticks.push({
               timestamp: new Date(candleData.end_period_ts * 1000),
               open: validOpen,
@@ -300,18 +340,36 @@ export class DomeApiClient {
           const maxPrice = Math.max(...prices);
         }
       }
-      
+
       return candlesticks;
     } catch (error: any) {
-      console.error(`Error fetching candlesticks for ${conditionId}:`, {
+      // Handle 429 rate limit errors with retry
+      if (error.response?.status === 429 && retryCount < maxRetries) {
+        const retryAfter = error.response?.data?.retry_after || error.response?.data?.rate_limit?.window_size_seconds || 5;
+        const waitTime = (retryAfter + 1) * 1000; // Add 1 second buffer
+
+        console.log(`Rate limit hit (429). Retrying after ${waitTime}ms (attempt ${retryCount + 1}/${maxRetries})`);
+        await this.sleep(waitTime);
+
+        return this.fetchCandlesticksChunk(conditionId, interval, startTimeSeconds, endTimeSeconds, retryCount + 1);
+      }
+
+      // Handle timeout errors with retry
+      if (error.code === 'ECONNABORTED' && retryCount < maxRetries) {
+        const waitTime = 2000 * (retryCount + 1); // Progressive backoff
+        console.log(`Timeout error. Retrying after ${waitTime}ms (attempt ${retryCount + 1}/${maxRetries})`);
+        await this.sleep(waitTime);
+
+        return this.fetchCandlesticksChunk(conditionId, interval, startTimeSeconds, endTimeSeconds, retryCount + 1);
+      }
+
+      console.error(`Error in fetchCandlesticksChunk:`, {
         message: error.message,
         response: error.response?.data,
         status: error.response?.status,
-        statusText: error.response?.statusText,
-        url: error.config?.url,
-        params: error.config?.params
+        statusText: error.response?.statusText
       });
-      return [];
+      throw error; // Re-throw to be caught by getCandlesticks
     }
   }
 

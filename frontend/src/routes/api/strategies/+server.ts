@@ -88,15 +88,24 @@ export const POST: RequestHandler = async (event) => {
 		const data = await event.request.json();
 		console.log('[POST /api/strategies] Received data keys:', Object.keys(data));
 		console.log('[POST /api/strategies] Saving strategy for user:', user.id);
+		console.log('[POST /api/strategies] Data structure:', {
+			hasBacktestResult: !!data.backtestResult,
+			backtestResultKeys: data.backtestResult ? Object.keys(data.backtestResult) : [],
+			hasTrades: !!data.backtestResult?.trades,
+			tradesLength: data.backtestResult?.trades?.length || 0,
+			marketIdsLength: data.marketIds?.length || 0,
+			strategyName: data.strategyName
+		});
 
 		// Validate that backtest is complete
 		if (!data.backtestResult || !data.backtestResult.trades || data.backtestResult.trades.length === 0) {
 			console.error('[POST /api/strategies] Incomplete backtest data:', {
 				hasBacktestResult: !!data.backtestResult,
 				hasTrades: !!data.backtestResult?.trades,
-				tradesLength: data.backtestResult?.trades?.length || 0
+				tradesLength: data.backtestResult?.trades?.length || 0,
+				fullData: JSON.stringify(data).substring(0, 500) // First 500 chars for debugging
 			});
-			throw error(400, 'Cannot save incomplete backtest');
+			throw error(400, 'Cannot save incomplete backtest - no trades found');
 		}
 
 		// Build strategy object from backtest data

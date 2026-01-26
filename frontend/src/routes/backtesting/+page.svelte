@@ -10,6 +10,10 @@
 	import type { BacktestResult } from '$lib/backtesting/types';
 	import EquityCurveChart from '$lib/components/EquityCurveChart.svelte';
 	import PnLDistributionChart from '$lib/components/PnLDistributionChart.svelte';
+	import { env } from '$env/dynamic/public';
+
+	// Backtest API URL - use external API if configured, otherwise local
+	const BACKTEST_API_URL = env.PUBLIC_BACKTEST_API_URL || '';
 
 	// Main tab state - set based on URL parameter
 	let activeMainTab: 'summary' | 'strategies' = 'summary';
@@ -425,12 +429,15 @@
 	let isAuthenticating = false;
 	let showSuccessNotification = false;
 
-	// Wizard state
+	// Two-phase flow state
+	let marketSelectionPhase: 1 | 2 = 1; // 1 = select markets, 2 = configure all parameters
+	let showSelectedMarkets = true; // Show/hide selected markets in phase 2
+
+	// For backward compatibility during refactor (will be removed)
 	let currentStep = 0;
-	const totalSteps = 5; // Markets (with date range & filters), Capital, Entry, Exit, Position Sizing
+	const totalSteps = 5;
 
 	// Market browser state
-	let marketSelectionPhase: 1 | 2 = 1; // 1 = select markets, 2 = select date range
 	let marketStatus: 'closed' | 'open' = 'closed'; // closed = past, open = active
 	let availableMarkets: any[] = [];
 	let loadingMarkets = false;
@@ -501,7 +508,10 @@
 		selectedMarketId = null; // Clear selection
 
 		try {
-			const response = await fetch('/api/backtest/markets', {
+			// Use external backtest API for markets if configured
+			const marketsEndpoint = BACKTEST_API_URL ? `${BACKTEST_API_URL}/api/backtest/markets` : '/api/backtest/markets';
+
+			const response = await fetch(marketsEndpoint, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -530,8 +540,8 @@
 	let prevTag: string = '';
 	let hasLoadedMarkets = false;
 
-	// Auto-fetch markets when entering step 0 or tag changes (client-side only)
-	$: if (browser && currentStep === 0 && marketSelectionPhase === 1) {
+	// Auto-fetch markets when entering phase 1 or tag changes (client-side only)
+	$: if (browser && marketSelectionPhase === 1) {
 		const tagChanged = prevTag !== selectedTag;
 
 		// Only fetch if tag changed or this is the first load
@@ -542,7 +552,16 @@
 		}
 	}
 
-	// Wizard navigation
+	// Phase navigation functions
+	function goToParametersPhase() {
+		marketSelectionPhase = 2;
+	}
+
+	function backToMarketSelection() {
+		marketSelectionPhase = 1;
+	}
+
+	// Temporary wizard navigation for backward compatibility (will be removed)
 	function nextStep() {
 		if (currentStep < totalSteps - 1) {
 			currentStep++;
@@ -836,27 +855,57 @@
 				progress = Math.min(progress + 10, 90);
 			}, 500);
 
-			const response = await fetch('/api/backtest', {
+			// Use external backtest API if configured, otherwise local
+			const backtestEndpoint = BACKTEST_API_URL ? `${BACKTEST_API_URL}/api/backtest` : '/api/backtest';
+			console.log('[Backtest] Using endpoint:', backtestEndpoint);
+			console.log('[Backtest] Sending config:', {
+				markets: selectedMarkets.length,
+				dateRange: `${config.startDate} to ${config.endDate}`,
+				bankroll: config.initialBankroll
+			});
+
+			// Create an AbortController for timeout handling
+			const controller = new AbortController();
+			const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minute timeout
+
+			const startTime = Date.now();
+			const response = await fetch(backtestEndpoint, {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json'
 				},
-				body: JSON.stringify(config)
+				body: JSON.stringify(config),
+				signal: controller.signal
 			});
 
+			clearTimeout(timeoutId);
 			clearInterval(progressInterval);
+
+			const responseTime = Date.now() - startTime;
+			console.log(`[Backtest] Response received in ${responseTime}ms`);
 
 			if (!response.ok) {
 				const errorData = await response.json();
 				throw new Error(errorData.error || 'Backtest failed');
 			}
 
+			console.log('[Backtest] Parsing response...');
 			backtestResult = await response.json();
+			console.log('[Backtest] Result:', {
+				trades: backtestResult.metrics?.totalTrades,
+				finalBankroll: backtestResult.metrics?.finalBankroll
+			});
+
 			progress = 100;
 			strategyTab = 'results';
 
 		} catch (err: any) {
-			error = err.message || 'An error occurred';
+			if (err.name === 'AbortError') {
+				error = 'Request timeout - the backtest is taking too long. Try reducing the date range or number of markets.';
+			} else {
+				error = err.message || 'An error occurred';
+			}
+			console.error('[Backtest Error]:', err);
 		} finally {
 			isRunning = false;
 		}
@@ -1580,9 +1629,10 @@
 	{/if}
 
 	<!-- STRATEGY BACKTESTING TAB -->
+	<!-- STRATEGY BACKTESTING TAB -->
 	{#if activeMainTab === 'strategies'}
 		<div class="strategy-backtesting">
-			<!-- Sub-tabs for Strategy Backtesting -->
+			<!-- Sub-tabs -->
 			<div class="tabs">
 				<button
 					class="tab"
@@ -1601,450 +1651,426 @@
 				</button>
 			</div>
 
-			<!-- WIZARD CONFIGURATION -->
+			<!-- CONFIGURATION TAB -->
 			{#if strategyTab === 'configure'}
-				<div class="wizard-container">
-					<!-- Progress Bar -->
-					<div class="wizard-progress">
-						<div class="progress-bar">
-							<div class="progress-fill" style="width: {((currentStep + 1) / totalSteps) * 100}%"></div>
-						</div>
-						<div class="progress-steps">
-							{#each Array(totalSteps) as _, i}
-								<button
-									class="progress-step"
-									class:active={i === currentStep}
-									class:completed={i < currentStep}
-									on:click={() => goToStep(i)}
-								>
-									{i + 1}
-								</button>
-							{/each}
-						</div>
-					</div>
-			
-					<!-- Wizard Steps -->
-					<div class="wizard-content">
-						<!-- STEP 1: Market Selection (Two Phases) -->
-						{#if currentStep === 0}
-							<div class="wizard-step" transition:fade>
-								{#if marketSelectionPhase === 1}
-									<!-- Phase 1: Select a Closed Market -->
-									<div class="step-header">
-										<h2>Select a Past Market</h2>
-										<p>Choose a closed market to backtest your strategy</p>
+				<div class="config-container">
+					<!-- PHASE 1: MARKET SELECTION -->
+					{#if marketSelectionPhase === 1}
+						<div class="market-selection-phase">
+							<div class="phase-header">
+								<div class="header-content">
+									<div>
+										<h2>Select Markets</h2>
+										<p>Choose closed markets to backtest your strategy</p>
 									</div>
+									{#if selectedMarkets.length > 0}
+										<button class="btn-continue" on:click={proceedToDateSelection}>
+											Continue with {selectedMarkets.length} {selectedMarkets.length === 1 ? 'Market' : 'Markets'} →
+										</button>
+									{/if}
+								</div>
+							</div>
 
-									<div class="step-body market-selection-body">
-										<!-- Search and Filters -->
-										<div class="search-filters-section">
-											<!-- Search Bar -->
-											<div class="search-container">
-												<input
-													type="text"
-													bind:value={marketSearchQuery}
-													placeholder="Search markets..."
-													class="search-input"
-												/>
-											</div>
+							<!-- Search and Filters Bar -->
+							<div class="search-filters-container">
+								<div class="search-filters-bar">
+									<input
+										type="text"
+										bind:value={marketSearchQuery}
+										placeholder="Search markets..."
+										class="search-input"
+									/>
 
-											<!-- Continue Button (Multi-select) -->
-											{#if selectedMarkets.length > 0}
-												<div class="continue-button-container">
-													<button class="continue-btn" on:click={proceedToDateSelection}>
-														Continue with {selectedMarkets.length} {selectedMarkets.length === 1 ? 'Market' : 'Markets'}
-													</button>
-												</div>
-											{/if}
+									<button class="filters-toggle" on:click={() => showAdvancedFilters = !showAdvancedFilters}>
+										<span>FILTERS</span>
+										<span class="toggle-icon">{showAdvancedFilters ? '▼' : '▶'}</span>
+									</button>
 
-											<!-- Filters Toggle Button -->
-											<button class="filters-toggle-btn" on:click={() => showAdvancedFilters = !showAdvancedFilters}>
-												<span>Advanced Filters</span>
-												<span class="dropdown-arrow">{showAdvancedFilters ? '▼' : '▶'}</span>
-											</button>
-
-											<!-- Filters Panel (Below Search) -->
-											{#if showAdvancedFilters}
-												<div class="filters-panel">
-													<!-- Category Filter -->
-													<div class="filter-group">
-														<label class="filter-group-label">Category</label>
-														<select bind:value={selectedTag} class="filter-select">
-															{#each availableTags as tag}
-																<option value={tag}>
-																	{tag === 'All' ? 'All Categories' : tag.charAt(0).toUpperCase() + tag.slice(1)}
-																</option>
-															{/each}
-														</select>
-													</div>
-
-													<!-- Volume Filter -->
-													<div class="filter-group">
-														<label class="filter-group-label">Volume Range</label>
-														<div class="volume-inputs-inline">
-															<input
-																type="number"
-																bind:value={minVolume}
-																placeholder="Min"
-																class="volume-input-small"
-																on:change={fetchMarkets}
-															/>
-															<span class="volume-separator">to</span>
-															<input
-																type="number"
-																bind:value={maxVolume}
-																placeholder="Max"
-																class="volume-input-small"
-																on:change={fetchMarkets}
-															/>
-														</div>
-													</div>
-												</div>
-											{/if}
+									{#if selectedMarkets.length > 0}
+										<div class="selected-badge">
+											{selectedMarkets.length} SELECTED
 										</div>
+									{/if}
+								</div>
 
-										<!-- Markets Table -->
-										{#if loadingMarkets}
-											<div class="loading-state">
-												<span class="spinner"></span>
-												<p>Loading closed markets...</p>
+								<!-- Filters Panel -->
+								{#if showAdvancedFilters}
+									<div class="filters-panel">
+										<div class="filter-group">
+											<label>CATEGORY</label>
+											<select bind:value={selectedTag} class="filter-select">
+												{#each availableTags as tag}
+													<option value={tag}>{tag === 'All' ? 'All Categories' : tag.toUpperCase()}</option>
+												{/each}
+											</select>
+										</div>
+										<div class="filter-group">
+											<label>VOLUME RANGE</label>
+											<div class="volume-inputs">
+												<input type="number" bind:value={minVolume} placeholder="MIN" on:change={fetchMarkets} class="volume-input" />
+												<span class="separator">→</span>
+												<input type="number" bind:value={maxVolume} placeholder="MAX" on:change={fetchMarkets} class="volume-input" />
 											</div>
-										{:else if availableMarkets.length === 0}
-											<div class="empty-state">
-												<p>No closed markets found matching your criteria</p>
-												<small>Try adjusting your filters</small>
-											</div>
-										{:else}
-											<div class="events-table-container">
-												<div class="results-info">
-													<span>{groupedEvents.length} events found ({filteredMarkets.length} markets total)</span>
-													<span>Page {eventsCurrentPage + 1} of {eventsTotalPages || 1}</span>
-												</div>
-
-												<table class="events-table">
-													<thead>
-														<tr>
-															<th class="event-header">Event</th>
-															<th class="volume-header sortable-header" on:click={() => sortEvents('volume')}>
-																<div class="sort-header-content">
-																	<span>Volume</span>
-																	<span class="sort-indicator" class:active={eventSortColumn === 'volume'}>
-																		{#if eventSortColumn === 'volume'}
-																			{eventSortDirection === 'asc' ? '↑' : '↓'}
-																		{:else}
-																			⇅
-																		{/if}
-																	</span>
-																</div>
-															</th>
-															<th class="starts-header">Starts</th>
-															<th class="ends-header sortable-header" on:click={() => sortEvents('ends')}>
-																<div class="sort-header-content">
-																	<span>Ends</span>
-																	<span class="sort-indicator" class:active={eventSortColumn === 'ends'}>
-																		{#if eventSortColumn === 'ends'}
-																			{eventSortDirection === 'asc' ? '↑' : '↓'}
-																		{:else}
-																			⇅
-																		{/if}
-																	</span>
-																</div>
-															</th>
-															<th class="tags-header">Tags</th>
-														</tr>
-													</thead>
-													<tbody>
-														{#each paginatedEvents as event}
-															<!-- Event Row -->
-															<tr class="event-row"
-																class:selected={event.markets.length === 1 && selectedMarketIds.has(event.markets[0].condition_id)}
-																on:click={() => event.markets.length > 1 ? toggleEvent(event.eventSlug) : toggleMarketSelection(event.markets[0])}>
-																<td class="event-cell">
-																	<div class="event-content">
-																		{#if event.markets.length > 1}
-																			<button class="expand-icon" class:expanded={expandedEvents.has(event.eventSlug)}>
-																				{expandedEvents.has(event.eventSlug) ? '▼' : '▶'}
-																			</button>
-																		{/if}
-																		{#if event.icon}
-																			<img src={event.icon} alt={event.eventTitle} class="event-icon" />
-																		{/if}
-																		<div class="event-info">
-																			<div class="event-title">{event.eventTitle}</div>
-																			{#if event.markets.length > 1}
-																				<div class="event-markets-count">({event.markets.length} markets)</div>
-																			{/if}
-																		</div>
-																	</div>
-																</td>
-																<td class="volume-cell">
-																	${(event.totalVolume / 1000000).toFixed(1)}M
-																</td>
-																<td class="starts-cell">
-																	{#if event.startDate}
-																		{formatMarketDate(event.startDate)}
-																	{:else}
-																		N/A
-																	{/if}
-																</td>
-																<td class="ends-cell">
-																	{#if event.endDate}
-																		{formatMarketDate(event.endDate)}
-																	{:else}
-																		N/A
-																	{/if}
-																</td>
-																<td class="tags-cell">
-																	<div class="tags-container">
-																		{#if event.tags && event.tags.length > 0}
-																			{#each event.tags.slice(0, 2) as tag}
-																				<span class="tag-badge">{tag}</span>
-																			{/each}
-																			{#if event.tags.length > 2}
-																				<span class="tag-more">+{event.tags.length - 2}</span>
-																			{/if}
-																		{:else}
-																			<span class="tag-badge">Other</span>
-																		{/if}
-																	</div>
-																</td>
-															</tr>
-
-															<!-- Expanded Markets (Nested Table) -->
-															{#if expandedEvents.has(event.eventSlug) && event.markets.length > 1}
-																<tr class="markets-expanded-row">
-																	<td colspan="5" class="markets-expanded-cell">
-																		<div class="nested-markets-container">
-																			<table class="nested-markets-table">
-																				<thead>
-																					<tr>
-																						<th>Question</th>
-																						<th>Volume</th>
-																						<th>Ends</th>
-																					</tr>
-																				</thead>
-																				<tbody>
-																					{#each event.markets as market}
-																						{@const marketVolume = market.volume_total || market.volume || market.volume_24h || market.total_volume || 0}
-																						<tr class:selected={selectedMarketIds.has(market.condition_id)} on:click|stopPropagation={() => toggleMarketSelection(market)}>
-																							<td class="market-question-cell">
-																								{market.title || market.question || 'Untitled'}
-																							</td>
-																							<td class="market-volume-cell">
-																								{#if marketVolume > 0}
-																									${(marketVolume / 1000000).toFixed(1)}M
-																								{:else}
-																									$0.0M
-																								{/if}
-																							</td>
-																							<td class="market-ends-cell">
-																								{#if market.end_time || market.close_time}
-																									{formatMarketDate(market.end_time || market.close_time)}
-																								{:else}
-																									N/A
-																								{/if}
-																							</td>
-																						</tr>
-																					{/each}
-																				</tbody>
-																			</table>
-																		</div>
-																	</td>
-																</tr>
-															{/if}
-														{/each}
-													</tbody>
-												</table>
-
-												<!-- Pagination Controls -->
-												<div class="pagination-controls">
-													<div class="pagination-buttons">
-														<button
-															class="pagination-btn"
-															on:click={() => eventsCurrentPage = 0}
-															disabled={eventsCurrentPage === 0}
-														>
-															First
-														</button>
-														<button
-															class="pagination-btn"
-															on:click={() => eventsCurrentPage--}
-															disabled={eventsCurrentPage === 0}
-														>
-															Previous
-														</button>
-														<span class="page-info">
-															Page {eventsCurrentPage + 1} of {eventsTotalPages || 1}
-														</span>
-														<button
-															class="pagination-btn"
-															on:click={() => eventsCurrentPage++}
-															disabled={eventsCurrentPage >= eventsTotalPages - 1}
-														>
-															Next
-														</button>
-														<button
-															class="pagination-btn"
-															on:click={() => eventsCurrentPage = eventsTotalPages - 1}
-															disabled={eventsCurrentPage >= eventsTotalPages - 1}
-														>
-															Last
-														</button>
-													</div>
-												</div>
-											</div>
-										{/if}
-									</div>
-
-								{:else}
-									<!-- Phase 2: Select Date Range for Markets -->
-									<div class="step-header">
-										<h2>Select Date Range</h2>
-										<p>Choose the timeframe for backtesting {selectedMarkets.length === 1 ? 'this market' : `these ${selectedMarkets.length} markets`}</p>
-									</div>
-
-									<div class="step-body">
-										<!-- Selected Markets Display -->
-										{#if selectedMarkets.length > 0}
-											<div class="selected-market-display">
-												<div class="selected-market-info">
-													<div class="selected-label">Selected {selectedMarkets.length === 1 ? 'Market' : 'Markets'}: ({selectedMarkets.length})</div>
-													<div class="selected-markets-list">
-														{#each selectedMarkets as market, idx}
-															{@const selectedVolume = market.volume_total || market.volume || market.volume_24h || market.total_volume || 0}
-															<div class="selected-market-item">
-																<span class="market-number">{idx + 1}.</span>
-																<span class="market-title">{market.title || market.question}</span>
-																<span class="market-volume">${(selectedVolume / 1000000).toFixed(2)}M</span>
-																<button class="remove-market-btn" on:click={() => toggleMarketSelection(market)}>×</button>
-															</div>
-														{/each}
-													</div>
-												</div>
-												<button class="change-market-btn" on:click={clearMarketSelection}>
-													Change Markets
-												</button>
-											</div>
-
-											<!-- Date Range Selector -->
-											<div class="date-range-selector">
-												<h3>Select Backtest Date Range</h3>
-												<p class="date-range-description">
-													Choose a date range within the market's lifetime to backtest your strategy
-												</p>
-												<div class="filters-grid">
-													<div class="filter-item">
-														<label>Start Date</label>
-														<input
-															type="date"
-															bind:value={startDateStr}
-															min={marketStartTime ? formatDateForInput(marketStartTime) : ''}
-															max={endDateStr}
-															class="filter-input-uniform"
-														/>
-													</div>
-
-													<div class="filter-item">
-														<label>End Date</label>
-														<input
-															type="date"
-															bind:value={endDateStr}
-															min={startDateStr}
-															max={marketEndTime ? formatDateForInput(marketEndTime) : ''}
-															class="filter-input-uniform"
-														/>
-													</div>
-
-													<div class="filter-item">
-														<label>Backtest Duration</label>
-														<div class="duration-display">
-															{#if config.startDate && config.endDate}
-																{Math.floor((config.endDate.getTime() - config.startDate.getTime()) / (1000 * 60 * 60 * 24))} days
-															{:else}
-																-
-															{/if}
-														</div>
-													</div>
-												</div>
-											</div>
-										{/if}
+										</div>
 									</div>
 								{/if}
 							</div>
-						{/if}
 
-						<!-- STEP 2: Initial Capital -->
-						{#if currentStep === 1}
-							<div class="wizard-step" transition:fade>
-								<div class="step-header">
-									<h2>Initial Capital</h2>
-									<p>How much capital to start with</p>
+							<!-- Markets Table -->
+							{#if loadingMarkets}
+								<div class="loading-state">
+									<span class="spinner"></span>
+									<p>Loading markets...</p>
 								</div>
-			
-								<div class="step-body">
-									<div class="capital-input-wrapper">
-										<input
-											type="number"
-											bind:value={config.initialBankroll}
-											min="100"
-											step="100"
-											class="capital-input"
-											placeholder="10000"
-										/>
-										<span class="currency-label">USDC</span>
+							{:else if filteredMarkets.length === 0}
+								<div class="empty-state">
+									<p>No closed markets found</p>
+								</div>
+							{:else}
+								<div class="events-table-container">
+									<div class="results-info">
+										<span>{groupedEvents.length} events found ({filteredMarkets.length} markets total)</span>
+										<span>Page {eventsCurrentPage + 1} of {eventsTotalPages || 1}</span>
 									</div>
-			
-									<div class="capital-presets">
-										<button class="preset-btn" on:click={() => config.initialBankroll = 1000}>
-											$1K
-										</button>
-										<button class="preset-btn" on:click={() => config.initialBankroll = 5000}>
-											$5K
-										</button>
-										<button class="preset-btn" on:click={() => config.initialBankroll = 10000}>
-											$10K
-										</button>
-										<button class="preset-btn" on:click={() => config.initialBankroll = 50000}>
-											$50K
-										</button>
+
+									<table class="events-table">
+										<thead>
+											<tr>
+												<th class="event-header">Event</th>
+												<th class="volume-header sortable-header" on:click={() => sortEvents('volume')}>
+													<div class="sort-header-content">
+														<span>Volume</span>
+														<span class="sort-indicator" class:active={eventSortColumn === 'volume'}>
+															{#if eventSortColumn === 'volume'}
+																{eventSortDirection === 'asc' ? '↑' : '↓'}
+															{:else}
+																⇅
+															{/if}
+														</span>
+													</div>
+												</th>
+												<th class="starts-header">Starts</th>
+												<th class="ends-header sortable-header" on:click={() => sortEvents('ends')}>
+													<div class="sort-header-content">
+														<span>Ends</span>
+														<span class="sort-indicator" class:active={eventSortColumn === 'ends'}>
+															{#if eventSortColumn === 'ends'}
+																{eventSortDirection === 'asc' ? '↑' : '↓'}
+															{:else}
+																⇅
+															{/if}
+														</span>
+													</div>
+												</th>
+												<th class="tags-header">Tags</th>
+											</tr>
+										</thead>
+										<tbody>
+											{#each paginatedEvents as event}
+												<!-- Event Row -->
+												<tr class="event-row"
+													class:selected={event.markets.length === 1 && selectedMarketIds.has(event.markets[0].condition_id)}
+													on:click={() => event.markets.length > 1 ? toggleEvent(event.eventSlug) : toggleMarketSelection(event.markets[0])}>
+													<td class="event-cell">
+														<div class="event-content">
+															{#if event.markets.length > 1}
+																<button class="expand-icon" class:expanded={expandedEvents.has(event.eventSlug)}>
+																	{expandedEvents.has(event.eventSlug) ? '▼' : '▶'}
+																</button>
+															{/if}
+															{#if event.icon}
+																<img src={event.icon} alt={event.eventTitle} class="event-icon" />
+															{/if}
+															<div class="event-info">
+																<div class="event-title">{event.eventTitle}</div>
+																{#if event.markets.length > 1}
+																	<div class="event-markets-count">({event.markets.length} markets)</div>
+																{/if}
+															</div>
+														</div>
+													</td>
+													<td class="volume-cell">
+														${(event.totalVolume / 1000000).toFixed(1)}M
+													</td>
+													<td class="starts-cell">
+														{#if event.startDate}
+															{formatMarketDate(event.startDate)}
+														{:else}
+															N/A
+														{/if}
+													</td>
+													<td class="ends-cell">
+														{#if event.endDate}
+															{formatMarketDate(event.endDate)}
+														{:else}
+															N/A
+														{/if}
+													</td>
+													<td class="tags-cell">
+														<div class="tags-container">
+															{#if event.tags && event.tags.length > 0}
+																{#each event.tags.slice(0, 2) as tag}
+																	<span class="tag-badge">{tag}</span>
+																{/each}
+																{#if event.tags.length > 2}
+																	<span class="tag-more">+{event.tags.length - 2}</span>
+																{/if}
+															{:else}
+																<span class="tag-badge">Other</span>
+															{/if}
+														</div>
+													</td>
+												</tr>
+
+												<!-- Expanded Markets (Nested Table) -->
+												{#if expandedEvents.has(event.eventSlug) && event.markets.length > 1}
+													<tr class="markets-expanded-row">
+														<td colspan="5" class="markets-expanded-cell">
+															<div class="nested-markets-container">
+																<table class="nested-markets-table">
+																	<thead>
+																		<tr>
+																			<th>Select</th>
+																			<th>Question</th>
+																			<th>Volume</th>
+																			<th>Ends</th>
+																		</tr>
+																	</thead>
+																	<tbody>
+																		{#each event.markets as market}
+																			{@const marketVolume = market.volume_total || market.volume || market.volume_24h || market.total_volume || 0}
+																			{@const isSelected = selectedMarketIds.has(market.condition_id)}
+																			<tr class:selected={isSelected} on:click|stopPropagation={() => toggleMarketSelection(market)}>
+																				<td class="market-select-cell">
+																					<input
+																						type="checkbox"
+																						checked={isSelected}
+																						on:click|stopPropagation={() => toggleMarketSelection(market)}
+																					/>
+																				</td>
+																				<td class="market-question-cell">
+																					{market.title || market.question || 'Untitled'}
+																				</td>
+																				<td class="market-volume-cell">
+																					{#if marketVolume > 0}
+																						${(marketVolume / 1000000).toFixed(1)}M
+																					{:else}
+																						$0.0M
+																					{/if}
+																				</td>
+																				<td class="market-ends-cell">
+																					{#if market.end_time || market.close_time}
+																						{formatMarketDate(market.end_time || market.close_time)}
+																					{:else}
+																						N/A
+																					{/if}
+																				</td>
+																			</tr>
+																		{/each}
+																	</tbody>
+																</table>
+															</div>
+														</td>
+													</tr>
+												{/if}
+											{/each}
+										</tbody>
+									</table>
+
+									<!-- Pagination Controls -->
+									<div class="pagination-controls">
+										<div class="pagination-buttons">
+											<button
+												class="pagination-btn"
+												on:click={() => eventsCurrentPage = 0}
+												disabled={eventsCurrentPage === 0}
+											>
+												First
+											</button>
+											<button
+												class="pagination-btn"
+												on:click={() => eventsCurrentPage--}
+												disabled={eventsCurrentPage === 0}
+											>
+												Previous
+											</button>
+											<span class="page-info">
+												Page {eventsCurrentPage + 1} of {eventsTotalPages || 1}
+											</span>
+											<button
+												class="pagination-btn"
+												on:click={() => eventsCurrentPage++}
+												disabled={eventsCurrentPage >= eventsTotalPages - 1}
+											>
+												Next
+											</button>
+											<button
+												class="pagination-btn"
+												on:click={() => eventsCurrentPage = eventsTotalPages - 1}
+												disabled={eventsCurrentPage >= eventsTotalPages - 1}
+											>
+												Last
+											</button>
+										</div>
+									</div>
+								</div>
+							{/if}
+						</div>
+
+					{:else if marketSelectionPhase === 2}
+						<!-- PHASE 2: TRADING TERMINAL -->
+						<div class="trading-terminal">
+							<!-- Terminal Header -->
+							<div class="terminal-header">
+								<button class="terminal-back-btn" on:click={backToMarketSelection}>
+									← MARKETS
+								</button>
+								<div class="terminal-title">
+									<span class="terminal-label">STRATEGY CONFIGURATION</span>
+									<span class="terminal-status">READY</span>
+								</div>
+								<div class="terminal-actions">
+									<button class="terminal-action-btn" on:click={runBacktest} disabled={isRunning}>
+										{#if isRunning}
+											⟳ RUNNING... {progress}%
+										{:else}
+											▶ RUN BACKTEST
+										{/if}
+									</button>
+								</div>
+							</div>
+
+							<!-- Selected Markets Panel -->
+							<div class="terminal-markets-panel">
+								<div class="panel-header">
+									<span class="panel-title">SELECTED MARKETS [{selectedMarkets.length}]</span>
+									<button class="panel-collapse-btn" on:click={() => showSelectedMarkets = !showSelectedMarkets}>
+										{showSelectedMarkets ? '−' : '+'}
+									</button>
+								</div>
+								{#if showSelectedMarkets}
+									<div class="markets-list">
+										{#each selectedMarkets as market, idx}
+											{@const volume = market.volume_total || market.volume || 0}
+											{@const endTime = market.end_time || market.close_time}
+											<div class="market-item">
+												<span class="market-index">{String(idx + 1).padStart(2, '0')}</span>
+												<div class="market-details">
+													<div class="market-name">{market.title || market.question || 'Untitled'}</div>
+													<div class="market-meta">
+														<span>VOL: ${(volume / 1000000).toFixed(1)}M</span>
+														{#if endTime}
+															<span>ENDED: {new Date(endTime * 1000).toLocaleDateString()}</span>
+														{/if}
+													</div>
+												</div>
+												<button class="market-remove-btn" on:click={() => toggleMarketSelection(market)}>×</button>
+											</div>
+										{/each}
+									</div>
+								{/if}
+							</div>
+
+							<!-- Terminal Grid -->
+							<div class="terminal-grid">
+								<!-- LEFT PANEL: Time & Capital -->
+								<div class="terminal-panel">
+									<!-- Date Range -->
+									<div class="terminal-section">
+										<div class="section-header">
+											<span class="section-icon">📅</span>
+											<span class="section-label">TIME RANGE</span>
+										</div>
+										<div class="section-body">
+											<div class="terminal-field">
+												<label>START DATE</label>
+												<input type="date" bind:value={startDateStr} class="terminal-input" />
+											</div>
+											<div class="terminal-field">
+												<label>END DATE</label>
+												<input type="date" bind:value={endDateStr} class="terminal-input" />
+											</div>
+											<div class="terminal-info">
+												DURATION: {#if config.startDate && config.endDate}
+													{Math.floor((config.endDate.getTime() - config.startDate.getTime()) / (1000 * 60 * 60 * 24))} DAYS
+												{:else}
+													-
+												{/if}
+											</div>
+										</div>
+									</div>
+
+									<!-- Initial Capital -->
+									<div class="terminal-section">
+										<div class="section-header">
+											<span class="section-icon">💰</span>
+											<span class="section-label">INITIAL CAPITAL</span>
+										</div>
+										<div class="section-body">
+											<div class="terminal-field">
+												<label>AMOUNT</label>
+												<div class="terminal-input-suffix">
+													<input
+														type="number"
+														bind:value={config.initialBankroll}
+														min="100"
+														step="100"
+														placeholder="10000"
+														class="terminal-input"
+													/>
+													<span>USDC</span>
+												</div>
+											</div>
+											<div class="terminal-quick-btns">
+												<button class="terminal-quick-btn" on:click={() => config.initialBankroll = 1000}>$1K</button>
+												<button class="terminal-quick-btn" on:click={() => config.initialBankroll = 5000}>$5K</button>
+												<button class="terminal-quick-btn" on:click={() => config.initialBankroll = 10000}>$10K</button>
+												<button class="terminal-quick-btn" on:click={() => config.initialBankroll = 50000}>$50K</button>
+											</div>
+										</div>
 									</div>
 
 									<!-- Position Sizing -->
-									<div class="form-section" style="margin-top: 2rem;">
-										<label>Position Sizing</label>
-										<div class="position-sizing-controls">
-											<div class="sizing-type-buttons">
-												<button
-													class="sizing-btn"
-													class:active={config.positionSizing.type === 'FIXED'}
-													on:click={() => config.positionSizing.type = 'FIXED'}
-												>
-													Fixed Amount
-												</button>
-												<button
-													class="sizing-btn"
-													class:active={config.positionSizing.type === 'PERCENTAGE'}
-													on:click={() => config.positionSizing.type = 'PERCENTAGE'}
-												>
-													Percentage
-												</button>
+									<div class="terminal-section">
+										<div class="section-header">
+											<span class="section-icon">📊</span>
+											<span class="section-label">POSITION SIZING</span>
+										</div>
+										<div class="section-body">
+											<div class="terminal-field">
+												<label>TYPE</label>
+												<div class="terminal-button-group">
+													<button
+														class="terminal-btn"
+														class:active={config.positionSizing.type === 'FIXED'}
+														on:click={() => config.positionSizing.type = 'FIXED'}
+													>
+														FIXED
+													</button>
+													<button
+														class="terminal-btn"
+														class:active={config.positionSizing.type === 'PERCENTAGE'}
+														on:click={() => config.positionSizing.type = 'PERCENTAGE'}
+													>
+														PERCENTAGE
+													</button>
+												</div>
 											</div>
-
 											{#if config.positionSizing.type === 'FIXED'}
-												<div class="sizing-input-group">
-													<label>Amount per Trade (USDC)</label>
+												<div class="terminal-field">
+													<label>AMOUNT PER TRADE (USDC)</label>
 													<input
 														type="number"
 														bind:value={config.positionSizing.fixedAmount}
 														min="10"
 														step="10"
 														placeholder="100"
-														class="sizing-input"
+														class="terminal-input"
 													/>
 												</div>
 											{:else}
-												<div class="sizing-input-group">
-													<label>Percentage of Bankroll per Trade (%)</label>
+												<div class="terminal-field">
+													<label>% OF BANKROLL PER TRADE</label>
 													<input
 														type="number"
 														bind:value={config.positionSizing.percentageOfBankroll}
@@ -2052,13 +2078,12 @@
 														max="100"
 														step="1"
 														placeholder="5"
-														class="sizing-input"
+														class="terminal-input"
 													/>
 												</div>
 											{/if}
-
-											<div class="sizing-input-group">
-												<label>Max Total Exposure</label>
+											<div class="terminal-field">
+												<label>MAX TOTAL EXPOSURE (%)</label>
 												<input
 													type="number"
 													bind:value={config.positionSizing.maxExposurePercent}
@@ -2066,453 +2091,293 @@
 													max="100"
 													step="5"
 													placeholder="50"
-													class="sizing-input"
+													class="terminal-input"
 												/>
-												<p class="help-text-sm">Maximum % of bankroll in open positions simultaneously</p>
+												<span class="terminal-info">Max % of bankroll in open positions</span>
 											</div>
 										</div>
 									</div>
 								</div>
-							</div>
-						{/if}
 
-						<!-- STEP 2: Entry Rules -->
-						{#if currentStep === 2}
-							<div class="wizard-step" transition:fade>
-								<div class="step-header">
-									<h2>Entry Rules</h2>
-									<p>Define when to enter positions</p>
-								</div>
-			
-								<div class="step-body">
-									<div class="form-section">
-										<label>Entry Type</label>
-										<div class="entry-type-buttons">
-											<button
-												class="entry-btn"
-												class:active={config.entryType === 'YES'}
-												on:click={() => config.entryType = 'YES'}
-											>
-												YES
-											</button>
-											<button
-												class="entry-btn"
-												class:active={config.entryType === 'NO'}
-												on:click={() => config.entryType = 'NO'}
-											>
-												NO
-											</button>
-											<button
-												class="entry-btn"
-												class:active={config.entryType === 'BOTH'}
-												on:click={() => config.entryType = 'BOTH'}
-											>
-												BOTH
-											</button>
+								<!-- COLUMN 2: Entry Rules -->
+								<div class="terminal-panel">
+									<div class="terminal-section">
+										<div class="section-header">
+											<span class="section-icon">📊</span>
+											<span class="section-label">ENTRY RULES</span>
 										</div>
-									</div>
-			
-									{#if config.entryType === 'YES' || config.entryType === 'BOTH'}
-										<div class="form-section">
-											<label>YES Price Threshold</label>
-											<div class="price-range">
-												<div class="range-input-group">
-													<span class="range-label">Min</span>
-													<input
-														type="range"
-														bind:value={config.entryPriceThreshold.yes.min}
-														min="0"
-														max="1"
-														step="0.01"
-														class="price-slider"
-													/>
-													<span class="range-value">{(config.entryPriceThreshold.yes.min || 0).toFixed(2)}</span>
-												</div>
-												<div class="range-input-group">
-													<span class="range-label">Max</span>
-													<input
-														type="range"
-														bind:value={config.entryPriceThreshold.yes.max}
-														min="0"
-														max="1"
-														step="0.01"
-														class="price-slider"
-													/>
-													<span class="range-value">{(config.entryPriceThreshold.yes.max || 1).toFixed(2)}</span>
+										<div class="section-body">
+											<div class="terminal-field">
+												<label>ENTRY TYPE</label>
+												<div class="terminal-button-group">
+													<button
+														class="terminal-btn"
+														class:active={config.entryType === 'YES'}
+														on:click={() => config.entryType = 'YES'}
+													>
+														YES
+													</button>
+													<button
+														class="terminal-btn"
+														class:active={config.entryType === 'NO'}
+														on:click={() => config.entryType = 'NO'}
+													>
+														NO
+													</button>
+													<button
+														class="terminal-btn"
+														class:active={config.entryType === 'BOTH'}
+														on:click={() => config.entryType = 'BOTH'}
+													>
+														BOTH
+													</button>
 												</div>
 											</div>
-										</div>
-									{/if}
-			
-									{#if config.entryType === 'NO' || config.entryType === 'BOTH'}
-										<div class="form-section">
-											<label>NO Price Threshold</label>
-											<div class="price-range">
-												<div class="range-input-group">
-													<span class="range-label">Min</span>
-													<input
-														type="range"
-														bind:value={config.entryPriceThreshold.no.min}
-														min="0"
-														max="1"
-														step="0.01"
-														class="price-slider"
-													/>
-													<span class="range-value">{(config.entryPriceThreshold.no.min || 0).toFixed(2)}</span>
-												</div>
-												<div class="range-input-group">
-													<span class="range-label">Max</span>
-													<input
-														type="range"
-														bind:value={config.entryPriceThreshold.no.max}
-														min="0"
-														max="1"
-														step="0.01"
-														class="price-slider"
-													/>
-													<span class="range-value">{(config.entryPriceThreshold.no.max || 1).toFixed(2)}</span>
-												</div>
-											</div>
-										</div>
-									{/if}
 
-									<!-- Time Constraints -->
-									<div class="form-section">
-										<label>Entry Time Window</label>
-										<div class="date-range-group">
-											<div class="date-input-wrapper">
-												<span class="date-label">Earliest Entry</span>
-												<input
-													type="date"
-													bind:value={earliestEntryStr}
-													class="date-input"
-													placeholder="Backtest start date"
-												/>
-											</div>
-											<div class="date-input-wrapper">
-												<span class="date-label">Latest Entry</span>
-												<input
-													type="date"
-													bind:value={latestEntryStr}
-													class="date-input"
-													placeholder="Backtest end date"
-												/>
-											</div>
-										</div>
-										<p class="help-text">Optional: Restrict when trades can be entered</p>
-									</div>
+											<!-- Price Thresholds -->
+											{#if config.entryType === 'YES' || config.entryType === 'BOTH'}
+												<div class="terminal-field">
+													<label>YES PRICE RANGE</label>
+													<div class="terminal-range-inputs">
+														<input
+															type="number"
+															bind:value={config.entryPriceThreshold.yes.min}
+															min="0"
+															max="1"
+															step="0.01"
+															placeholder="MIN (0.3)"
+															class="terminal-input"
+														/>
+														<span class="range-separator">→</span>
+														<input
+															type="number"
+															bind:value={config.entryPriceThreshold.yes.max}
+															min="0"
+															max="1"
+															step="0.01"
+															placeholder="MAX (0.7)"
+															class="terminal-input"
+														/>
+													</div>
+												</div>
+											{/if}
 
-									<!-- Trade Frequency Controls -->
-									<div class="form-section">
-										<label>Trade Frequency Limit</label>
-										<div class="frequency-controls">
-											<div class="frequency-input-group">
-												<span class="input-label">Max Trades Per Day</span>
+											{#if config.entryType === 'NO' || config.entryType === 'BOTH'}
+												<div class="terminal-field">
+													<label>NO PRICE RANGE</label>
+													<div class="terminal-range-inputs">
+														<input
+															type="number"
+															bind:value={config.entryPriceThreshold.no.min}
+															min="0"
+															max="1"
+															step="0.01"
+															placeholder="MIN"
+															class="terminal-input"
+														/>
+														<span class="range-separator">→</span>
+														<input
+															type="number"
+															bind:value={config.entryPriceThreshold.no.max}
+															min="0"
+															max="1"
+															step="0.01"
+															placeholder="MAX"
+															class="terminal-input"
+														/>
+													</div>
+												</div>
+											{/if}
+
+											<!-- Time Constraints -->
+											<div class="terminal-field">
+												<label>EARLIEST ENTRY</label>
+												<input type="date" bind:value={earliestEntryStr} class="terminal-input" />
+											</div>
+											<div class="terminal-field">
+												<label>LATEST ENTRY</label>
+												<input type="date" bind:value={latestEntryStr} class="terminal-input" />
+											</div>
+
+											<!-- Trade Frequency -->
+											<div class="terminal-field">
+												<label>MAX TRADES PER DAY</label>
 												<input
 													type="number"
 													bind:value={config.tradeFrequency.maxTradesPerDay}
 													min="1"
-													step="1"
-													placeholder="Unlimited"
-													class="frequency-input"
+													placeholder="UNLIMITED"
+													class="terminal-input"
+												/>
+											</div>
+											<div class="terminal-field">
+												<label>COOLDOWN (HOURS)</label>
+												<input
+													type="number"
+													bind:value={config.tradeFrequency.cooldownHours}
+													min="0"
+													step="0.5"
+													placeholder="0"
+													class="terminal-input"
 												/>
 											</div>
 										</div>
-										<p class="help-text">Optional: Limit daily trade frequency to prevent overtrading</p>
 									</div>
 								</div>
-							</div>
-						{/if}
-			
-						<!-- STEP 3: Exit Rules -->
-						{#if currentStep === 3}
-							<div class="wizard-step" transition:fade>
-								<div class="step-header">
-									<h2>Exit Rules</h2>
-									<p>Define when to close positions</p>
-								</div>
-			
-								<div class="step-body">
-									<div class="form-section">
-										<label>Stop Loss (%)</label>
-										<input
-											type="number"
-											bind:value={config.exitRules.stopLoss}
-											min="0"
-											max="100"
-											step="1"
-											placeholder="20"
-											class="exit-input"
-										/>
-										<p class="help-text-sm">Exit when position loses this % (leave empty for none)</p>
-									</div>
 
-									<div class="form-section">
-										<label>Take Profit (%)</label>
-										<input
-											type="number"
-											bind:value={config.exitRules.takeProfit}
-											min="0"
-											max="500"
-											step="1"
-											placeholder="50"
-											class="exit-input"
-										/>
-										<p class="help-text-sm">Exit when position gains this % (leave empty for none)</p>
-									</div>
-
-									<div class="form-section">
-										<label>Max Hold Time (hours)</label>
-										<input
-											type="number"
-											bind:value={config.exitRules.maxHoldTime}
-											min="1"
-											step="1"
-											placeholder="168"
-											class="exit-input"
-										/>
-										<p class="help-text-sm">Auto-exit after this duration (leave empty for none)</p>
-									</div>
-			
-									<!-- Optional Features Toggle Section -->
-									<div class="form-section">
-										<label class="section-label">Optional Exit Features</label>
-										<div class="optional-features">
-											<button
-												type="button"
-												class="toggle-feature-btn"
-												class:active={config.exitRules.resolveOnExpiry}
-												on:click={() => config.exitRules.resolveOnExpiry = !config.exitRules.resolveOnExpiry}
-											>
-												<span class="toggle-icon">{config.exitRules.resolveOnExpiry ? '✓' : '+'}</span>
-												<span class="toggle-text">Close at Resolution</span>
-											</button>
-
-											<button
-												type="button"
-												class="toggle-feature-btn"
-												class:active={config.exitRules.trailingStop.enabled}
-												on:click={() => config.exitRules.trailingStop.enabled = !config.exitRules.trailingStop.enabled}
-											>
-												<span class="toggle-icon">{config.exitRules.trailingStop.enabled ? '✓' : '+'}</span>
-												<span class="toggle-text">Trailing Stop Loss</span>
-											</button>
-
-											<button
-												type="button"
-												class="toggle-feature-btn"
-												class:active={config.exitRules.partialExits.enabled}
-												on:click={() => config.exitRules.partialExits.enabled = !config.exitRules.partialExits.enabled}
-											>
-												<span class="toggle-icon">{config.exitRules.partialExits.enabled ? '✓' : '+'}</span>
-												<span class="toggle-text">Partial Exits</span>
-											</button>
+								<!-- COLUMN 3: Exit Rules -->
+								<div class="terminal-panel">
+									<div class="terminal-section">
+										<div class="section-header">
+											<span class="section-icon">🚪</span>
+											<span class="section-label">EXIT RULES</span>
 										</div>
-									</div>
-
-									<!-- Trailing Stop Loss Config -->
-									{#if config.exitRules.trailingStop.enabled}
-										<div class="form-section feature-config">
-											<h4 class="feature-config-title">Trailing Stop Loss Settings</h4>
-											<div class="trailing-stop-config">
-												<div class="trailing-input-group">
-													<span class="input-label">Activation at Profit (%)</span>
-													<input
-														type="number"
-														bind:value={config.exitRules.trailingStop.activationPercent}
-														min="0"
-														max="500"
-														step="5"
-														placeholder="20"
-														class="trailing-input"
-													/>
-													<p class="help-text-sm">Activate trailing stop after reaching this % profit</p>
-												</div>
-												<div class="trailing-input-group">
-													<span class="input-label">Trail by (%)</span>
-													<input
-														type="number"
-														bind:value={config.exitRules.trailingStop.trailPercent}
-														min="1"
-														max="100"
-														step="1"
-														placeholder="10"
-														class="trailing-input"
-													/>
-													<p class="help-text-sm">Exit if profit drops by this % from peak</p>
-												</div>
+										<div class="section-body">
+											<div class="terminal-field">
+												<label class="terminal-checkbox">
+													<input type="checkbox" bind:checked={config.exitRules.resolveOnExpiry} />
+													<span>RESOLVE ON MARKET EXPIRY</span>
+												</label>
 											</div>
-										</div>
-									{/if}
 
-									<!-- Partial Exits Config -->
-									{#if config.exitRules.partialExits.enabled}
-										<div class="form-section feature-config">
-											<h4 class="feature-config-title">Partial Exits Settings</h4>
-											<div class="partial-exits-config">
-												<div class="partial-exit-row">
-													<span class="partial-label">First Exit:</span>
-													<div class="partial-inputs">
-														<div class="partial-input-wrapper">
+											<div class="terminal-field">
+												<label>STOP LOSS (%)</label>
+												<input
+													type="number"
+													bind:value={config.exitRules.stopLoss}
+													min="0"
+													max="100"
+													step="1"
+													placeholder="20"
+													class="terminal-input"
+												/>
+											</div>
+
+											<div class="terminal-field">
+												<label>TAKE PROFIT (%)</label>
+												<input
+													type="number"
+													bind:value={config.exitRules.takeProfit}
+													min="0"
+													step="1"
+													placeholder="50"
+													class="terminal-input"
+												/>
+											</div>
+
+											<div class="terminal-field">
+												<label>MAX HOLD TIME (HOURS)</label>
+												<input
+													type="number"
+													bind:value={config.exitRules.maxHoldTime}
+													min="0"
+													placeholder="UNLIMITED"
+													class="terminal-input"
+												/>
+											</div>
+
+											<!-- Trailing Stop -->
+											<div class="terminal-field">
+												<label class="terminal-checkbox">
+													<input type="checkbox" bind:checked={config.exitRules.trailingStop.enabled} />
+													<span>TRAILING STOP</span>
+												</label>
+												{#if config.exitRules.trailingStop.enabled}
+													<div class="terminal-field-nested">
+														<label>ACTIVATION %</label>
+														<input
+															type="number"
+															bind:value={config.exitRules.trailingStop.activationPercent}
+															min="0"
+															step="1"
+															placeholder="20"
+															class="terminal-input"
+														/>
+													</div>
+													<div class="terminal-field-nested">
+														<label>TRAIL %</label>
+														<input
+															type="number"
+															bind:value={config.exitRules.trailingStop.trailPercent}
+															min="0"
+															step="1"
+															placeholder="10"
+															class="terminal-input"
+														/>
+													</div>
+												{/if}
+											</div>
+
+											<!-- Partial Exits -->
+											<div class="terminal-field">
+												<label class="terminal-checkbox">
+													<input type="checkbox" bind:checked={config.exitRules.partialExits.enabled} />
+													<span>PARTIAL EXITS</span>
+												</label>
+												{#if config.exitRules.partialExits.enabled}
+													<div class="terminal-field-nested">
+														<label>TP1: PROFIT % / SELL %</label>
+														<div class="terminal-range-inputs">
 															<input
 																type="number"
 																bind:value={config.exitRules.partialExits.takeProfit1.percent}
-																min="1"
-																max="500"
-																step="1"
-																placeholder="Profit %"
-																class="partial-input"
+																placeholder="PROFIT %"
+																class="terminal-input"
 															/>
-															<span class="unit-label">% profit</span>
-														</div>
-														<span class="arrow">→</span>
-														<div class="partial-input-wrapper">
+															<span class="range-separator">/</span>
 															<input
 																type="number"
 																bind:value={config.exitRules.partialExits.takeProfit1.sellPercent}
-																min="1"
-																max="100"
-																step="5"
-																placeholder="Sell %"
-																class="partial-input"
+																placeholder="SELL %"
+																class="terminal-input"
 															/>
-															<span class="unit-label">% of position</span>
 														</div>
 													</div>
-												</div>
-												<div class="partial-exit-row">
-													<span class="partial-label">Second Exit:</span>
-													<div class="partial-inputs">
-														<div class="partial-input-wrapper">
+													<div class="terminal-field-nested">
+														<label>TP2: PROFIT % / SELL %</label>
+														<div class="terminal-range-inputs">
 															<input
 																type="number"
 																bind:value={config.exitRules.partialExits.takeProfit2.percent}
-																min="1"
-																max="500"
-																step="1"
-																placeholder="Profit %"
-																class="partial-input"
+																placeholder="PROFIT %"
+																class="terminal-input"
 															/>
-															<span class="unit-label">% profit</span>
-														</div>
-														<span class="arrow">→</span>
-														<div class="partial-input-wrapper">
+															<span class="range-separator">/</span>
 															<input
 																type="number"
 																bind:value={config.exitRules.partialExits.takeProfit2.sellPercent}
-																min="1"
-																max="100"
-																step="5"
-																placeholder="Sell %"
-																class="partial-input"
+																placeholder="SELL %"
+																class="terminal-input"
 															/>
-															<span class="unit-label">% of remaining</span>
 														</div>
 													</div>
-												</div>
-												<p class="help-text">Take profits at multiple levels (e.g., sell 50% at +30%, then 50% at +60%)</p>
-											</div>
-										</div>
-									{/if}
-								</div>
-							</div>
-						{/if}
-			
-						<!-- STEP 4: Review & Run -->
-						{#if currentStep === 4}
-							<div class="wizard-step" transition:fade>
-								<div class="step-header">
-									<h2>Review & Run</h2>
-									<p>Review your configuration and run the backtest</p>
-								</div>
-			
-								<div class="step-body">
-									<!-- Configuration Summary -->
-									<div class="config-summary">
-										<h3>Summary</h3>
-										<div class="summary-grid">
-											<div class="summary-item">
-												<span class="summary-label">Date Range</span>
-												<span class="summary-value">
-													{config.startDate?.toLocaleDateString()} - {config.endDate?.toLocaleDateString()}
-												</span>
-											</div>
-											<div class="summary-item">
-												<span class="summary-label">Initial Capital</span>
-												<span class="summary-value">${config.initialBankroll?.toLocaleString()}</span>
-											</div>
-											<div class="summary-item">
-												<span class="summary-label">Markets</span>
-												<span class="summary-value">
-													{selectedMarketId ? '1 specific market' : 'All matching markets'}
-												</span>
-											</div>
-											<div class="summary-item">
-												<span class="summary-label">Entry Type</span>
-												<span class="summary-value">{config.entryType}</span>
-											</div>
-											<div class="summary-item">
-												<span class="summary-label">Stop Loss</span>
-												<span class="summary-value">
-													{config.exitRules.stopLoss ? `${config.exitRules.stopLoss}%` : 'None'}
-												</span>
-											</div>
-											<div class="summary-item">
-												<span class="summary-label">Take Profit</span>
-												<span class="summary-value">
-													{config.exitRules.takeProfit ? `${config.exitRules.takeProfit}%` : 'None'}
-												</span>
-											</div>
-											<div class="summary-item">
-												<span class="summary-label">Max Hold Time</span>
-												<span class="summary-value">
-													{config.exitRules.maxHoldTime ? `${config.exitRules.maxHoldTime}h` : 'None'}
-												</span>
-											</div>
-											<div class="summary-item">
-												<span class="summary-label">Close at Resolution</span>
-												<span class="summary-value">
-													{config.exitRules.resolveOnExpiry ? 'Yes' : 'No'}
-												</span>
+												{/if}
 											</div>
 										</div>
 									</div>
-			
-									<!-- Error Display -->
-									{#if error}
-										<div class="error-box">{error}</div>
-									{/if}
-			
-									<!-- Run Backtest Button -->
-									<button class="btn-run-backtest" on:click={runBacktest} disabled={isRunning}>
-										{#if isRunning}
-											<span class="spinner-small"></span>
-											Running Backtest... {progress}%
-										{:else}
-											Run Backtest
-										{/if}
-									</button>
 								</div>
 							</div>
-						{/if}
-					</div>
-			
-					<!-- Navigation -->
-					<div class="wizard-navigation">
-						{#if currentStep > 0}
-							<button class="nav-btn nav-prev" on:click={prevStep}>
-								← Back
-							</button>
-						{/if}
-						{#if currentStep < totalSteps - 1}
-							<button class="nav-btn nav-next" on:click={nextStep}>
-								Next →
-							</button>
-						{:else}
-							<div></div>
-						{/if}
-					</div>
+
+							<!-- Error Display -->
+							{#if error}
+								<div class="error-box">{error}</div>
+							{/if}
+
+							<!-- Run Backtest Button -->
+							<div class="phase-actions">
+								<button class="btn-primary btn-lg btn-run" on:click={runBacktest} disabled={isRunning}>
+									{#if isRunning}
+										<span class="spinner"></span>
+										Running... {progress}%
+									{:else}
+										Run Backtest
+									{/if}
+								</button>
+							</div>
+						</div>
+					{/if}
 				</div>
+
 		{:else if strategyTab === 'results' && backtestResult}
 			<!-- ============= COMPREHENSIVE RESULTS DISPLAY ============= -->
 			<div class="results-panel">
@@ -4781,17 +4646,7 @@
 	font-weight: 500;
 }
 
-.selected-badge {
-	position: absolute;
-	top: 12px;
-	right: 12px;
-	padding: 4px 12px;
-	background: #F97316;
-	color: white;
-	border-radius: 12px;
-	font-size: 12px;
-	font-weight: 600;
-}
+/* Removed duplicate selected-badge - using the new one in Phase 1 styles */
 
 .clear-selection-btn {
 	width: 100%;
@@ -7060,5 +6915,1477 @@
 
 .close-notification:hover {
 	color: white;
+}
+
+/* ============= NEW TWO-PHASE BACKTESTING UI ============= */
+
+.config-container {
+	background: #000000;
+	border: 1px solid #FFFFFF;
+	border-radius: 8px;
+	padding: 2rem;
+	margin-top: 1.5rem;
+}
+
+/* Phase Headers */
+.phase-header {
+	margin-bottom: 1.5rem;
+}
+
+.phase-header .header-content {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+}
+
+.phase-header h2 {
+	color: #FFFFFF;
+	font-size: 1.25rem;
+	margin-bottom: 0.25rem;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+}
+
+.phase-header p {
+	color: #9CA3AF;
+	font-size: 0.75rem;
+	text-transform: uppercase;
+}
+
+.btn-continue {
+	background: #000000;
+	border: 1px solid #FFFFFF;
+	color: #FFFFFF;
+	padding: 0.75rem 1.5rem;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 0.75rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	transition: all 0.2s;
+}
+
+.btn-continue:hover {
+	border-color: #F97316;
+	color: #F97316;
+}
+
+/* Phase 1: Market Selection */
+.market-selection-phase {
+	max-width: 100%;
+}
+
+.search-filters-container {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	margin-bottom: 1.5rem;
+}
+
+.search-filters-bar {
+	display: flex;
+	gap: 0.75rem;
+	align-items: stretch;
+	height: 42px;
+}
+
+.search-input {
+	flex: 1;
+	background: #000000;
+	border: 1px solid #FFFFFF;
+	color: #FFFFFF;
+	padding: 0 1rem;
+	border-radius: 4px;
+	font-size: 0.75rem;
+	font-family: monospace;
+	text-transform: uppercase;
+	height: 100%;
+}
+
+.search-input::placeholder {
+	color: #6B7280;
+	text-transform: uppercase;
+}
+
+.filters-toggle {
+	background: #000000;
+	border: 1px solid #FFFFFF;
+	color: #FFFFFF;
+	padding: 0 1rem;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 0.7rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	transition: all 0.2s;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	white-space: nowrap;
+	height: 100%;
+}
+
+.filters-toggle:hover {
+	border-color: #F97316;
+	color: #F97316;
+}
+
+.toggle-icon {
+	font-size: 0.6rem;
+}
+
+.selected-badge {
+	background: #F97316;
+	color: #000000;
+	padding: 0 1rem;
+	border-radius: 4px;
+	font-weight: 700;
+	font-size: 0.7rem;
+	letter-spacing: 0.1em;
+	white-space: nowrap;
+	display: flex;
+	align-items: center;
+	height: 100%;
+}
+
+.filters-panel {
+	background: #0A0A0A;
+	border: 1px solid #FFFFFF;
+	padding: 1.5rem;
+	border-radius: 4px;
+	display: flex;
+	gap: 1.5rem;
+	align-items: flex-start;
+}
+
+.filter-group {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+
+.filter-group label {
+	color: #9CA3AF;
+	font-size: 0.65rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+}
+
+.filter-select {
+	background: #000000;
+	border: 1px solid #FFFFFF;
+	color: #FFFFFF;
+	padding: 0 0.75rem;
+	border-radius: 4px;
+	font-size: 0.75rem;
+	text-transform: uppercase;
+	font-family: monospace;
+	height: 42px;
+}
+
+.volume-inputs {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	height: 42px;
+}
+
+.volume-input {
+	flex: 1;
+	background: #000000;
+	border: 1px solid #FFFFFF;
+	color: #FFFFFF;
+	padding: 0 0.75rem;
+	border-radius: 4px;
+	font-size: 0.75rem;
+	font-family: monospace;
+	text-transform: uppercase;
+	height: 42px;
+}
+
+.volume-input::placeholder {
+	color: #6B7280;
+}
+
+.separator {
+	color: #F97316;
+	font-weight: 600;
+	display: flex;
+	align-items: center;
+}
+
+/* Events Table */
+.events-table-container {
+	background: #000000;
+	border: 1px solid #FFFFFF;
+	border-radius: 4px;
+	overflow: hidden;
+	margin-bottom: 1.5rem;
+}
+
+.results-info {
+	display: flex;
+	justify-content: space-between;
+	padding: 0.75rem 1rem;
+	background: #1A1A1A;
+	border-bottom: 1px solid #FFFFFF;
+	color: #9CA3AF;
+	font-size: 0.75rem;
+}
+
+.events-table {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+.events-table thead {
+	background: #1A1A1A;
+}
+
+.events-table th {
+	color: #9CA3AF;
+	text-align: left;
+	padding: 0.75rem 1rem;
+	font-size: 0.75rem;
+	text-transform: uppercase;
+	font-weight: 600;
+	border-bottom: 1px solid #FFFFFF;
+	white-space: nowrap;
+}
+
+.sortable-header {
+	cursor: pointer;
+	user-select: none;
+	transition: color 0.2s;
+}
+
+.sortable-header:hover {
+	color: #F97316;
+}
+
+.sort-header-content {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.sort-indicator {
+	color: #666666;
+	font-size: 0.875rem;
+}
+
+.sort-indicator.active {
+	color: #F97316;
+}
+
+.event-row {
+	border-bottom: 1px solid #333333;
+	cursor: pointer;
+	transition: background 0.2s;
+}
+
+.event-row:hover {
+	background: #1A1A1A;
+}
+
+.event-row.selected {
+	background: #F973161A;
+}
+
+.event-cell {
+	padding: 0;
+}
+
+.event-content {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	padding: 0.75rem 1rem;
+}
+
+.expand-icon {
+	background: transparent;
+	border: none;
+	color: #9CA3AF;
+	cursor: pointer;
+	padding: 0.25rem;
+	font-size: 0.75rem;
+	transition: color 0.2s;
+	flex-shrink: 0;
+}
+
+.expand-icon:hover {
+	color: #F97316;
+}
+
+.expand-icon.expanded {
+	color: #F97316;
+}
+
+.event-icon {
+	width: 32px;
+	height: 32px;
+	border-radius: 4px;
+	object-fit: cover;
+	flex-shrink: 0;
+}
+
+.event-info {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+	min-width: 0;
+}
+
+.event-title {
+	color: #FFFFFF;
+	font-weight: 500;
+	font-size: 0.875rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.event-markets-count {
+	color: #F97316;
+	font-size: 0.75rem;
+}
+
+.volume-cell,
+.starts-cell,
+.ends-cell {
+	color: #FFFFFF;
+	padding: 0.75rem 1rem;
+	font-size: 0.875rem;
+}
+
+.tags-cell {
+	padding: 0.75rem 1rem;
+}
+
+.tags-container {
+	display: flex;
+	gap: 0.5rem;
+	flex-wrap: wrap;
+}
+
+.tag-badge {
+	background: #1A1A1A;
+	border: 1px solid #FFFFFF;
+	color: #FFFFFF;
+	padding: 0.25rem 0.5rem;
+	border-radius: 3px;
+	font-size: 0.7rem;
+	text-transform: uppercase;
+}
+
+.tag-more {
+	color: #9CA3AF;
+	font-size: 0.7rem;
+}
+
+/* Nested Markets Table */
+.markets-expanded-row {
+	background: #0A0A0A;
+}
+
+.markets-expanded-cell {
+	padding: 0;
+	border-top: 1px solid #F97316;
+}
+
+.nested-markets-container {
+	padding: 1rem;
+}
+
+.nested-markets-table {
+	width: 100%;
+	border-collapse: collapse;
+	background: #000000;
+	border: 1px solid #FFFFFF;
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+.nested-markets-table thead {
+	background: #1A1A1A;
+}
+
+.nested-markets-table th {
+	color: #9CA3AF;
+	text-align: left;
+	padding: 0.5rem 0.75rem;
+	font-size: 0.7rem;
+	text-transform: uppercase;
+	border-bottom: 1px solid #FFFFFF;
+}
+
+.nested-markets-table tbody tr {
+	border-bottom: 1px solid #333333;
+	cursor: pointer;
+	transition: background 0.2s;
+}
+
+.nested-markets-table tbody tr:hover {
+	background: #1A1A1A;
+}
+
+.nested-markets-table tbody tr.selected {
+	background: #F973161A;
+}
+
+.nested-markets-table td {
+	color: #FFFFFF;
+	padding: 0.5rem 0.75rem;
+	font-size: 0.8rem;
+}
+
+.market-select-cell {
+	width: 40px;
+	text-align: center;
+}
+
+.market-question-cell {
+	font-weight: 400;
+}
+
+.market-volume-cell,
+.market-ends-cell {
+	white-space: nowrap;
+}
+
+/* Custom Checkbox Styling */
+.nested-markets-table input[type="checkbox"] {
+	appearance: none;
+	-webkit-appearance: none;
+	width: 20px;
+	height: 20px;
+	border: 2px solid #FFFFFF;
+	border-radius: 2px;
+	background: #000000;
+	cursor: pointer;
+	position: relative;
+	transition: all 0.2s;
+}
+
+.nested-markets-table input[type="checkbox"]:hover {
+	border-color: #F97316;
+}
+
+.nested-markets-table input[type="checkbox"]:checked {
+	background: #F97316;
+	border-color: #F97316;
+}
+
+.nested-markets-table input[type="checkbox"]:checked::after {
+	content: '✓';
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	color: #000000;
+	font-size: 14px;
+	font-weight: 700;
+}
+
+.pagination-controls {
+	padding: 1rem;
+	background: #1A1A1A;
+	border-top: 1px solid #FFFFFF;
+}
+
+.pagination-buttons {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.pagination-btn {
+	background: #000000;
+	border: 1px solid #FFFFFF;
+	color: #FFFFFF;
+	padding: 0.5rem 1rem;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 0.75rem;
+	transition: all 0.2s;
+	min-width: 80px;
+}
+
+.pagination-btn:hover:not(:disabled) {
+	border-color: #F97316;
+	color: #F97316;
+}
+
+.pagination-btn:disabled {
+	opacity: 0.3;
+	cursor: not-allowed;
+}
+
+.page-info {
+	color: #9CA3AF;
+	font-size: 0.875rem;
+	padding: 0 1rem;
+}
+
+/* Phase Actions */
+.phase-actions {
+	display: flex;
+	justify-content: center;
+	padding-top: 1.5rem;
+}
+
+.btn-primary {
+	background: #F97316;
+	color: #000000;
+	border: none;
+	padding: 0.75rem 2rem;
+	border-radius: 4px;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.2s;
+	font-size: 0.875rem;
+}
+
+.btn-primary:hover:not(:disabled) {
+	background: #EA580C;
+	transform: translateY(-1px);
+}
+
+.btn-primary:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.btn-lg {
+	padding: 1rem 3rem;
+	font-size: 1rem;
+}
+
+.btn-run {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.btn-back {
+	background: transparent;
+	border: 1px solid #FFFFFF;
+	color: #FFFFFF;
+	padding: 0.5rem 1rem;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 0.875rem;
+	transition: all 0.2s;
+	margin-bottom: 1rem;
+}
+
+.btn-back:hover {
+	border-color: #F97316;
+	color: #F97316;
+}
+
+/* Phase 2: Parameters Grid */
+.parameters-phase {
+	max-width: 100%;
+}
+
+.params-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+	gap: 1.5rem;
+	margin-bottom: 2rem;
+}
+
+.param-col {
+	display: flex;
+	flex-direction: column;
+	gap: 1.5rem;
+}
+
+.param-section {
+	background: #1A1A1A;
+	border: 1px solid #FFFFFF;
+	padding: 1.5rem;
+	border-radius: 4px;
+}
+
+.param-section h3 {
+	color: #F97316;
+	font-size: 1rem;
+	margin-bottom: 1rem;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	font-weight: 600;
+}
+
+.section-title {
+	color: #F97316 !important;
+}
+
+.param-field {
+	margin-bottom: 1rem;
+}
+
+.param-field label {
+	display: block;
+	color: #9CA3AF;
+	font-size: 0.75rem;
+	margin-bottom: 0.5rem;
+	text-transform: uppercase;
+}
+
+.param-field input[type="checkbox"] {
+	margin-right: 0.5rem;
+}
+
+.input-field {
+	width: 100%;
+	background: #000000;
+	border: 1px solid #FFFFFF;
+	color: #FFFFFF;
+	padding: 0.75rem;
+	border-radius: 4px;
+	font-size: 0.875rem;
+	transition: border-color 0.2s;
+}
+
+.input-field:focus {
+	outline: none;
+	border-color: #F97316;
+}
+
+.input-field::placeholder {
+	color: #6B7280;
+}
+
+.input-suffix {
+	color: #9CA3AF;
+	font-size: 0.875rem;
+	margin-left: 0.5rem;
+}
+
+.param-info {
+	color: #9CA3AF;
+	font-size: 0.75rem;
+	margin-top: 0.5rem;
+}
+
+.help-text {
+	display: block;
+	color: #6B7280;
+	font-size: 0.7rem;
+	margin-top: 0.25rem;
+	font-style: italic;
+}
+
+.quick-buttons {
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 0.5rem;
+	margin-top: 0.5rem;
+}
+
+.quick-buttons button {
+	background: #000000;
+	border: 1px solid #FFFFFF;
+	color: #FFFFFF;
+	padding: 0.5rem;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 0.75rem;
+	transition: all 0.2s;
+}
+
+.quick-buttons button:hover {
+	border-color: #F97316;
+	color: #F97316;
+}
+
+.button-group {
+	display: flex;
+	gap: 0.5rem;
+	margin-bottom: 1rem;
+}
+
+.button-group button {
+	flex: 1;
+	background: #000000;
+	border: 1px solid #FFFFFF;
+	color: #FFFFFF;
+	padding: 0.75rem;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 0.875rem;
+	transition: all 0.2s;
+}
+
+.button-group button:hover {
+	border-color: #F97316;
+}
+
+.button-group button.active {
+	background: #F97316;
+	border-color: #F97316;
+	color: #000000;
+	font-weight: 600;
+}
+
+.param-subgroup {
+	background: #0A0A0A;
+	border: 1px solid #333333;
+	padding: 1rem;
+	border-radius: 4px;
+	margin-top: 1rem;
+}
+
+.param-subgroup > label:first-child {
+	color: #F97316;
+	font-size: 0.875rem;
+	font-weight: 600;
+	margin-bottom: 0.75rem;
+	display: flex;
+	align-items: center;
+}
+
+.range-inputs {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.range-inputs input {
+	flex: 1;
+}
+
+.range-inputs span {
+	color: #9CA3AF;
+	font-size: 0.75rem;
+}
+
+.error-box {
+	background: #7F1D1D;
+	border: 1px solid #DC2626;
+	color: #FFFFFF;
+	padding: 1rem;
+	border-radius: 4px;
+	margin-bottom: 1rem;
+	font-size: 0.875rem;
+}
+
+/* Loading States */
+.loading-state {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	padding: 4rem 2rem;
+	gap: 1rem;
+}
+
+.spinner {
+	width: 40px;
+	height: 40px;
+	border: 3px solid #333333;
+	border-top-color: #F97316;
+	border-radius: 50%;
+	animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+	to { transform: rotate(360deg); }
+}
+
+.empty-state {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	padding: 4rem 2rem;
+	color: #9CA3AF;
+}
+
+.empty-state p {
+	font-size: 0.875rem;
+}
+
+/* Results Panel Styling */
+.results-panel {
+	margin-top: 1.5rem;
+}
+
+.export-actions {
+	display: flex;
+	justify-content: flex-end;
+	margin-bottom: 1.5rem;
+}
+
+.btn-save {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	background: #000000;
+	border: 1px solid #FFFFFF;
+	color: #FFFFFF;
+	padding: 0.75rem 1.5rem;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 0.875rem;
+	transition: all 0.2s;
+}
+
+.btn-save:hover {
+	border-color: #F97316;
+	color: #F97316;
+}
+
+.summary-cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+	gap: 1rem;
+	margin-bottom: 2rem;
+}
+
+.summary-card {
+	background: #000000;
+	border: 1px solid #FFFFFF;
+	padding: 1.5rem;
+	border-radius: 4px;
+}
+
+.summary-card.positive {
+	border-color: #10B981;
+}
+
+.summary-card.negative {
+	border-color: #EF4444;
+}
+
+.card-label {
+	color: #9CA3AF;
+	font-size: 0.75rem;
+	text-transform: uppercase;
+	margin-bottom: 0.5rem;
+}
+
+.card-value {
+	color: #FFFFFF;
+	font-size: 1.5rem;
+	font-weight: 600;
+}
+
+.summary-card.positive .card-value {
+	color: #10B981;
+}
+
+.summary-card.negative .card-value {
+	color: #EF4444;
+}
+
+.charts-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+	gap: 1.5rem;
+	margin-bottom: 2rem;
+}
+
+.chart-container {
+	background: #000000;
+	border: 1px solid #FFFFFF;
+	padding: 1.5rem;
+	border-radius: 4px;
+}
+
+.chart-container h3 {
+	color: #F97316;
+	font-size: 1rem;
+	margin-bottom: 1rem;
+}
+
+.trades-section {
+	background: #000000;
+	border: 1px solid #FFFFFF;
+	padding: 1.5rem;
+	border-radius: 4px;
+}
+
+.trades-section h3 {
+	color: #F97316;
+	font-size: 1rem;
+	margin-bottom: 1rem;
+}
+
+.trades-table {
+	overflow-x: auto;
+}
+
+.trades-table table {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+.trades-table th {
+	color: #9CA3AF;
+	text-align: left;
+	padding: 0.75rem;
+	font-size: 0.75rem;
+	text-transform: uppercase;
+	border-bottom: 1px solid #FFFFFF;
+}
+
+.trades-table td {
+	color: #FFFFFF;
+	padding: 0.75rem;
+	font-size: 0.875rem;
+	border-bottom: 1px solid #333333;
+}
+
+.market-cell {
+	max-width: 200px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.side-cell {
+	font-weight: 600;
+}
+
+.side-yes {
+	color: #10B981;
+}
+
+.side-no {
+	color: #EF4444;
+}
+
+.positive {
+	color: #10B981;
+}
+
+.negative {
+	color: #EF4444;
+}
+
+/* ============= PHASE 2: TRADING TERMINAL ============= */
+
+.trading-terminal {
+	background: #000000;
+	border: 1px solid #FFFFFF;
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+.terminal-header {
+	background: #0A0A0A;
+	border-bottom: 2px solid #F97316;
+	padding: 1rem 1.5rem;
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+}
+
+.terminal-back-btn {
+	background: transparent;
+	border: 1px solid #FFFFFF;
+	color: #FFFFFF;
+	padding: 0.5rem 1rem;
+	border-radius: 2px;
+	cursor: pointer;
+	font-size: 0.7rem;
+	font-weight: 700;
+	letter-spacing: 0.1em;
+	transition: all 0.2s;
+	font-family: monospace;
+}
+
+.terminal-back-btn:hover {
+	border-color: #F97316;
+	color: #F97316;
+}
+
+.terminal-title {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.25rem;
+}
+
+.terminal-label {
+	color: #FFFFFF;
+	font-size: 0.9rem;
+	font-weight: 700;
+	letter-spacing: 0.15em;
+	font-family: monospace;
+}
+
+.terminal-status {
+	color: #10B981;
+	font-size: 0.65rem;
+	font-weight: 600;
+	letter-spacing: 0.1em;
+	font-family: monospace;
+}
+
+.terminal-actions {
+	display: flex;
+	gap: 0.75rem;
+}
+
+.terminal-action-btn {
+	background: #F97316;
+	border: 2px solid #F97316;
+	color: #000000;
+	padding: 0.75rem 1.5rem;
+	border-radius: 2px;
+	cursor: pointer;
+	font-size: 0.75rem;
+	font-weight: 700;
+	letter-spacing: 0.1em;
+	transition: all 0.2s;
+	font-family: monospace;
+}
+
+.terminal-action-btn:hover:not(:disabled) {
+	background: #EA580C;
+	border-color: #EA580C;
+	transform: translateY(-1px);
+}
+
+.terminal-action-btn:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+/* Selected Markets Panel */
+.terminal-markets-panel {
+	background: #0A0A0A;
+	border-bottom: 1px solid #FFFFFF;
+}
+
+.panel-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 0.75rem 1.5rem;
+	background: #000000;
+	border-bottom: 1px solid #333333;
+}
+
+.panel-title {
+	color: #F97316;
+	font-size: 0.7rem;
+	font-weight: 700;
+	letter-spacing: 0.15em;
+	font-family: monospace;
+}
+
+.panel-collapse-btn {
+	background: transparent;
+	border: 1px solid #FFFFFF;
+	color: #FFFFFF;
+	width: 24px;
+	height: 24px;
+	border-radius: 2px;
+	cursor: pointer;
+	font-size: 0.875rem;
+	font-weight: 700;
+	transition: all 0.2s;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.panel-collapse-btn:hover {
+	border-color: #F97316;
+	color: #F97316;
+}
+
+.markets-list {
+	padding: 1rem 1.5rem;
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+	gap: 0.75rem;
+	max-height: 300px;
+	overflow-y: auto;
+}
+
+.market-item {
+	background: #000000;
+	border: 1px solid #333333;
+	border-radius: 2px;
+	padding: 0.75rem;
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	transition: border-color 0.2s;
+}
+
+.market-item:hover {
+	border-color: #F97316;
+}
+
+.market-index {
+	background: #F97316;
+	color: #000000;
+	width: 32px;
+	height: 32px;
+	border-radius: 2px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 0.7rem;
+	font-weight: 700;
+	font-family: monospace;
+	flex-shrink: 0;
+}
+
+.market-details {
+	flex: 1;
+	min-width: 0;
+}
+
+.market-name {
+	color: #FFFFFF;
+	font-size: 0.75rem;
+	font-weight: 500;
+	margin-bottom: 0.25rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.market-meta {
+	display: flex;
+	gap: 1rem;
+	color: #9CA3AF;
+	font-size: 0.65rem;
+	font-family: monospace;
+	text-transform: uppercase;
+}
+
+.market-remove-btn {
+	background: transparent;
+	border: 1px solid #EF4444;
+	color: #EF4444;
+	width: 24px;
+	height: 24px;
+	border-radius: 2px;
+	cursor: pointer;
+	font-size: 1rem;
+	font-weight: 700;
+	transition: all 0.2s;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+}
+
+.market-remove-btn:hover {
+	background: #EF4444;
+	color: #000000;
+}
+
+/* Terminal Grid */
+.terminal-grid {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 1.5rem;
+	background: #000000;
+	padding: 1.5rem;
+}
+
+.terminal-panel {
+	background: #000000;
+	display: flex;
+	flex-direction: column;
+	gap: 1.5rem;
+}
+
+.terminal-section {
+	background: #000000;
+	border: 1px solid #FFFFFF;
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+.section-header {
+	background: #0A0A0A;
+	border-bottom: 2px solid #F97316;
+	padding: 1rem;
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+}
+
+.section-icon {
+	font-size: 1rem;
+}
+
+.section-label {
+	color: #F97316;
+	font-size: 0.75rem;
+	font-weight: 700;
+	letter-spacing: 0.15em;
+	font-family: monospace;
+}
+
+.section-body {
+	padding: 1.5rem;
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
+}
+
+/* Terminal Input Fields */
+.terminal-field {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+
+.terminal-field label {
+	color: #9CA3AF;
+	font-size: 0.65rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	font-family: monospace;
+}
+
+.terminal-input {
+	background: #000000;
+	border: 1px solid #FFFFFF;
+	color: #FFFFFF;
+	padding: 0 0.75rem;
+	border-radius: 4px;
+	font-size: 0.75rem;
+	font-family: monospace;
+	height: 42px;
+	transition: border-color 0.2s;
+}
+
+.terminal-input:focus {
+	outline: none;
+	border-color: #F97316;
+}
+
+.terminal-input::placeholder {
+	color: #6B7280;
+}
+
+.terminal-input-suffix {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.terminal-input-suffix input {
+	flex: 1;
+}
+
+.terminal-input-suffix span {
+	color: #9CA3AF;
+	font-size: 0.75rem;
+	font-family: monospace;
+	text-transform: uppercase;
+}
+
+/* Terminal Buttons */
+.terminal-button-group {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+	gap: 0.5rem;
+}
+
+.terminal-btn {
+	background: #000000;
+	border: 1px solid #FFFFFF;
+	color: #FFFFFF;
+	padding: 0;
+	height: 42px;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 0.7rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	transition: all 0.2s;
+	font-family: monospace;
+}
+
+.terminal-btn:hover {
+	border-color: #F97316;
+	color: #F97316;
+}
+
+.terminal-btn.active {
+	background: #F97316;
+	border-color: #F97316;
+	color: #000000;
+}
+
+/* Terminal Checkbox */
+.terminal-checkbox {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	cursor: pointer;
+	padding: 0.75rem;
+	background: #0A0A0A;
+	border: 1px solid #333333;
+	border-radius: 4px;
+	transition: border-color 0.2s;
+}
+
+.terminal-checkbox:hover {
+	border-color: #F97316;
+}
+
+.terminal-checkbox input[type="checkbox"] {
+	appearance: none;
+	-webkit-appearance: none;
+	width: 20px;
+	height: 20px;
+	border: 2px solid #FFFFFF;
+	border-radius: 2px;
+	background: #000000;
+	cursor: pointer;
+	position: relative;
+	transition: all 0.2s;
+	flex-shrink: 0;
+}
+
+.terminal-checkbox input[type="checkbox"]:hover {
+	border-color: #F97316;
+}
+
+.terminal-checkbox input[type="checkbox"]:checked {
+	background: #F97316;
+	border-color: #F97316;
+}
+
+.terminal-checkbox input[type="checkbox"]:checked::after {
+	content: '✓';
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	color: #000000;
+	font-size: 14px;
+	font-weight: 700;
+}
+
+.terminal-checkbox label {
+	color: #FFFFFF;
+	font-size: 0.75rem;
+	font-family: monospace;
+	text-transform: uppercase;
+	cursor: pointer;
+}
+
+.terminal-checkbox span {
+	color: #FFFFFF;
+	font-size: 0.75rem;
+	font-family: monospace;
+	text-transform: uppercase;
+	font-weight: 500;
+	letter-spacing: 0.05em;
+}
+
+.terminal-info {
+	color: #6B7280;
+	font-size: 0.7rem;
+	font-family: monospace;
+	font-style: italic;
+	margin-top: 0.25rem;
+}
+
+.terminal-quick-btns {
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 0.5rem;
+	margin-top: 0.5rem;
+}
+
+.terminal-quick-btn {
+	background: #0A0A0A;
+	border: 1px solid #FFFFFF;
+	color: #FFFFFF;
+	padding: 0;
+	height: 36px;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 0.7rem;
+	font-weight: 600;
+	transition: all 0.2s;
+	font-family: monospace;
+}
+
+.terminal-quick-btn:hover {
+	border-color: #F97316;
+	color: #F97316;
+}
+
+.terminal-subsection {
+	background: #0A0A0A;
+	border: 1px solid #333333;
+	border-radius: 4px;
+	padding: 1rem;
+	margin-top: 0.5rem;
+}
+
+.terminal-subsection-header {
+	color: #F97316;
+	font-size: 0.7rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	font-family: monospace;
+	margin-bottom: 1rem;
+}
+
+.terminal-range-inputs {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+}
+
+.terminal-range-inputs input {
+	flex: 1;
+}
+
+.terminal-range-inputs span {
+	color: #F97316;
+	font-weight: 600;
+	font-family: monospace;
+}
+
+.range-separator {
+	color: #F97316;
+	font-weight: 600;
+	font-family: monospace;
+	font-size: 0.875rem;
+}
+
+.terminal-field-nested {
+	margin-left: 1.5rem;
+	margin-top: 0.75rem;
+}
+
+.terminal-field-nested label {
+	color: #9CA3AF;
+	font-size: 0.7rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	font-family: monospace;
+	display: block;
+	margin-bottom: 0.5rem;
 }
 </style>

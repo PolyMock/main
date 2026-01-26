@@ -591,17 +591,18 @@
 	}
 
 	.strategy-card {
-		background: #1A1F32;
-		border: 1px solid #2A2F45;
+		background: #000000;
+		border: 1px solid #FFFFFF;
 		border-radius: 16px;
 		padding: 24px;
-		transition: background 0.2s;
+		transition: all 0.2s;
 		cursor: pointer;
 		position: relative;
 	}
 
 	.strategy-card:hover {
-		background: rgba(249, 115, 22, 0.05);
+		border-color: #F97316;
+		background: #000000;
 	}
 
 	.card-header {
@@ -710,10 +711,10 @@
 
 	.equity-curve-container {
 		margin-bottom: 20px;
-		background: linear-gradient(135deg, rgba(10, 14, 26, 0.8) 0%, rgba(20, 24, 36, 0.6) 100%);
+		background: #000000;
 		border-radius: 10px;
 		padding: 16px;
-		border: 1px solid rgba(42, 47, 69, 0.6);
+		border: 1px solid rgba(255, 255, 255, 0.2);
 	}
 
 	.metrics {
@@ -729,9 +730,9 @@
 		gap: 6px;
 		text-align: center;
 		padding: 12px;
-		background: rgba(20, 24, 36, 0.4);
+		background: #000000;
 		border-radius: 8px;
-		border: 1px solid rgba(42, 47, 69, 0.4);
+		border: 1px solid rgba(255, 255, 255, 0.2);
 	}
 
 	.metric-label {
@@ -759,7 +760,7 @@
 
 	.card-footer {
 		padding-top: 16px;
-		border-top: 1px solid #1e2537;
+		border-top: 1px solid rgba(255, 255, 255, 0.1);
 		font-size: 13px;
 	}
 

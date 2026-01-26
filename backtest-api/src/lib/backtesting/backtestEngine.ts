@@ -922,6 +922,10 @@ export class BacktestEngine {
     const drawdownCurve = this.calculateDrawdownCurve();
     const capitalUtilizationOverTime = this.calculateCapitalUtilization();
 
+    // Generate P&L distribution buckets
+    const pnlValues = closedTrades.map(t => t.pnlPercentage);
+    const pnlDistribution = this.calculatePnlDistribution(pnlValues);
+
     return {
       // Free metrics
       totalTrades: closedTrades.length,
@@ -932,6 +936,7 @@ export class BacktestEngine {
       totalFees,
       netPnl,
       roi: initialBankroll > 0 ? (netPnl / initialBankroll) * 100 : 0,
+      finalBankroll: this.currentCapital, // Add finalBankroll for frontend compatibility
       avgWin: winningTrades.length > 0 ? totalWinAmount / winningTrades.length : 0,
       avgLoss: losingTrades.length > 0 ? totalLossAmount / losingTrades.length : 0,
       bestTrade: winningTrades.length > 0 ? Math.max(...winningTrades.map(t => t.pnl)) : 0,
@@ -970,6 +975,7 @@ export class BacktestEngine {
       medianHoldTime,
       capitalUtilization: avgCapitalAllocation,
       avgCapitalAllocation,
+      pnlDistribution, // Add P&L distribution for frontend charts
 
       // Streak analysis
       consecutiveWins,
@@ -998,6 +1004,74 @@ export class BacktestEngine {
     return sorted.length % 2 === 0
       ? (sorted[mid - 1] + sorted[mid]) / 2
       : sorted[mid];
+  }
+
+  private calculatePnlDistribution(pnlPercentages: number[]): {
+    buckets: Array<{ min: number; max: number; count: number; trades: number[] }>;
+    stats: {
+      winCount: number;
+      lossCount: number;
+      breakEvenCount: number;
+      avgWin: number;
+      avgLoss: number;
+      largestWin: number;
+      largestLoss: number;
+      median: number;
+      mean: number;
+    } | null;
+  } {
+    if (pnlPercentages.length === 0) {
+      return { buckets: [], stats: null };
+    }
+
+    // Define bucket ranges
+    const bucketRanges = [
+      { min: -100, max: -50 },
+      { min: -50, max: -25 },
+      { min: -25, max: -10 },
+      { min: -10, max: 0 },
+      { min: 0, max: 10 },
+      { min: 10, max: 25 },
+      { min: 25, max: 50 },
+      { min: 50, max: 100 }
+    ];
+
+    const buckets = bucketRanges.map(range => {
+      const trades = pnlPercentages.filter(pnl => pnl >= range.min && pnl < range.max);
+      return {
+        min: range.min,
+        max: range.max,
+        count: trades.length,
+        trades
+      };
+    });
+
+    // Calculate statistics
+    const wins = pnlPercentages.filter(pnl => pnl > 0);
+    const losses = pnlPercentages.filter(pnl => pnl < 0);
+    const breakEven = pnlPercentages.filter(pnl => pnl === 0);
+
+    const avgWin = wins.length > 0 ? wins.reduce((sum, pnl) => sum + pnl, 0) / wins.length : 0;
+    const avgLoss = losses.length > 0 ? losses.reduce((sum, pnl) => sum + pnl, 0) / losses.length : 0;
+    const largestWin = wins.length > 0 ? Math.max(...wins) : 0;
+    const largestLoss = losses.length > 0 ? Math.min(...losses) : 0;
+    const mean = pnlPercentages.length > 0 ? pnlPercentages.reduce((sum, pnl) => sum + pnl, 0) / pnlPercentages.length : 0;
+    const median = this.calculateMedian(pnlPercentages);
+
+    return {
+      buckets,
+      stats: {
+        winCount: wins.length,
+        lossCount: losses.length,
+        breakEvenCount: breakEven.length,
+        avgWin,
+        avgLoss,
+        largestWin,
+        largestLoss,
+        median,
+        mean
+      }
+    };
   }
 
   /**

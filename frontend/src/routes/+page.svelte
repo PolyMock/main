@@ -114,16 +114,35 @@
 			const response = await fetch('/api/news?lang=EN');
 
 			if (!response.ok) {
-				throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+				const errorData = await response.json().catch(() => null);
+				console.error('Failed to fetch news:', {
+					status: response.status,
+					statusText: response.statusText,
+					error: errorData
+				});
+				throw new Error(errorData?.details || `HTTP ${response.status}: ${response.statusText}`);
 			}
 
 			const data = await response.json();
 
+			// Check if there's an error in the response
+			if (data.error) {
+				console.error('News API returned error:', data);
+				throw new Error(data.details || data.error);
+			}
+
 			if (data.Data && data.Data.length > 0) {
 				news = data.Data.slice(0, 10);
+			} else {
+				console.warn('No news data received from API');
+				news = [];
 			}
 		} catch (error) {
 			console.error('Error fetching news:', error);
+			console.error('Full error details:', {
+				message: error instanceof Error ? error.message : 'Unknown error',
+				stack: error instanceof Error ? error.stack : undefined
+			});
 			news = [];
 		} finally {
 			newsLoading = false;
@@ -854,9 +873,10 @@
 		font-weight: 600;
 		color: #E8E8E8;
 		line-height: 1.3;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
+		white-space: normal;
+		word-wrap: break-word;
+		overflow-wrap: break-word;
+		min-height: 2.6em;
 	}
 
 	.event-category-badge-small {

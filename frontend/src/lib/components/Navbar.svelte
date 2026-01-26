@@ -9,6 +9,7 @@
 	let showProfileDropdown = false;
 	let showSettingsDropdown = false;
 	let showConnectDropdown = false;
+	let showMobileMenu = false;
 	let darkMode = false;
 	let settingsButtonElement: HTMLElement;
 	let profileButtonElement: HTMLElement;
@@ -89,6 +90,14 @@
 		showSettingsDropdown = !showSettingsDropdown;
 	}
 
+	function toggleMobileMenu() {
+		showMobileMenu = !showMobileMenu;
+	}
+
+	function closeMobileMenu() {
+		showMobileMenu = false;
+	}
+
 	function toggleDarkMode() {
 		darkMode = !darkMode;
 		// Apply dark mode class to body
@@ -112,13 +121,28 @@
 			<span class="logo-subtitle">by Hash<span class="fox-text">Fox</span> Labs</span>
 		</div>
 	</a>
-	<div class="nav-links">
-		<a href="/" class="nav-link" class:active={currentPath === '/'}>TERMINAL</a>
-		<a href="/news" class="nav-link" class:active={currentPath === '/news'}>NEWS</a>
-		<a href="/competition" class="nav-link" class:active={currentPath === '/competition'}>COMPETITION</a>
-		<a href="/dashboard" class="nav-link" class:active={currentPath === '/dashboard'}>DASHBOARD</a>
-		<a href="/backtesting?tab=summary" class="nav-link" class:active={currentPath === '/backtesting' && (!$page.url.searchParams.get('tab') || $page.url.searchParams.get('tab') === 'summary')}>PORTFOLIO</a>
-		<a href="/backtesting?tab=strategy" class="nav-link" class:active={currentPath === '/backtesting' && $page.url.searchParams.get('tab') === 'strategy'}>BACKTESTING</a>
+
+	<!-- Mobile Menu Toggle -->
+	<button class="mobile-menu-toggle" on:click={toggleMobileMenu} aria-label="Toggle menu">
+		{#if showMobileMenu}
+			<svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+				<path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+			</svg>
+		{:else}
+			<svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+				<path d="M3 7H21M3 12H21M3 17H21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+			</svg>
+		{/if}
+	</button>
+
+	<div class="nav-links" class:mobile-open={showMobileMenu}>
+		<a href="/" class="nav-link" class:active={currentPath === '/'} on:click={closeMobileMenu}>TERMINAL</a>
+		<a href="/news" class="nav-link" class:active={currentPath === '/news'} on:click={closeMobileMenu}>NEWS</a>
+		<a href="/competition" class="nav-link" class:active={currentPath === '/competition'} on:click={closeMobileMenu}>COMPETITION</a>
+		<a href="/dashboard" class="nav-link" class:active={currentPath === '/dashboard'} on:click={closeMobileMenu}>DASHBOARD</a>
+		<a href="/backtesting?tab=summary" class="nav-link" class:active={currentPath === '/backtesting' && (!$page.url.searchParams.get('tab') || $page.url.searchParams.get('tab') === 'summary')} on:click={closeMobileMenu}>PORTFOLIO</a>
+		<a href="/backtesting?tab=strategy" class="nav-link" class:active={currentPath === '/backtesting' && $page.url.searchParams.get('tab') === 'strategy'} on:click={closeMobileMenu}>BACKTESTING</a>
+		<a href="/marketplace" class="nav-link" class:active={currentPath === '/marketplace'} on:click={closeMobileMenu}>MARKETPLACE</a>
 	</div>
 
 	<div class="navbar-right">
@@ -271,39 +295,6 @@
 			</div>
 		{/if}
 
-		<!-- Settings Dropdown -->
-		<div class="settings-dropdown-container">
-			<button class="settings-btn" on:click={toggleSettingsDropdown} bind:this={settingsButtonElement}>
-				<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-					<path d="M3 5H17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-					<path d="M3 10H17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-					<path d="M3 15H17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-				</svg>
-			</button>
-
-			{#if showSettingsDropdown && settingsButtonElement}
-				<div class="settings-dropdown" style="top: {settingsButtonElement.getBoundingClientRect().bottom + 8}px;">
-					<button class="dropdown-item" on:click={toggleDarkMode}>
-						<svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-							{#if darkMode}
-								<path d="M8 11C9.65685 11 11 9.65685 11 8C11 6.34315 9.65685 5 8 5C6.34315 5 5 6.34315 5 8C5 9.65685 6.34315 11 8 11Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-								<path d="M8 1V2M8 14V15M15 8H14M2 8H1M12.364 12.364L11.657 11.657M4.343 4.343L3.636 3.636M12.364 3.636L11.657 4.343M4.343 11.657L3.636 12.364" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-							{:else}
-								<path d="M14 8.5C13.7 11.5 11 14 8 14C4.5 14 2 11.5 2 8C2 4.5 4.5 2 8 2C8.4 2 8.8 2.05 9.2 2.1C7.5 3.5 7 6 8.5 8C10 10 12.5 10.5 14 8.5Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-							{/if}
-						</svg>
-						{darkMode ? 'Light Mode' : 'Dark Mode'}
-					</button>
-					<button class="dropdown-item" on:click={() => { showSettingsDropdown = false; window.location.href = '/leaderboard'; }}>
-						<svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-							<path d="M8 10C9.10457 10 10 9.10457 10 8C10 6.89543 9.10457 6 8 6C6.89543 6 6 6.89543 6 8C6 9.10457 6.89543 10 8 10Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-							<path d="M12.93 8C12.7925 8.8831 12.3962 9.70505 11.7882 10.3605C11.1803 11.0159 10.3879 11.4761 9.51568 11.6816C8.64343 11.8872 7.73011 11.8292 6.89209 11.5148C6.05407 11.2005 5.32681 10.6432 4.79979 9.9136C4.27277 9.18404 3.97079 8.31375 3.93146 7.41164C3.89212 6.50953 4.11722 5.61615 4.57863 4.84005C5.04004 4.06394 5.71927 3.43717 6.53298 3.03636C7.34668 2.63555 8.25932 2.47794 9.16 2.58333M14 8C14 9.06087 13.7284 10.1029 13.2094 11.0355C12.6904 11.9681 11.9395 12.7626 11.0278 13.3452C10.1161 13.9279 9.07394 14.2801 8 14.3701C6.92606 14.4602 5.84405 14.2855 4.85368 13.863C3.8633 13.4406 2.99414 12.7844 2.31799 11.9524C1.64184 11.1204 1.17967 10.138 0.972365 9.08864C0.765062 8.03932 0.810426 6.95488 1.10444 5.92729C1.39845 4.8997 1.93426 3.96292 2.66667 3.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-						</svg>
-						Leaderboard
-					</button>
-				</div>
-			{/if}
-		</div>
 	</div>
 </div>
 
@@ -963,5 +954,146 @@
 	:global(.light-mode) .connect-account-btn:hover:not(:disabled) {
 		background: rgba(0, 0, 0, 0.05);
 		border-color: #00B570;
+	}
+
+	/* Mobile Menu Toggle Button */
+	.mobile-menu-toggle {
+		display: none;
+		background: transparent;
+		border: none;
+		color: #FFFFFF;
+		cursor: pointer;
+		padding: 8px;
+		margin-left: auto;
+	}
+
+	.mobile-menu-toggle:hover {
+		color: #F97316;
+	}
+
+	/* Mobile Responsive Styles */
+	@media (max-width: 1024px) {
+		.navbar {
+			flex-wrap: wrap;
+			position: relative;
+		}
+
+		.mobile-menu-toggle {
+			display: block;
+			order: 3;
+		}
+
+		.logo {
+			order: 1;
+		}
+
+		.navbar-right {
+			order: 2;
+			margin-left: auto;
+			margin-right: 8px;
+		}
+
+		.nav-links {
+			order: 4;
+			flex-basis: 100%;
+			flex-direction: column;
+			gap: 0;
+			display: none;
+			background: #111;
+			border-top: 1px solid #404040;
+			padding: 0;
+			margin: 0 -24px;
+		}
+
+		.nav-links.mobile-open {
+			display: flex;
+		}
+
+		.nav-link {
+			padding: 16px 24px;
+			border: none;
+			border-radius: 0;
+			border-bottom: 1px solid #222;
+			font-size: 14px;
+			width: 100%;
+			text-align: left;
+		}
+
+		.nav-link:hover {
+			background: rgba(249, 115, 22, 0.1);
+			border-color: transparent;
+			border-bottom: 1px solid #222;
+		}
+
+		.nav-link.active {
+			background: rgba(249, 115, 22, 0.15);
+			border-color: transparent;
+			border-bottom: 1px solid #222;
+			border-left: 3px solid #F97316;
+		}
+
+		.social-links {
+			gap: 8px;
+		}
+
+		.balance-display {
+			font-size: 12px;
+		}
+	}
+
+	@media (max-width: 768px) {
+		.navbar {
+			padding: 12px 16px;
+		}
+
+		.logo-img {
+			width: 32px;
+			height: 32px;
+		}
+
+		.logo-title {
+			font-size: 16px;
+		}
+
+		.logo-subtitle {
+			font-size: 9px;
+		}
+
+		.social-links {
+			display: none;
+		}
+
+		.balance-display {
+			display: none;
+		}
+
+		.initialize-btn {
+			font-size: 11px;
+			padding: 6px 10px;
+		}
+
+		.nav-links {
+			margin: 0 -16px;
+		}
+
+		.nav-link {
+			padding: 14px 16px;
+		}
+	}
+
+	@media (max-width: 480px) {
+		.navbar-right :global(.wallet-button) {
+			font-size: 11px;
+			padding: 6px 10px;
+		}
+
+		.connect-account-btn {
+			font-size: 11px;
+			padding: 6px 12px;
+		}
+
+		.profile-btn {
+			padding: 6px;
+		}
 	}
 </style>

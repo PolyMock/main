@@ -13,9 +13,12 @@ export const GET: RequestHandler = async ({ url }) => {
 		const lang = url.searchParams.get('lang') || 'EN';
 		const cacheKey = `news-${lang}`;
 
+		console.log('[News API] Fetching news for lang:', lang);
+
 		// Check cache first
 		const cached = cache.get(cacheKey);
 		if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+			console.log('[News API] Cache hit');
 			return json(cached.data, {
 				headers: {
 					'Access-Control-Allow-Origin': '*',
@@ -28,9 +31,12 @@ export const GET: RequestHandler = async ({ url }) => {
 
 		// Fetch from CryptoCompare API with timeout
 		const controller = new AbortController();
-		const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+		const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 second timeout
 
-		const response = await fetch(`${CRYPTOCOMPARE_API_BASE}/data/v2/news/?lang=${lang}`, {
+		const apiUrl = `${CRYPTOCOMPARE_API_BASE}/data/v2/news/?lang=${lang}`;
+		console.log('[News API] Fetching from:', apiUrl);
+
+		const response = await fetch(apiUrl, {
 			headers: {
 				'Accept': 'application/json',
 				'User-Agent': 'PolyMock/1.0'
@@ -39,10 +45,19 @@ export const GET: RequestHandler = async ({ url }) => {
 		});
 
 		clearTimeout(timeoutId);
+		console.log('[News API] Response status:', response.status);
 
 		if (!response.ok) {
+			const errorBody = await response.text().catch(() => 'Unable to read error body');
+			console.error('CryptoCompare API error:', {
+				status: response.status,
+				statusText: response.statusText,
+				body: errorBody
+			});
+
 			// If we have stale cache, return it on error
 			if (cached) {
+				console.log('Returning stale cache due to API error');
 				return json(cached.data, {
 					headers: {
 						'Access-Control-Allow-Origin': '*',
@@ -79,7 +94,14 @@ export const GET: RequestHandler = async ({ url }) => {
 			}
 		});
 	} catch (error) {
-		console.error('Error fetching crypto news:', error);
+		const isTimeout = error instanceof Error && error.name === 'AbortError';
+		const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+		console.error('Error fetching crypto news:', {
+			error: errorMessage,
+			isTimeout,
+			type: error instanceof Error ? error.name : typeof error
+		});
 
 		// Try to return cached data even if expired
 		const lang = url.searchParams.get('lang') || 'EN';
@@ -87,6 +109,7 @@ export const GET: RequestHandler = async ({ url }) => {
 		const cached = cache.get(cacheKey);
 
 		if (cached) {
+			console.log('Returning stale cache due to fetch error');
 			return json(cached.data, {
 				headers: {
 					'Access-Control-Allow-Origin': '*',
@@ -98,7 +121,10 @@ export const GET: RequestHandler = async ({ url }) => {
 		}
 
 		return json(
-			{ error: 'Failed to fetch news', details: error instanceof Error ? error.message : 'Unknown error' },
+			{
+				error: 'Failed to fetch news',
+				details: isTimeout ? 'Request timeout - CryptoCompare API not responding' : errorMessage
+			},
 			{
 				status: 500,
 				headers: {

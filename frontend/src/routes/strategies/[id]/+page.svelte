@@ -411,7 +411,7 @@
 <style>
 	.strategy-detail-page {
 		min-height: 100vh;
-		background: #0a0e1a;
+		background: #000000;
 		padding: 40px 20px;
 	}
 
@@ -468,8 +468,8 @@
 
 	.back-button:hover {
 		color: #F97316;
-		background: rgba(59, 130, 246, 0.1);
-		border-color: rgba(59, 130, 246, 0.3);
+		background: rgba(249, 115, 22, 0.1);
+		border-color: #F97316;
 	}
 
 	.back-button svg {
@@ -511,8 +511,8 @@
 	}
 
 	.stat-box {
-		background: #141824;
-		border: 1px solid #1e2537;
+		background: #000000;
+		border: 1px solid #FFFFFF;
 		border-radius: 12px;
 		padding: 20px;
 		min-width: 200px;
@@ -536,8 +536,8 @@
 	}
 
 	.section {
-		background: #141824;
-		border: 1px solid #1e2537;
+		background: #000000;
+		border: 1px solid #FFFFFF;
 		border-radius: 12px;
 		padding: 32px;
 		margin-bottom: 24px;
@@ -557,8 +557,8 @@
 	}
 
 	.metric-card {
-		background: #1a1f2e;
-		border: 1px solid #252d42;
+		background: #000000;
+		border: 1px solid rgba(255, 255, 255, 0.3);
 		border-radius: 8px;
 		padding: 16px;
 		display: flex;
@@ -587,21 +587,21 @@
 	}
 
 	.config-card {
-		background: #1a1f2e;
-		border: 1px solid #252d42;
+		background: #000000;
+		border: 1px solid rgba(255, 255, 255, 0.3);
 		border-radius: 12px;
 		padding: 20px;
 		transition: border-color 0.2s ease;
 	}
 
 	.config-card:hover {
-		border-color: #3b4b6b;
+		border-color: #F97316;
 	}
 
 	.config-header {
 		margin-bottom: 16px;
 		padding-bottom: 12px;
-		border-bottom: 1px solid #252d42;
+		border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 	}
 
 	.config-header h3 {
@@ -616,7 +616,7 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 10px 0;
-		border-bottom: 1px solid rgba(37, 45, 66, 0.3);
+		border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 	}
 
 	.config-item:last-child {
@@ -652,7 +652,7 @@
 	}
 
 	.trades-table th {
-		background: #1a1f2e;
+		background: #000000;
 		color: #8b92ab;
 		font-size: 12px;
 		font-weight: 600;
@@ -660,18 +660,18 @@
 		letter-spacing: 0.5px;
 		padding: 12px;
 		text-align: left;
-		border-bottom: 1px solid #252d42;
+		border-bottom: 1px solid rgba(255, 255, 255, 0.2);
 	}
 
 	.trades-table td {
 		padding: 12px;
 		color: #d1d5db;
 		font-size: 14px;
-		border-bottom: 1px solid #1e2537;
+		border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 	}
 
 	.trades-table tr:hover {
-		background: #1a1f2e;
+		background: rgba(249, 115, 22, 0.05);
 	}
 
 	.positive {
@@ -705,7 +705,7 @@
 		gap: 8px;
 		margin-top: 24px;
 		padding-top: 24px;
-		border-top: 1px solid #1e2537;
+		border-top: 1px solid rgba(255, 255, 255, 0.1);
 	}
 
 	.pagination-btn {
@@ -713,8 +713,8 @@
 		align-items: center;
 		gap: 6px;
 		padding: 8px 16px;
-		background: transparent;
-		border: 1px solid #2a2f45;
+		background: #000000;
+		border: 1px solid #FFFFFF;
 		color: #8b92ab;
 		border-radius: 6px;
 		cursor: pointer;
@@ -726,7 +726,7 @@
 	.pagination-btn:hover:not(:disabled) {
 		border-color: #F97316;
 		color: #F97316;
-		background: rgba(59, 130, 246, 0.05);
+		background: #000000;
 	}
 
 	.pagination-btn:disabled {
@@ -743,8 +743,8 @@
 		min-width: 36px;
 		height: 36px;
 		padding: 0 8px;
-		background: transparent;
-		border: 1px solid #2a2f45;
+		background: #000000;
+		border: 1px solid #FFFFFF;
 		color: #8b92ab;
 		border-radius: 6px;
 		cursor: pointer;
@@ -756,7 +756,7 @@
 	.pagination-page:hover {
 		border-color: #F97316;
 		color: #F97316;
-		background: rgba(59, 130, 246, 0.05);
+		background: #000000;
 	}
 
 	.pagination-page.active {
