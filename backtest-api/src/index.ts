@@ -9,6 +9,14 @@ dotenv.config();
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
 
+console.log('[Server Init] Environment:', {
+  NODE_ENV: process.env.NODE_ENV,
+  PORT: PORT,
+  PORT_ENV: process.env.PORT,
+  DOME_API_KEY_SET: !!process.env.DOME_API_KEY,
+  ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS
+});
+
 // Middleware
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173', 'https://polymock.app', 'https://*.pages.dev'],
@@ -211,9 +219,11 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 // Start server
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Backtest API server running on port ${PORT}`);
+  console.log(`   Binding to: 0.0.0.0:${PORT}`);
   console.log(`   Health check: http://localhost:${PORT}/health`);
   console.log(`   Backtest endpoint: http://localhost:${PORT}/api/backtest`);
   console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`   Server successfully listening and ready for connections`);
 });
 
 // Graceful shutdown
