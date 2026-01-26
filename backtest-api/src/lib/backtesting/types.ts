@@ -4,6 +4,7 @@
 
 export interface StrategyConfig {
   // Market Filters
+  marketIds?: string[]; // Array of market/condition IDs for multiple market backtesting
   specificMarkets?: Array<{
     conditionId?: string;
     marketSlug?: string;
@@ -112,6 +113,7 @@ export interface BacktestMetrics {
   totalFees: number;
   netPnl: number;
   roi: number;
+  finalBankroll: number;
   avgWin: number;
   avgLoss: number;
   bestTrade: number;
@@ -170,6 +172,22 @@ export interface BacktestMetrics {
   dailyPnl: DailyPnlPoint[];
   drawdownCurve: DrawdownPoint[];
   capitalUtilizationOverTime: CapitalUtilizationPoint[];
+
+  // PnL Distribution
+  pnlDistribution?: {
+    buckets: Array<{ min: number; max: number; count: number; trades: number[] }>;
+    stats: {
+      winCount: number;
+      lossCount: number;
+      breakEvenCount: number;
+      avgWin: number;
+      avgLoss: number;
+      largestWin: number;
+      largestLoss: number;
+      median: number;
+      mean: number;
+    } | null;
+  };
 }
 
 export interface EquityPoint {
