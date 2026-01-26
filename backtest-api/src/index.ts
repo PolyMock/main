@@ -7,7 +7,7 @@ import type { StrategyConfig } from './lib/backtesting/types.js';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = parseInt(process.env.PORT || '3001', 10);
 
 // Middleware
 app.use(cors({
@@ -209,7 +209,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 });
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Backtest API server running on port ${PORT}`);
   console.log(`   Health check: http://localhost:${PORT}/health`);
   console.log(`   Backtest endpoint: http://localhost:${PORT}/api/backtest`);
