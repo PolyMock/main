@@ -132,7 +132,11 @@
 
 					<div class="chart-column">
 						{#if strategy.equityCurve && strategy.equityCurve.length > 0}
-							<MiniEquityCurveChart data={strategy.equityCurve} positive={strategy.totalReturnPercent >= 0} />
+							<MiniEquityCurveChart
+								equityCurve={strategy.equityCurve}
+								initialCapital={strategy.initialCapital}
+								isPositive={strategy.totalReturnPercent >= 0}
+							/>
 						{:else}
 							<div class="no-chart">No data</div>
 						{/if}
