@@ -140,7 +140,7 @@
 		<a href="/news" class="nav-link" class:active={currentPath === '/news'} on:click={closeMobileMenu}>NEWS</a>
 		<a href="/competition" class="nav-link" class:active={currentPath === '/competition'} on:click={closeMobileMenu}>COMPETITION</a>
 		<a href="/dashboard" class="nav-link" class:active={currentPath === '/dashboard'} on:click={closeMobileMenu}>DASHBOARD</a>
-		<a href="/backtesting?tab=summary" class="nav-link" class:active={currentPath === '/backtesting' && (!$page.url.searchParams.get('tab') || $page.url.searchParams.get('tab') === 'summary')} on:click={closeMobileMenu}>PORTFOLIO</a>
+		<a href="/backtesting?tab=summary" class="nav-link" class:active={currentPath === '/backtesting' && (!$page.url.searchParams.get('tab') || $page.url.searchParams.get('tab') === 'summary')} on:click={closeMobileMenu}>PERFORMANCE</a>
 		<a href="/backtesting?tab=strategy" class="nav-link" class:active={currentPath === '/backtesting' && $page.url.searchParams.get('tab') === 'strategy'} on:click={closeMobileMenu}>BACKTESTING</a>
 		<a href="/marketplace" class="nav-link" class:active={currentPath === '/marketplace'} on:click={closeMobileMenu}>MARKETPLACE</a>
 	</div>

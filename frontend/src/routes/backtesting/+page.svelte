@@ -364,8 +364,8 @@
 		maxTimeToResolution: undefined,
 		entryType: 'BOTH',
 		entryPriceThreshold: {
-			yes: { min: undefined, max: undefined },
-			no: { min: undefined, max: undefined }
+			yes: { min: 0.3, max: 0.7 },
+			no: { min: 0.3, max: 0.7 }
 		},
 		entryTimeConstraints: {
 			earliestEntry: undefined,
@@ -690,6 +690,7 @@
 
 		// Set initial date range based on calculated market times
 		if (marketStartTime && marketEndTime) {
+			console.log('Setting dates from markets:', marketStartTime, marketEndTime);
 			startDateStr = formatDateForInput(marketStartTime);
 			endDateStr = formatDateForInput(marketEndTime);
 			config.startDate = marketStartTime;
@@ -700,11 +701,21 @@
 			latestEntryStr = formatDateForInput(marketEndTime);
 			config.entryTimeConstraints.earliestEntry = marketStartTime;
 			config.entryTimeConstraints.latestEntry = marketEndTime;
+		} else {
+			console.log('No market dates available, using defaults');
+			// Set default dates if market dates aren't available
+			const today = new Date();
+			const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+			startDateStr = formatDateForInput(thirtyDaysAgo);
+			endDateStr = formatDateForInput(today);
+			config.startDate = thirtyDaysAgo;
+			config.endDate = today;
 		}
 
-		console.log('Moving to phase 2');
+		console.log('Moving to phase 2, marketSelectionPhase will be set to 2');
 		// Move to phase 2
 		marketSelectionPhase = 2;
+		console.log('marketSelectionPhase is now:', marketSelectionPhase);
 	}
 
 	// Toggle event expansion
@@ -1952,6 +1963,7 @@
 									<div class="markets-list">
 										{#each selectedMarkets as market, idx}
 											{@const volume = market.volume_total || market.volume || 0}
+											{@const startTime = market.start_time}
 											{@const endTime = market.end_time || market.close_time}
 											<div class="market-item">
 												<span class="market-index">{String(idx + 1).padStart(2, '0')}</span>
@@ -1959,6 +1971,9 @@
 													<div class="market-name">{market.title || market.question || 'Untitled'}</div>
 													<div class="market-meta">
 														<span>VOL: ${(volume / 1000000).toFixed(1)}M</span>
+														{#if startTime}
+															<span>STARTED: {new Date(startTime * 1000).toLocaleDateString()}</span>
+														{/if}
 														{#if endTime}
 															<span>ENDED: {new Date(endTime * 1000).toLocaleDateString()}</span>
 														{/if}
@@ -1973,22 +1988,43 @@
 
 							<!-- Terminal Grid -->
 							<div class="terminal-grid">
-								<!-- LEFT PANEL: Time & Capital -->
-								<div class="terminal-panel">
-									<!-- Date Range -->
-									<div class="terminal-section">
-										<div class="section-header">
-											<span class="section-icon">📅</span>
-											<span class="section-label">TIME RANGE</span>
-										</div>
-										<div class="section-body">
+								<!-- CAPITAL & TIME SECTION -->
+								<div class="terminal-section full-width">
+									<div class="section-header">
+										<span class="section-label">CAPITAL & TIME CONFIGURATION</span>
+									</div>
+									<div class="section-body-grid">
+										<div class="config-group">
 											<div class="terminal-field">
-												<label>START DATE</label>
-												<input type="date" bind:value={startDateStr} class="terminal-input" />
+												<label>INITIAL CAPITAL (USDC)</label>
+												<div class="capital-input-container">
+													<input
+														type="number"
+														bind:value={config.initialBankroll}
+														min="100"
+														step="100"
+														placeholder="10000"
+														class="terminal-input"
+													/>
+													<div class="terminal-quick-btns">
+														<button class="terminal-quick-btn" on:click={() => config.initialBankroll = 1000}>$1K</button>
+														<button class="terminal-quick-btn" on:click={() => config.initialBankroll = 5000}>$5K</button>
+														<button class="terminal-quick-btn" on:click={() => config.initialBankroll = 10000}>$10K</button>
+														<button class="terminal-quick-btn" on:click={() => config.initialBankroll = 50000}>$50K</button>
+													</div>
+												</div>
 											</div>
-											<div class="terminal-field">
-												<label>END DATE</label>
-												<input type="date" bind:value={endDateStr} class="terminal-input" />
+										</div>
+										<div class="config-group">
+											<div class="terminal-field-row">
+												<div class="terminal-field">
+													<label>START DATE</label>
+													<input type="date" bind:value={startDateStr} class="terminal-input" />
+												</div>
+												<div class="terminal-field">
+													<label>END DATE</label>
+													<input type="date" bind:value={endDateStr} class="terminal-input" />
+												</div>
 											</div>
 											<div class="terminal-info">
 												DURATION: {#if config.startDate && config.endDate}
@@ -1999,46 +2035,17 @@
 											</div>
 										</div>
 									</div>
+								</div>
 
-									<!-- Initial Capital -->
-									<div class="terminal-section">
-										<div class="section-header">
-											<span class="section-icon">💰</span>
-											<span class="section-label">INITIAL CAPITAL</span>
-										</div>
-										<div class="section-body">
-											<div class="terminal-field">
-												<label>AMOUNT</label>
-												<div class="terminal-input-suffix">
-													<input
-														type="number"
-														bind:value={config.initialBankroll}
-														min="100"
-														step="100"
-														placeholder="10000"
-														class="terminal-input"
-													/>
-													<span>USDC</span>
-												</div>
-											</div>
-											<div class="terminal-quick-btns">
-												<button class="terminal-quick-btn" on:click={() => config.initialBankroll = 1000}>$1K</button>
-												<button class="terminal-quick-btn" on:click={() => config.initialBankroll = 5000}>$5K</button>
-												<button class="terminal-quick-btn" on:click={() => config.initialBankroll = 10000}>$10K</button>
-												<button class="terminal-quick-btn" on:click={() => config.initialBankroll = 50000}>$50K</button>
-											</div>
-										</div>
+								<!-- POSITION SIZING SECTION -->
+								<div class="terminal-section full-width">
+									<div class="section-header">
+										<span class="section-label">POSITION SIZING</span>
 									</div>
-
-									<!-- Position Sizing -->
-									<div class="terminal-section">
-										<div class="section-header">
-											<span class="section-icon">📊</span>
-											<span class="section-label">POSITION SIZING</span>
-										</div>
-										<div class="section-body">
+									<div class="section-body-grid">
+										<div class="config-group">
 											<div class="terminal-field">
-												<label>TYPE</label>
+												<label>SIZING TYPE</label>
 												<div class="terminal-button-group">
 													<button
 														class="terminal-btn"
@@ -2082,6 +2089,8 @@
 													/>
 												</div>
 											{/if}
+										</div>
+										<div class="config-group">
 											<div class="terminal-field">
 												<label>MAX TOTAL EXPOSURE (%)</label>
 												<input
@@ -2099,14 +2108,13 @@
 									</div>
 								</div>
 
-								<!-- COLUMN 2: Entry Rules -->
-								<div class="terminal-panel">
-									<div class="terminal-section">
-										<div class="section-header">
-											<span class="section-icon">📊</span>
-											<span class="section-label">ENTRY RULES</span>
-										</div>
-										<div class="section-body">
+								<!-- ENTRY CONFIGURATION SECTION -->
+								<div class="terminal-section full-width">
+									<div class="section-header">
+										<span class="section-label">ENTRY CONFIGURATION</span>
+									</div>
+									<div class="section-body-grid">
+										<div class="config-group">
 											<div class="terminal-field">
 												<label>ENTRY TYPE</label>
 												<div class="terminal-button-group">
@@ -2133,225 +2141,226 @@
 													</button>
 												</div>
 											</div>
-
-											<!-- Price Thresholds -->
 											{#if config.entryType === 'YES' || config.entryType === 'BOTH'}
 												<div class="terminal-field">
-													<label>YES PRICE RANGE</label>
-													<div class="terminal-range-inputs">
-														<input
-															type="number"
-															bind:value={config.entryPriceThreshold.yes.min}
-															min="0"
-															max="1"
-															step="0.01"
-															placeholder="MIN (0.3)"
-															class="terminal-input"
-														/>
-														<span class="range-separator">→</span>
-														<input
-															type="number"
-															bind:value={config.entryPriceThreshold.yes.max}
-															min="0"
-															max="1"
-															step="0.01"
-															placeholder="MAX (0.7)"
-															class="terminal-input"
-														/>
+													<label>YES PRICE RANGE: {(config.entryPriceThreshold.yes.min ?? 0).toFixed(2)} - {(config.entryPriceThreshold.yes.max ?? 1).toFixed(2)}</label>
+													<div class="price-range-slider">
+														<div class="slider-container">
+															<input
+																type="range"
+																bind:value={config.entryPriceThreshold.yes.min}
+																min="0"
+																max="1"
+																step="0.01"
+																class="range-slider range-slider-min"
+															/>
+															<input
+																type="range"
+																bind:value={config.entryPriceThreshold.yes.max}
+																min="0"
+																max="1"
+																step="0.01"
+																class="range-slider range-slider-max"
+															/>
+														</div>
+														<div class="slider-labels">
+															<span>0.00</span>
+															<span>1.00</span>
+														</div>
 													</div>
 												</div>
 											{/if}
-
 											{#if config.entryType === 'NO' || config.entryType === 'BOTH'}
 												<div class="terminal-field">
-													<label>NO PRICE RANGE</label>
-													<div class="terminal-range-inputs">
-														<input
-															type="number"
-															bind:value={config.entryPriceThreshold.no.min}
-															min="0"
-															max="1"
-															step="0.01"
-															placeholder="MIN"
-															class="terminal-input"
-														/>
-														<span class="range-separator">→</span>
-														<input
-															type="number"
-															bind:value={config.entryPriceThreshold.no.max}
-															min="0"
-															max="1"
-															step="0.01"
-															placeholder="MAX"
-															class="terminal-input"
-														/>
+													<label>NO PRICE RANGE: {(config.entryPriceThreshold.no.min ?? 0).toFixed(2)} - {(config.entryPriceThreshold.no.max ?? 1).toFixed(2)}</label>
+													<div class="price-range-slider">
+														<div class="slider-container">
+															<input
+																type="range"
+																bind:value={config.entryPriceThreshold.no.min}
+																min="0"
+																max="1"
+																step="0.01"
+																class="range-slider range-slider-min"
+															/>
+															<input
+																type="range"
+																bind:value={config.entryPriceThreshold.no.max}
+																min="0"
+																max="1"
+																step="0.01"
+																class="range-slider range-slider-max"
+															/>
+														</div>
+														<div class="slider-labels">
+															<span>0.00</span>
+															<span>1.00</span>
+														</div>
 													</div>
 												</div>
 											{/if}
-
-											<!-- Time Constraints -->
-											<div class="terminal-field">
-												<label>EARLIEST ENTRY</label>
-												<input type="date" bind:value={earliestEntryStr} class="terminal-input" />
+										</div>
+										<div class="config-group">
+											<div class="terminal-field-row">
+												<div class="terminal-field">
+													<label>EARLIEST ENTRY</label>
+													<input type="date" bind:value={earliestEntryStr} class="terminal-input" />
+												</div>
+												<div class="terminal-field">
+													<label>LATEST ENTRY</label>
+													<input type="date" bind:value={latestEntryStr} class="terminal-input" />
+												</div>
 											</div>
-											<div class="terminal-field">
-												<label>LATEST ENTRY</label>
-												<input type="date" bind:value={latestEntryStr} class="terminal-input" />
-											</div>
-
-											<!-- Trade Frequency -->
-											<div class="terminal-field">
-												<label>MAX TRADES PER DAY</label>
-												<input
-													type="number"
-													bind:value={config.tradeFrequency.maxTradesPerDay}
-													min="1"
-													placeholder="UNLIMITED"
-													class="terminal-input"
-												/>
-											</div>
-											<div class="terminal-field">
-												<label>COOLDOWN (HOURS)</label>
-												<input
-													type="number"
-													bind:value={config.tradeFrequency.cooldownHours}
-													min="0"
-													step="0.5"
-													placeholder="0"
-													class="terminal-input"
-												/>
+											<div class="terminal-field-row">
+												<div class="terminal-field">
+													<label>MAX TRADES PER DAY</label>
+													<input
+														type="number"
+														bind:value={config.tradeFrequency.maxTradesPerDay}
+														min="1"
+														placeholder="UNLIMITED"
+														class="terminal-input"
+													/>
+												</div>
+												<div class="terminal-field">
+													<label>COOLDOWN (HOURS)</label>
+													<input
+														type="number"
+														bind:value={config.tradeFrequency.cooldownHours}
+														min="0"
+														step="0.5"
+														placeholder="0"
+														class="terminal-input"
+													/>
+												</div>
 											</div>
 										</div>
 									</div>
 								</div>
 
-								<!-- COLUMN 3: Exit Rules -->
-								<div class="terminal-panel">
-									<div class="terminal-section">
-										<div class="section-header">
-											<span class="section-icon">🚪</span>
-											<span class="section-label">EXIT RULES</span>
-										</div>
-										<div class="section-body">
+								<!-- EXIT CONFIGURATION SECTION -->
+								<div class="terminal-section full-width">
+									<div class="section-header">
+										<span class="section-label">EXIT CONFIGURATION</span>
+									</div>
+									<div class="section-body-grid">
+										<div class="config-group">
 											<div class="terminal-field">
 												<label class="terminal-checkbox">
 													<input type="checkbox" bind:checked={config.exitRules.resolveOnExpiry} />
 													<span>RESOLVE ON MARKET EXPIRY</span>
 												</label>
 											</div>
-
-											<div class="terminal-field">
-												<label>STOP LOSS (%)</label>
-												<input
-													type="number"
-													bind:value={config.exitRules.stopLoss}
-													min="0"
-													max="100"
-													step="1"
-													placeholder="20"
-													class="terminal-input"
-												/>
+											<div class="terminal-field-row">
+												<div class="terminal-field">
+													<label>STOP LOSS (%)</label>
+													<input
+														type="number"
+														bind:value={config.exitRules.stopLoss}
+														min="0"
+														max="100"
+														step="1"
+														placeholder="20"
+														class="terminal-input"
+													/>
+												</div>
+												<div class="terminal-field">
+													<label>TAKE PROFIT (%)</label>
+													<input
+														type="number"
+														bind:value={config.exitRules.takeProfit}
+														min="0"
+														step="1"
+														placeholder="50"
+														class="terminal-input"
+													/>
+												</div>
+												<div class="terminal-field">
+													<label>MAX HOLD TIME (HOURS)</label>
+													<input
+														type="number"
+														bind:value={config.exitRules.maxHoldTime}
+														min="0"
+														placeholder="UNLIMITED"
+														class="terminal-input"
+													/>
+												</div>
 											</div>
+										</div>
 
+										<!-- Advanced Exit Options -->
+										<div class="config-group">
 											<div class="terminal-field">
-												<label>TAKE PROFIT (%)</label>
-												<input
-													type="number"
-													bind:value={config.exitRules.takeProfit}
-													min="0"
-													step="1"
-													placeholder="50"
-													class="terminal-input"
-												/>
-											</div>
-
-											<div class="terminal-field">
-												<label>MAX HOLD TIME (HOURS)</label>
-												<input
-													type="number"
-													bind:value={config.exitRules.maxHoldTime}
-													min="0"
-													placeholder="UNLIMITED"
-													class="terminal-input"
-												/>
-											</div>
-
-											<!-- Trailing Stop -->
-											<div class="terminal-field">
-												<label class="terminal-checkbox">
-													<input type="checkbox" bind:checked={config.exitRules.trailingStop.enabled} />
-													<span>TRAILING STOP</span>
-												</label>
-												{#if config.exitRules.trailingStop.enabled}
-													<div class="terminal-field-nested">
+												<label class="section-subtitle">TRAILING STOP (OPTIONAL)</label>
+												<div class="terminal-field-row">
+													<div class="terminal-field">
 														<label>ACTIVATION %</label>
 														<input
 															type="number"
 															bind:value={config.exitRules.trailingStop.activationPercent}
 															min="0"
 															step="1"
-															placeholder="20"
+															placeholder="OPTIONAL"
 															class="terminal-input"
 														/>
 													</div>
-													<div class="terminal-field-nested">
+													<div class="terminal-field">
 														<label>TRAIL %</label>
 														<input
 															type="number"
 															bind:value={config.exitRules.trailingStop.trailPercent}
 															min="0"
 															step="1"
-															placeholder="10"
+															placeholder="OPTIONAL"
 															class="terminal-input"
 														/>
 													</div>
-												{/if}
+												</div>
 											</div>
-
-											<!-- Partial Exits -->
+										</div>
+										<div class="config-group">
 											<div class="terminal-field">
-												<label class="terminal-checkbox">
-													<input type="checkbox" bind:checked={config.exitRules.partialExits.enabled} />
-													<span>PARTIAL EXITS</span>
-												</label>
-												{#if config.exitRules.partialExits.enabled}
-													<div class="terminal-field-nested">
-														<label>TP1: PROFIT % / SELL %</label>
-														<div class="terminal-range-inputs">
-															<input
-																type="number"
-																bind:value={config.exitRules.partialExits.takeProfit1.percent}
-																placeholder="PROFIT %"
-																class="terminal-input"
-															/>
-															<span class="range-separator">/</span>
-															<input
-																type="number"
-																bind:value={config.exitRules.partialExits.takeProfit1.sellPercent}
-																placeholder="SELL %"
-																class="terminal-input"
-															/>
-														</div>
+												<label class="section-subtitle">PARTIAL EXITS (OPTIONAL)</label>
+												<div class="terminal-field-row">
+													<div class="terminal-field">
+														<label>TP1: PROFIT %</label>
+														<input
+															type="number"
+															bind:value={config.exitRules.partialExits.takeProfit1.percent}
+															placeholder="OPTIONAL"
+															class="terminal-input"
+														/>
 													</div>
-													<div class="terminal-field-nested">
-														<label>TP2: PROFIT % / SELL %</label>
-														<div class="terminal-range-inputs">
-															<input
-																type="number"
-																bind:value={config.exitRules.partialExits.takeProfit2.percent}
-																placeholder="PROFIT %"
-																class="terminal-input"
-															/>
-															<span class="range-separator">/</span>
-															<input
-																type="number"
-																bind:value={config.exitRules.partialExits.takeProfit2.sellPercent}
-																placeholder="SELL %"
-																class="terminal-input"
-															/>
-														</div>
+													<div class="terminal-field">
+														<label>TP1: SELL %</label>
+														<input
+															type="number"
+															bind:value={config.exitRules.partialExits.takeProfit1.sellPercent}
+															placeholder="OPTIONAL"
+															class="terminal-input"
+														/>
 													</div>
-												{/if}
+												</div>
+												<div class="terminal-field-row">
+													<div class="terminal-field">
+														<label>TP2: PROFIT %</label>
+														<input
+															type="number"
+															bind:value={config.exitRules.partialExits.takeProfit2.percent}
+															placeholder="OPTIONAL"
+															class="terminal-input"
+														/>
+													</div>
+													<div class="terminal-field">
+														<label>TP2: SELL %</label>
+														<input
+															type="number"
+															bind:value={config.exitRules.partialExits.takeProfit2.sellPercent}
+															placeholder="OPTIONAL"
+															class="terminal-input"
+														/>
+													</div>
+												</div>
 											</div>
 										</div>
 									</div>
@@ -2362,18 +2371,6 @@
 							{#if error}
 								<div class="error-box">{error}</div>
 							{/if}
-
-							<!-- Run Backtest Button -->
-							<div class="phase-actions">
-								<button class="btn-primary btn-lg btn-run" on:click={runBacktest} disabled={isRunning}>
-									{#if isRunning}
-										<span class="spinner"></span>
-										Running... {progress}%
-									{:else}
-										Run Backtest
-									{/if}
-								</button>
-							</div>
 						</div>
 					{/if}
 				</div>
@@ -4826,20 +4823,48 @@
 	width: 40%;
 }
 
+.volume-header {
+	width: 15%;
+	text-align: right !important;
+}
+
+.starts-header {
+	width: 15%;
+	text-align: center !important;
+}
+
+.ends-header {
+	width: 15%;
+	text-align: center !important;
+}
+
+.tags-header {
+	width: 15%;
+}
+
 .sortable-header {
 	cursor: pointer;
 	user-select: none;
 	transition: all 0.2s;
 }
 
-.sortable-header:hover {
-	background: rgba(249, 115, 22, 0.1);
+.volume-header .sort-header-content {
+	justify-content: flex-end;
+}
+
+.ends-header .sort-header-content {
+	justify-content: center;
 }
 
 .sort-header-content {
 	display: flex;
 	align-items: center;
 	gap: 8px;
+	transition: all 0.2s;
+}
+
+.sortable-header:hover {
+	background: rgba(249, 115, 22, 0.1);
 }
 
 .sort-indicator {
@@ -4848,12 +4873,14 @@
 	justify-content: center;
 	color: #64748b;
 	transition: all 0.2s;
-	font-size: 12px;
-	font-weight: 600;
+	font-size: 14px;
+	font-weight: 700;
+	min-width: 16px;
 }
 
 .sort-indicator.active {
 	color: #F97316;
+	transform: scale(1.1);
 }
 
 /* Event Row Styling */
@@ -4943,16 +4970,20 @@
 	font-weight: 600;
 	color: #10b981;
 	font-size: 14px;
+	text-align: right;
 }
 
 .starts-cell {
 	color: #8b92ab;
 	font-size: 14px;
+	text-align: center;
 }
 
 .ends-cell {
 	color: #8b92ab;
 	font-size: 14px;
+	text-align: center;
+	font-weight: 500;
 }
 
 .tags-cell {
@@ -8093,11 +8124,38 @@
 
 /* Terminal Grid */
 .terminal-grid {
-	display: grid;
-	grid-template-columns: repeat(3, 1fr);
-	gap: 1.5rem;
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
 	background: #000000;
 	padding: 1.5rem;
+}
+
+.terminal-section.full-width {
+	width: 100%;
+	background: rgba(255, 255, 255, 0.02);
+	border: 1px solid #2a2a2a;
+	border-radius: 6px;
+	overflow: hidden;
+}
+
+.section-body-grid {
+	display: grid;
+	grid-template-columns: repeat(2, 1fr);
+	gap: 2rem;
+	padding: 1.5rem;
+}
+
+.config-group {
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
+}
+
+.terminal-field-row {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+	gap: 1rem;
 }
 
 .terminal-panel {
@@ -8115,24 +8173,21 @@
 }
 
 .section-header {
-	background: #0A0A0A;
-	border-bottom: 2px solid #F97316;
-	padding: 1rem;
+	background: linear-gradient(to right, #0A0A0A, #1a1a1a);
+	border-bottom: 1px solid #F97316;
+	padding: 0.875rem 1.25rem;
 	display: flex;
 	align-items: center;
 	gap: 0.75rem;
 }
 
-.section-icon {
-	font-size: 1rem;
-}
-
 .section-label {
 	color: #F97316;
-	font-size: 0.75rem;
+	font-size: 0.6875rem;
 	font-weight: 700;
-	letter-spacing: 0.15em;
-	font-family: monospace;
+	letter-spacing: 0.125em;
+	font-family: 'Courier New', monospace;
+	text-transform: uppercase;
 }
 
 .section-body {
@@ -8177,6 +8232,28 @@
 
 .terminal-input::placeholder {
 	color: #6B7280;
+}
+
+/* Date input calendar styling */
+.terminal-input[type="date"]::-webkit-calendar-picker-indicator {
+	filter: invert(1);
+	cursor: pointer;
+}
+
+.terminal-input[type="date"]::-webkit-datetime-edit {
+	color: #FFFFFF;
+}
+
+.terminal-input[type="date"]::-webkit-datetime-edit-fields-wrapper {
+	color: #FFFFFF;
+}
+
+.section-subtitle {
+	color: #F97316 !important;
+	font-size: 0.7rem !important;
+	font-weight: 700 !important;
+	margin-bottom: 0.5rem !important;
+	display: block;
 }
 
 .terminal-input-suffix {
@@ -8306,11 +8383,16 @@
 	margin-top: 0.25rem;
 }
 
+.capital-input-container {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+
 .terminal-quick-btns {
 	display: grid;
 	grid-template-columns: repeat(4, 1fr);
 	gap: 0.5rem;
-	margin-top: 0.5rem;
 }
 
 .terminal-quick-btn {
@@ -8371,6 +8453,93 @@
 	font-weight: 600;
 	font-family: monospace;
 	font-size: 0.875rem;
+}
+
+/* Price Range Sliders */
+.price-range-slider {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+
+.slider-container {
+	position: relative;
+	height: 40px;
+	display: flex;
+	align-items: center;
+	background: #1a1a1a;
+	border-radius: 4px;
+	padding: 0 8px;
+}
+
+.slider-container::before {
+	content: '';
+	position: absolute;
+	left: 8px;
+	width: calc(100% - 16px);
+	height: 8px;
+	background: #FFFFFF;
+	border-radius: 4px;
+	z-index: 0;
+}
+
+.range-slider {
+	position: absolute;
+	width: calc(100% - 16px);
+	left: 8px;
+	height: 8px;
+	-webkit-appearance: none;
+	appearance: none;
+	background: transparent;
+	pointer-events: none;
+	z-index: 1;
+}
+
+.range-slider::-webkit-slider-track {
+	width: 100%;
+	height: 8px;
+	background: transparent;
+	border-radius: 4px;
+}
+
+.range-slider::-webkit-slider-thumb {
+	-webkit-appearance: none;
+	appearance: none;
+	width: 18px;
+	height: 18px;
+	background: #F97316;
+	cursor: pointer;
+	border-radius: 50%;
+	pointer-events: all;
+	border: 2px solid #000;
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.range-slider::-moz-range-track {
+	width: 100%;
+	height: 8px;
+	background: transparent;
+	border-radius: 4px;
+}
+
+.range-slider::-moz-range-thumb {
+	width: 18px;
+	height: 18px;
+	background: #F97316;
+	cursor: pointer;
+	border-radius: 50%;
+	pointer-events: all;
+	border: 2px solid #000;
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.slider-labels {
+	display: flex;
+	justify-content: space-between;
+	color: #6B7280;
+	font-size: 0.75rem;
+	font-family: monospace;
+	padding: 0 4px;
 }
 
 .terminal-field-nested {

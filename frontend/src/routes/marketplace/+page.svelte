@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
+	import MiniEquityCurveChart from '$lib/components/MiniEquityCurveChart.svelte';
 
 	interface Strategy {
 		id: number;
@@ -26,6 +27,7 @@
 		largestLoss: number;
 		startDate: string;
 		endDate: string;
+		equityCurve: Array<{timestamp: number, value: number}>;
 		createdAt: string;
 	}
 
@@ -116,51 +118,56 @@
 			<p class="hint">Be the first to create and share a strategy!</p>
 		</div>
 	{:else}
-		<div class="strategies-grid" in:fade={{ duration: 300 }}>
+		<div class="strategies-list" in:fade={{ duration: 300 }}>
 			{#each strategies as strategy, index (strategy.id)}
-				<div class="strategy-card" in:fade={{ duration: 300, delay: index * 50 }}>
-					<div class="card-header">
-						<div class="rank-badge">#{index + 1}</div>
-						<div class="return-badge" class:positive={strategy.totalReturnPercent >= 0} class:negative={strategy.totalReturnPercent < 0}>
+				<div class="strategy-row" in:fade={{ duration: 300, delay: index * 30 }}>
+					<div class="rank-column">#{index + 1}</div>
+
+					<div class="name-column">
+						<div class="strategy-name">{strategy.strategyName}</div>
+						<div class="creator-name">by {strategy.userName || truncateAddress(strategy.walletAddress)}</div>
+					</div>
+
+					<div class="chart-column">
+						{#if strategy.equityCurve && strategy.equityCurve.length > 0}
+							<MiniEquityCurveChart data={strategy.equityCurve} positive={strategy.totalReturnPercent >= 0} />
+						{:else}
+							<div class="no-chart">No data</div>
+						{/if}
+					</div>
+
+					<div class="metric-column">
+						<div class="metric-label">RETURN</div>
+						<div class="metric-value" class:positive={strategy.totalReturnPercent >= 0} class:negative={strategy.totalReturnPercent < 0}>
 							{formatPercent(strategy.totalReturnPercent)}
 						</div>
 					</div>
 
-					<h3 class="strategy-name">{strategy.strategyName}</h3>
-					<div class="creator-info">
-						<span class="creator-label">by</span>
-						<span class="creator-name">{strategy.userName || truncateAddress(strategy.walletAddress)}</span>
+					<div class="metric-column">
+						<div class="metric-label">WIN RATE</div>
+						<div class="metric-value">{strategy.winRate.toFixed(1)}%</div>
 					</div>
 
-					<div class="metrics-grid">
-						<div class="metric">
-							<div class="metric-label">Capital</div>
-							<div class="metric-value">{formatCurrency(strategy.initialCapital)} → {formatCurrency(strategy.finalCapital)}</div>
-						</div>
-						<div class="metric">
-							<div class="metric-label">Win Rate</div>
-							<div class="metric-value">{strategy.winRate.toFixed(1)}%</div>
-						</div>
-						<div class="metric">
-							<div class="metric-label">Trades</div>
-							<div class="metric-value">{strategy.totalTrades}</div>
-						</div>
-						<div class="metric">
-							<div class="metric-label">Sharpe Ratio</div>
-							<div class="metric-value">{strategy.sharpeRatio?.toFixed(2) || 'N/A'}</div>
-						</div>
+					<div class="metric-column">
+						<div class="metric-label">TRADES</div>
+						<div class="metric-value">{strategy.totalTrades}</div>
 					</div>
 
-					<div class="market-info">
-						<div class="market-count">{strategy.marketIds.length} market{strategy.marketIds.length !== 1 ? 's' : ''}</div>
-						<div class="date-range">
-							{formatDate(strategy.startDate)} - {formatDate(strategy.endDate)}
-						</div>
+					<div class="metric-column">
+						<div class="metric-label">SHARPE</div>
+						<div class="metric-value">{strategy.sharpeRatio?.toFixed(2) || 'N/A'}</div>
 					</div>
 
-					<button class="view-details-btn" on:click={() => openStrategyDetails(strategy)}>
-						View Details
-					</button>
+					<div class="metric-column">
+						<div class="metric-label">DRAWDOWN</div>
+						<div class="metric-value negative">{strategy.maxDrawdown?.toFixed(1) || '0'}%</div>
+					</div>
+
+					<div class="action-column">
+						<button class="view-details-btn" on:click={() => openStrategyDetails(strategy)}>
+							View Details
+						</button>
+					</div>
 				</div>
 			{/each}
 		</div>
@@ -291,8 +298,8 @@
 	.spinner {
 		width: 50px;
 		height: 50px;
-		border: 4px solid rgba(0, 208, 132, 0.1);
-		border-top: 4px solid #00D084;
+		border: 4px solid rgba(249, 115, 22, 0.1);
+		border-top: 4px solid #F97316;
 		border-radius: 50%;
 		animation: spin 1s linear infinite;
 		margin: 0 auto 20px;
@@ -306,148 +313,136 @@
 	.error-state button {
 		margin-top: 20px;
 		padding: 10px 24px;
-		background: #00D084;
+		background: #F97316;
 		color: #0A0A0A;
 		border: none;
-		border-radius: 8px;
-		font-weight: 600;
-		cursor: pointer;
-	}
-
-	.strategies-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-		gap: 24px;
-	}
-
-	.strategy-card {
-		background: #111;
-		border: 1px solid #222;
-		border-radius: 12px;
-		padding: 24px;
-		transition: all 0.3s ease;
-	}
-
-	.strategy-card:hover {
-		border-color: #00D084;
-		transform: translateY(-4px);
-		box-shadow: 0 8px 24px rgba(0, 208, 132, 0.1);
-	}
-
-	.card-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 16px;
-	}
-
-	.rank-badge {
-		background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
-		color: #0A0A0A;
-		font-weight: 700;
-		font-size: 14px;
-		padding: 6px 12px;
-		border-radius: 20px;
-	}
-
-	.return-badge {
-		font-weight: 700;
-		font-size: 18px;
-		padding: 6px 12px;
-		border-radius: 8px;
-	}
-
-	.return-badge.positive {
-		color: #00D084;
-		background: rgba(0, 208, 132, 0.1);
-	}
-
-	.return-badge.negative {
-		color: #FF4444;
-		background: rgba(255, 68, 68, 0.1);
-	}
-
-	.strategy-name {
-		font-size: 20px;
-		font-weight: 700;
-		color: #E8E8E8;
-		margin: 0 0 8px 0;
-	}
-
-	.creator-info {
-		font-size: 14px;
-		color: #888;
-		margin-bottom: 20px;
-	}
-
-	.creator-label {
-		margin-right: 4px;
-	}
-
-	.creator-name {
-		color: #00D084;
-		font-weight: 600;
-	}
-
-	.metrics-grid {
-		display: grid;
-		grid-template-columns: repeat(2, 1fr);
-		gap: 16px;
-		margin-bottom: 20px;
-	}
-
-	.metric {
-		background: #0A0A0A;
-		padding: 12px;
-		border-radius: 8px;
-	}
-
-	.metric-label {
-		font-size: 12px;
-		color: #888;
-		margin-bottom: 4px;
-	}
-
-	.metric-value {
-		font-size: 14px;
-		font-weight: 600;
-		color: #E8E8E8;
-	}
-
-	.market-info {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 12px 0;
-		border-top: 1px solid #222;
-		margin-bottom: 20px;
-		font-size: 12px;
-		color: #888;
-	}
-
-	.market-count {
-		background: rgba(0, 208, 132, 0.1);
-		color: #00D084;
-		padding: 4px 8px;
-		border-radius: 4px;
-		font-weight: 600;
-	}
-
-	.view-details-btn {
-		width: 100%;
-		padding: 12px;
-		background: transparent;
-		border: 2px solid #00D084;
-		color: #00D084;
 		border-radius: 8px;
 		font-weight: 600;
 		cursor: pointer;
 		transition: all 0.2s;
 	}
 
+	.error-state button:hover {
+		background: #EA580C;
+	}
+
+	.strategies-list {
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+		background: #2a2a2a;
+		border-radius: 8px;
+		overflow: hidden;
+	}
+
+	.strategy-row {
+		display: grid;
+		grid-template-columns: 60px 250px 200px repeat(5, 1fr) 140px;
+		gap: 16px;
+		align-items: center;
+		background: #000000;
+		padding: 16px 20px;
+		transition: all 0.2s ease;
+		border-left: 3px solid transparent;
+	}
+
+	.strategy-row:hover {
+		background: rgba(249, 115, 22, 0.05);
+		border-left-color: #F97316;
+	}
+
+	.rank-column {
+		font-size: 18px;
+		font-weight: 700;
+		color: #F97316;
+		font-family: monospace;
+		text-align: center;
+	}
+
+	.name-column {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		min-width: 0;
+	}
+
+	.strategy-name {
+		font-size: 14px;
+		font-weight: 600;
+		color: #E8E8E8;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.creator-name {
+		font-size: 11px;
+		color: #6B7280;
+		font-family: monospace;
+	}
+
+	.chart-column {
+		height: 40px;
+		display: flex;
+		align-items: center;
+	}
+
+	.no-chart {
+		font-size: 11px;
+		color: #6B7280;
+		font-style: italic;
+	}
+
+	.metric-column {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		align-items: center;
+		text-align: center;
+	}
+
+	.metric-label {
+		font-size: 10px;
+		color: #6B7280;
+		font-weight: 600;
+		letter-spacing: 0.5px;
+		font-family: monospace;
+	}
+
+	.metric-value {
+		font-size: 14px;
+		font-weight: 700;
+		color: #E8E8E8;
+		font-family: monospace;
+	}
+
+	.metric-value.positive {
+		color: #10B981;
+	}
+
+	.metric-value.negative {
+		color: #EF4444;
+	}
+
+	.action-column {
+		display: flex;
+		justify-content: flex-end;
+	}
+
+	.view-details-btn {
+		padding: 8px 16px;
+		background: transparent;
+		border: 1px solid #F97316;
+		color: #F97316;
+		border-radius: 4px;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+
 	.view-details-btn:hover {
-		background: #00D084;
-		color: #0A0A0A;
+		background: #F97316;
+		color: #000000;
 	}
 
 	.modal-overlay {
@@ -536,7 +531,7 @@
 	}
 
 	.modal-stat-value.positive {
-		color: #00D084;
+		color: #10B981;
 	}
 
 	.modal-stat-value.negative {
@@ -584,7 +579,7 @@
 	.paper-trade-btn {
 		flex: 1;
 		padding: 16px;
-		background: #00D084;
+		background: #F97316;
 		color: #0A0A0A;
 		border: none;
 		border-radius: 8px;
@@ -601,7 +596,7 @@
 	}
 
 	.paper-trade-btn:not(:disabled):hover {
-		background: #00BF77;
+		background: #EA580C;
 	}
 
 	@media (max-width: 768px) {
