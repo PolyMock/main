@@ -21,6 +21,8 @@
 		status: 'Active' | 'Closed';
 		openedAt: Date;
 		closedAt?: Date; // When position was closed
+		stopLoss?: number; // Stop loss price (0 = disabled)
+		takeProfit?: number; // Take profit price (0 = disabled)
 	}
 
 	let positions: Position[] = [];
@@ -177,6 +179,9 @@
 				const status: 'Active' | 'Closed' = (isClosed || isFullySold) ? 'Closed' : 'Active';
 
 
+				const stopLoss = pos.stopLoss ? pos.stopLoss.toNumber() / 1_000_000 : 0;
+				const takeProfit = pos.takeProfit ? pos.takeProfit.toNumber() / 1_000_000 : 0;
+
 				const position: Position = {
 					id: positionId,
 					marketId: pos.marketId,
@@ -191,7 +196,9 @@
 					pnlPercentage,
 					status,
 					openedAt: new Date(pos.openedAt.toNumber() * 1000),
-					closedAt: (isClosed || isFullySold) ? new Date(pos.closedAt.toNumber() * 1000) : undefined
+					closedAt: (isClosed || isFullySold) ? new Date(pos.closedAt.toNumber() * 1000) : undefined,
+					stopLoss: stopLoss > 0 ? stopLoss : undefined,
+					takeProfit: takeProfit > 0 ? takeProfit : undefined
 				};
 
 				// Cache fully closed/sold positions so they NEVER get recalculated
@@ -496,6 +503,8 @@
 							<th>Entry Price</th>
 							<th>Current Price</th>
 							<th>Closed Price</th>
+							<th>SL</th>
+							<th>TP</th>
 							<th>P&L</th>
 							<th>Status</th>
 							<th>Actions</th>
@@ -527,6 +536,20 @@
 								<td>
 									{#if position.status === 'Closed' && position.closedPrice !== undefined}
 										${position.closedPrice.toFixed(4)}
+									{:else}
+										<span class="text-muted">—</span>
+									{/if}
+								</td>
+								<td>
+									{#if position.stopLoss}
+										<span class="sltp-badge sl-badge">{position.stopLoss.toFixed(1)}¢</span>
+									{:else}
+										<span class="text-muted">—</span>
+									{/if}
+								</td>
+								<td>
+									{#if position.takeProfit}
+										<span class="sltp-badge tp-badge">{position.takeProfit.toFixed(1)}¢</span>
 									{:else}
 										<span class="text-muted">—</span>
 									{/if}
@@ -1259,6 +1282,35 @@
 	.status-badge.closed {
 		background: rgba(139, 146, 171, 0.1);
 		color: #8B92AB;
+	}
+
+	.sltp-display {
+		display: flex;
+		flex-direction: row;
+		gap: 8px;
+		align-items: center;
+	}
+
+	.sltp-badge {
+		padding: 3px 8px;
+		border-radius: 4px;
+		font-size: 11px;
+		font-weight: 700;
+		letter-spacing: 0.02em;
+		white-space: nowrap;
+		display: inline-block;
+	}
+
+	.sltp-badge.sl-badge {
+		background: rgba(255, 71, 87, 0.15);
+		color: #FF4757;
+		border: 1px solid rgba(255, 71, 87, 0.3);
+	}
+
+	.sltp-badge.tp-badge {
+		background: rgba(0, 208, 132, 0.15);
+		color: #00D084;
+		border: 1px solid rgba(0, 208, 132, 0.3);
 	}
 
 	.action-btn {

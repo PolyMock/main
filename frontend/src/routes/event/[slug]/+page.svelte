@@ -20,6 +20,11 @@
 	let showResolved = false;
 	let trading = false;
 	let walletState = $walletStore;
+	let showInfoView: 'markets' | 'info' = 'markets'; // Toggle between markets and rules/comments
+
+	// Stop Loss / Take Profit
+	let stopLoss = 0;
+	let takeProfit = 0;
 
 	// Modal state
 	let showConfirmModal = false;
@@ -254,7 +259,9 @@
 				amount: `$${amount.toFixed(2)}`,
 				price: `${(price * 100).toFixed(1)}¢`,
 				shares: shares.toFixed(2),
-				potentialWin: `$${potentialWin.toFixed(2)}`
+				potentialWin: `$${potentialWin.toFixed(2)}`,
+				stopLoss: stopLoss > 0 ? `${stopLoss.toFixed(2)}¢` : null,
+				takeProfit: takeProfit > 0 ? `${takeProfit.toFixed(2)}¢` : null
 			};
 			showConfirmModal = true;
 
@@ -270,14 +277,18 @@
 							walletState.adapter,
 							selectedMarket.id,
 							amount,
-							price
+							price,
+							stopLoss,
+							takeProfit
 						);
 					} else {
 						txSignature = await polymarketService.buyNo(
 							walletState.adapter,
 							selectedMarket.id,
 							amount,
-							price
+							price,
+							stopLoss,
+							takeProfit
 						);
 					}
 
@@ -403,9 +414,41 @@
 		modalDetails = null;
 	}
 
+	function matchPanelHeights() {
+		const tradingPanel = document.querySelector('.trading-panel');
+		const marketsPanel = document.querySelector('.markets-panel');
+
+		if (tradingPanel && marketsPanel) {
+			const tradingHeight = tradingPanel.offsetHeight;
+			(marketsPanel as HTMLElement).style.height = `${tradingHeight}px`;
+			(marketsPanel as HTMLElement).style.minHeight = `${tradingHeight}px`;
+			(marketsPanel as HTMLElement).style.maxHeight = `${tradingHeight}px`;
+			console.log('Matched heights:', tradingHeight);
+		}
+	}
+
 	onMount(() => {
 		fetchEvent();
+
+		// Match heights after content loads with multiple attempts
+		setTimeout(matchPanelHeights, 100);
+		setTimeout(matchPanelHeights, 500);
+		setTimeout(matchPanelHeights, 1000);
+
+		// Watch for changes in trading panel only
+		const observer = new MutationObserver(matchPanelHeights);
+		const tradingPanel = document.querySelector('.trading-panel');
+		if (tradingPanel) {
+			observer.observe(tradingPanel, { childList: true, subtree: true });
+		}
+
+		return () => observer.disconnect();
 	});
+
+	// React to state changes
+	$: if (selectedMarket || tradeTab || stopLoss || takeProfit) {
+		setTimeout(matchPanelHeights, 50);
+	}
 </script>
 
 <div class="event-page">
@@ -432,6 +475,12 @@
 							<img src={event.image} alt={event.title} class="event-icon" />
 						{/if}
 						<h1 class="event-title">{event.title}</h1>
+						<button
+							class="info-toggle-btn"
+							on:click={() => showInfoView = showInfoView === 'markets' ? 'info' : 'markets'}
+						>
+							{showInfoView === 'markets' ? 'Info' : 'Markets'}
+						</button>
 					</div>
 					<div class="event-header-right">
 						<img src={polymockLogo} alt="Polymock" class="polymarket-icon" />
@@ -440,6 +489,7 @@
 				</div>
 
 				<!-- Markets List (Scrollable) -->
+				{#if showInfoView === 'markets'}
 				<div class="markets-list">
 					{#each displayedMarkets as market}
 						<div
@@ -496,14 +546,22 @@
 					{/if}
 				</div>
 
-				<!-- Rules Section -->
-				{#if event}
-					<MarketRules event={event} market={selectedMarket} />
-				{/if}
+				{:else if showInfoView === 'info'}
+				<div class="info-view">
+					<!-- Rules Section -->
+					{#if event}
+						<div class="info-section">
+							<MarketRules event={event} market={selectedMarket} />
+						</div>
+					{/if}
 
-				<!-- Comments Section -->
-				{#if event}
-					<MarketComments marketId={event.id} />
+					<!-- Comments Section -->
+					{#if event}
+						<div class="info-section">
+							<MarketComments marketId={event.id} />
+						</div>
+					{/if}
+				</div>
 				{/if}
 			</div>
 
@@ -605,6 +663,74 @@
 						</div>
 					</div>
 
+					<!-- Advanced Settings (SL/TP) - Only for Buy Tab -->
+					{#if tradeTab === 'Buy'}
+					<div class="advanced-section">
+						<div class="advanced-header">
+							<span class="advanced-title">Stop Loss / Take Profit</span>
+							<span class="advanced-subtitle">Automated exit conditions</span>
+						</div>
+
+						<div class="advanced-content">
+							<div class="sltp-grid">
+								<div class="sltp-input-group">
+									<label class="sltp-label">
+										<span class="sltp-label-text">Stop Loss</span>
+										<span class="sltp-label-badge sl-badge">SL</span>
+									</label>
+									<div class="sltp-input-wrapper">
+										<input
+											type="number"
+											bind:value={stopLoss}
+											class="sltp-input"
+											min="0"
+											max={selectedMarket.yesPrice || selectedMarket.noPrice}
+											step="0.01"
+											placeholder="45.5"
+										/>
+										<span class="sltp-currency">¢</span>
+									</div>
+									<span class="sltp-description">Exit if price drops to this level</span>
+								</div>
+
+								<div class="sltp-input-group">
+									<label class="sltp-label">
+										<span class="sltp-label-text">Take Profit</span>
+										<span class="sltp-label-badge tp-badge">TP</span>
+									</label>
+									<div class="sltp-input-wrapper">
+										<input
+											type="number"
+											bind:value={takeProfit}
+											class="sltp-input"
+											min={selectedMarket.yesPrice || selectedMarket.noPrice}
+											max="100"
+											step="0.01"
+											placeholder="85.5"
+										/>
+										<span class="sltp-currency">¢</span>
+									</div>
+									<span class="sltp-description">Exit if price rises to this level</span>
+								</div>
+							</div>
+
+							<div class="sltp-active-summary">
+								<div class="sltp-active-title">Active Conditions</div>
+								<div class="sltp-active-items">
+									<div class="sltp-active-item sl-item">
+										<span class="sltp-active-badge sl-badge">SL</span>
+										<span class="sltp-active-value">{stopLoss > 0 ? `${stopLoss.toFixed(2)}¢` : 'No'}</span>
+									</div>
+									<div class="sltp-active-item tp-item">
+										<span class="sltp-active-badge tp-badge">TP</span>
+										<span class="sltp-active-value">{takeProfit > 0 ? `${takeProfit.toFixed(2)}¢` : 'No'}</span>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+					{/if}
+
 					<!-- Action Button -->
 					<button
 						class="action-button"
@@ -674,6 +800,22 @@
 					<span class="summary-label">Potential Win:</span>
 					<span class="summary-value">{modalDetails.potentialWin}</span>
 				</div>
+				{#if modalDetails.stopLoss || modalDetails.takeProfit}
+				<div class="summary-divider"></div>
+				<div class="summary-section-title">Automated Exit Conditions</div>
+				{/if}
+				{#if modalDetails.stopLoss}
+				<div class="summary-row sltp-row sl-row">
+					<span class="summary-label">Stop Loss:</span>
+					<span class="summary-value">{modalDetails.stopLoss}</span>
+				</div>
+				{/if}
+				{#if modalDetails.takeProfit}
+				<div class="summary-row sltp-row tp-row">
+					<span class="summary-label">Take Profit:</span>
+					<span class="summary-value">{modalDetails.takeProfit}</span>
+				</div>
+				{/if}
 			</div>
 			{/if}
 		</div>
@@ -814,7 +956,6 @@
 		margin: 0;
 		width: 100%;
 		box-sizing: border-box;
-		height: calc(100vh - 180px);
 		align-items: start;
 	}
 
@@ -823,10 +964,9 @@
 		background: #000000;
 		border: 1px solid #404040;
 		border-radius: 16px;
-		overflow-y: auto;
 		display: flex;
 		flex-direction: column;
-		height: 100%;
+		overflow: hidden !important;
 	}
 
 	.event-header {
@@ -836,6 +976,7 @@
 		padding: 24px;
 		border-bottom: 1px solid #404040;
 		background: rgba(0, 0, 0, 0.5);
+		flex-shrink: 0;
 	}
 
 	.event-header-left {
@@ -869,6 +1010,27 @@
 		line-height: 1.3;
 		overflow: hidden;
 		text-overflow: ellipsis;
+		flex: 1;
+	}
+
+	.info-toggle-btn {
+		padding: 6px 16px;
+		background: transparent;
+		border: 1px solid #404040;
+		border-radius: 6px;
+		color: #999999;
+		font-size: 13px;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 200ms ease-out;
+		white-space: nowrap;
+		flex-shrink: 0;
+	}
+
+	.info-toggle-btn:hover {
+		background: rgba(255, 255, 255, 0.05);
+		border-color: #F97316;
+		color: #F97316;
 	}
 
 	.polymarket-icon {
@@ -890,6 +1052,22 @@
 		display: flex;
 		flex-direction: column;
 		gap: 8px;
+		flex: 1 1 auto;
+		overflow-y: auto;
+		min-height: 0;
+	}
+
+	/* Info View */
+	.info-view {
+		flex: 1;
+		overflow-y: auto;
+		display: flex;
+		flex-direction: column;
+		gap: 0;
+	}
+
+	.info-section {
+		border-top: 1px solid #404040;
 	}
 
 	.market-row {
@@ -1058,9 +1236,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 20px;
-		max-height: calc(100vh - 140px);
-		position: sticky;
-		top: 24px;
 	}
 
 	.trading-header {
@@ -1517,5 +1692,232 @@
 	.confirm-btn:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
+	}
+
+	/* Advanced Settings (SL/TP) Styles */
+	.advanced-section {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+
+	.advanced-header {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		padding-bottom: 8px;
+		border-bottom: 1px solid #2A2F45;
+	}
+
+	.advanced-title {
+		font-size: 13px;
+		font-weight: 600;
+		color: #E8E8E8;
+		letter-spacing: 0.01em;
+	}
+
+	.advanced-subtitle {
+		font-size: 11px;
+		color: #666666;
+		font-weight: 400;
+	}
+
+	.advanced-content {
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+	}
+
+	.sltp-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 12px;
+	}
+
+	.sltp-input-group {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.sltp-label {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.sltp-label-text {
+		font-size: 12px;
+		font-weight: 600;
+		color: #A0A0A0;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+	}
+
+	.sltp-label-badge {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		padding: 2px 6px;
+		border-radius: 3px;
+		font-size: 9px;
+		font-weight: 700;
+		letter-spacing: 0.5px;
+	}
+
+	.sl-badge {
+		background: rgba(255, 71, 87, 0.15);
+		color: #FF4757;
+		border: 1px solid rgba(255, 71, 87, 0.3);
+	}
+
+	.tp-badge {
+		background: rgba(0, 208, 132, 0.15);
+		color: #00D084;
+		border: 1px solid rgba(0, 208, 132, 0.3);
+	}
+
+	.sltp-input-wrapper {
+		position: relative;
+		display: flex;
+		align-items: center;
+	}
+
+	.sltp-input {
+		width: 100%;
+		background: #0A0E1A;
+		border: 1px solid #2A2F45;
+		border-radius: 4px;
+		padding: 8px 28px 8px 10px;
+		font-size: 15px;
+		font-weight: 600;
+		color: #E8E8E8;
+		font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+		transition: all 200ms ease-out;
+	}
+
+	.sltp-input:focus {
+		outline: none;
+		border-color: #F97316;
+		background: #0F1421;
+	}
+
+	.sltp-input::placeholder {
+		color: #3A4055;
+		font-weight: 400;
+	}
+
+	.sltp-currency {
+		position: absolute;
+		right: 10px;
+		font-size: 12px;
+		font-weight: 600;
+		color: #666666;
+		pointer-events: none;
+	}
+
+	.sltp-description {
+		font-size: 10px;
+		color: #666666;
+		line-height: 1.3;
+	}
+
+	.sltp-active-summary {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		padding: 12px;
+		background: rgba(249, 115, 22, 0.05);
+		border: 1px solid rgba(249, 115, 22, 0.2);
+		border-radius: 4px;
+		margin-top: 4px;
+	}
+
+	.sltp-active-title {
+		font-size: 11px;
+		font-weight: 600;
+		color: #A0A0A0;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+	}
+
+	.sltp-active-items {
+		display: flex;
+		gap: 12px;
+	}
+
+	.sltp-active-item {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 6px 10px;
+		background: rgba(0, 0, 0, 0.3);
+		border-radius: 4px;
+	}
+
+	.sltp-active-badge {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		padding: 2px 5px;
+		border-radius: 3px;
+		font-size: 9px;
+		font-weight: 700;
+		letter-spacing: 0.5px;
+	}
+
+	.sltp-active-value {
+		font-size: 14px;
+		font-weight: 700;
+		font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+	}
+
+	.sl-item .sltp-active-value {
+		color: #FF4757;
+	}
+
+	.tp-item .sltp-active-value {
+		color: #00D084;
+	}
+
+	/* Modal SL/TP Styles */
+	.summary-divider {
+		height: 1px;
+		background: #2A2F45;
+		margin: 8px 0;
+	}
+
+	.summary-section-title {
+		font-size: 11px;
+		font-weight: 600;
+		color: #A0A0A0;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+		margin-bottom: 8px;
+	}
+
+	.sltp-row {
+		background: rgba(249, 115, 22, 0.05);
+		border-left: 3px solid transparent;
+	}
+
+	.sl-row {
+		border-left-color: #FF4757;
+	}
+
+	.tp-row {
+		border-left-color: #00D084;
+	}
+
+	.sltp-row .summary-value {
+		font-weight: 700;
+	}
+
+	.sl-row .summary-value {
+		color: #FF4757;
+	}
+
+	.tp-row .summary-value {
+		color: #00D084;
 	}
 </style>

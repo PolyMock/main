@@ -208,7 +208,9 @@ export class PolymarketService {
 		wallet: any,
 		marketId: string,
 		amountUsdc: number,
-		pricePerShare: number
+		pricePerShare: number,
+		stopLoss: number = 0,
+		takeProfit: number = 0
 	): Promise<string> {
 		try {
 			if (!this.program) {
@@ -230,9 +232,11 @@ export class PolymarketService {
 			// Convert to 6 decimal places (USDC format)
 			const amountUsdcBN = new BN(Math.floor(amountUsdc * 1_000_000));
 			const pricePerShareBN = new BN(Math.floor(pricePerShare * 1_000_000));
+			const stopLossBN = new BN(Math.floor(stopLoss * 1_000_000));
+			const takeProfitBN = new BN(Math.floor(takeProfit * 1_000_000));
 
 			const tx = await this.program.methods
-				.buyYes(marketId, amountUsdcBN, pricePerShareBN)
+				.buyYes(marketId, amountUsdcBN, pricePerShareBN, stopLossBN, takeProfitBN)
 				.accounts({
 					userAccount: userAccountPDA,
 					positionAccount: positionPDA,
@@ -263,7 +267,9 @@ export class PolymarketService {
 		wallet: any,
 		marketId: string,
 		amountUsdc: number,
-		pricePerShare: number
+		pricePerShare: number,
+		stopLoss: number = 0,
+		takeProfit: number = 0
 	): Promise<string> {
 		try {
 			if (!this.program) {
@@ -285,9 +291,11 @@ export class PolymarketService {
 			// Convert to 6 decimal places (USDC format)
 			const amountUsdcBN = new BN(Math.floor(amountUsdc * 1_000_000));
 			const pricePerShareBN = new BN(Math.floor(pricePerShare * 1_000_000));
+			const stopLossBN = new BN(Math.floor(stopLoss * 1_000_000));
+			const takeProfitBN = new BN(Math.floor(takeProfit * 1_000_000));
 
 			const tx = await this.program.methods
-				.buyNo(marketId, amountUsdcBN, pricePerShareBN)
+				.buyNo(marketId, amountUsdcBN, pricePerShareBN, stopLossBN, takeProfitBN)
 				.accounts({
 					userAccount: userAccountPDA,
 					positionAccount: positionPDA,
