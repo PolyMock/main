@@ -50,6 +50,8 @@
 			}
 			const data = await response.json();
 			strategies = data.strategies;
+			console.log('[Marketplace] Fetched strategies:', strategies.length);
+			console.log('[Marketplace] First strategy equity curve:', strategies[0]?.equityCurve);
 		} catch (err: any) {
 			console.error('Error fetching marketplace strategies:', err);
 			error = err.message;
