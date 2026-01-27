@@ -10,11 +10,14 @@
 	import type { BacktestResult } from '$lib/backtesting/types';
 	import EquityCurveChart from '$lib/components/EquityCurveChart.svelte';
 	import PnLDistributionChart from '$lib/components/PnLDistributionChart.svelte';
-	import { browser } from '$app/environment';
+	import { env } from '$env/dynamic/public';
 
 	// Backtest API URL - use external API if configured, otherwise local
-	// Access via import.meta.env for Vite/Cloudflare compatibility
-	const BACKTEST_API_URL = browser ? (import.meta.env.PUBLIC_BACKTEST_API_URL || '') : '';
+	const BACKTEST_API_URL = env.PUBLIC_BACKTEST_API_URL || '';
+
+	// Debug: Log the value to console
+	console.log('[Backtest] BACKTEST_API_URL:', BACKTEST_API_URL);
+	console.log('[Backtest] Raw env:', env.PUBLIC_BACKTEST_API_URL);
 
 	// Main tab state - set based on URL parameter
 	let activeMainTab: 'summary' | 'strategies' = 'summary';
