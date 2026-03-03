@@ -1,7 +1,9 @@
 import {
 	Connection,
+	Keypair,
 	PublicKey,
 	SystemProgram,
+	Transaction,
 	LAMPORTS_PER_SOL,
 } from '@solana/web3.js';
 import { AnchorProvider, Program } from '@coral-xyz/anchor';
@@ -10,10 +12,25 @@ import BN from 'bn.js';
 import { PUBLIC_SOLANA_PROGRAM_ID, PUBLIC_SOLANA_RPC_ENDPOINT } from '$env/static/public';
 import IDL from './polymarket_paper.json';
 import { erVerification } from './er-verification';
+import { sessionKeyManager, SESSION_KEYS_PROGRAM_ID } from './session-keys';
 
-// Program ID and RPC from environment variables
-const PROGRAM_ID = new PublicKey(PUBLIC_SOLANA_PROGRAM_ID);
-const RPC_ENDPOINT = PUBLIC_SOLANA_RPC_ENDPOINT;
+// Lazy init to avoid "Cannot read properties of undefined (reading '_bn')" during SSR
+// when env vars are not available (e.g. $env/static/public not set in server context)
+let _programId: PublicKey | null = null;
+function getProgramId(): PublicKey {
+	if (_programId) return _programId;
+	const id = PUBLIC_SOLANA_PROGRAM_ID;
+	if (!id || typeof id !== 'string' || !id.trim()) {
+		throw new Error('PUBLIC_SOLANA_PROGRAM_ID is not set. Add it to your .env file (e.g. PUBLIC_SOLANA_PROGRAM_ID=AmuwGa8LXKW63ZHzGm1TkqSugbJ8fMVXr6HKksYkwUNT).');
+	}
+	_programId = new PublicKey(id);
+	return _programId;
+}
+
+// Use standard devnet RPC for all operations. MagicBlock RPC has issues with:
+// 1. Session key transaction simulation (incorrectly reports AccountNotSigner)
+// 2. Data consistency when writes go to devnet but reads go through MagicBlock
+const RPC_ENDPOINT = 'https://api.devnet.solana.com';
 
 // IDL type - we'll use the generic Idl type from Anchor
 export type PolymarketPaperIDL = Idl;
@@ -39,16 +56,102 @@ export interface PredictionPosition {
 	status: { active: {} } | { closed: {} } | { partiallySold: {} } | { fullySold: {} };
 	openedAt: BN;
 	closedAt: BN;
+	stopLoss: BN;
+	takeProfit: BN;
 }
 
 export class PolymarketService {
 	private connection: Connection;
-	private program: Program | null = null;
+	program: Program | null = null;
 	private verifyEREnabled: boolean = true; // Enable ER verification by default
 
 	constructor() {
 		// MagicBlock RPC handles ER automatically - no need for separate connections
 		this.connection = new Connection(RPC_ENDPOINT, 'confirmed');
+	}
+
+	/**
+	 * Get active session info (keypair + token PDA) if session is valid for this wallet
+	 */
+	private getActiveSession(walletPubkey: PublicKey): { sessionKeypair: Keypair; sessionTokenPDA: PublicKey } | null {
+		if (!sessionKeyManager.isSessionActive()) return null;
+		if (!sessionKeyManager.isSessionForWallet(walletPubkey)) return null;
+		const sessionKeypair = sessionKeyManager.getSessionKeypair();
+		const sessionTokenPDA = sessionKeyManager.getSessionTokenPDA();
+		if (!sessionKeypair || !sessionTokenPDA) return null;
+		return { sessionKeypair, sessionTokenPDA };
+	}
+
+	/**
+	 * Create a Program instance that uses the session keypair as the signer.
+	 * This means .rpc() will sign with the session keypair — no wallet popup.
+	 */
+	private getSessionProgram(sessionKeypair: Keypair): Program {
+		const sessionWallet = {
+			publicKey: sessionKeypair.publicKey,
+			signTransaction: async (tx: any) => { tx.partialSign(sessionKeypair); return tx; },
+			signAllTransactions: async (txs: any[]) => { txs.forEach(tx => tx.partialSign(sessionKeypair)); return txs; },
+		};
+		const sessionProvider = new AnchorProvider(
+			this.connection,
+			sessionWallet as any,
+			{ commitment: 'confirmed', preflightCommitment: 'confirmed' }
+		);
+		return new Program(IDL as Idl, sessionProvider);
+	}
+
+	/**
+	 * Send a transaction using session key (no wallet popup) or fall back to .rpc()
+	 */
+	private async sendWithSession(
+		methodName: string,
+		methodArgs: any[],
+		accounts: Record<string, PublicKey>,
+		walletPubkey: PublicKey,
+		session: { sessionKeypair: Keypair; sessionTokenPDA: PublicKey } | null,
+	): Promise<string> {
+		if (session) {
+			// Session mode: build instruction via Anchor, then sign & send manually.
+			// skipPreflight because Solana's simulator incorrectly reports
+			// AccountNotSigner for session keypair transactions.
+			const sessionProgram = this.getSessionProgram(session.sessionKeypair);
+
+			const ix = await (sessionProgram.methods as any)[methodName](...methodArgs)
+				.accounts({
+					...accounts,
+					sessionToken: session.sessionTokenPDA,
+					user: session.sessionKeypair.publicKey,
+				})
+				.instruction();
+
+			const tx = new Transaction().add(ix);
+			tx.feePayer = session.sessionKeypair.publicKey;
+			const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash();
+			tx.recentBlockhash = blockhash;
+			tx.sign(session.sessionKeypair);
+
+			const sig = await this.connection.sendRawTransaction(tx.serialize(), {
+				skipPreflight: true,
+			});
+
+			await this.connection.confirmTransaction({
+				signature: sig,
+				blockhash,
+				lastValidBlockHeight,
+			}, 'confirmed');
+
+			console.log('[Session] TX confirmed:', sig);
+			return sig;
+		} else {
+			// Normal mode: wallet signs via .rpc()
+			return await (this.program!.methods as any)[methodName](...methodArgs)
+				.accounts({
+					...accounts,
+					sessionToken: SESSION_KEYS_PROGRAM_ID,
+					user: walletPubkey,
+				})
+				.rpc();
+		}
 	}
 
 	/**
@@ -98,7 +201,7 @@ export class PolymarketService {
 	getUserAccountPDA(userPublicKey: PublicKey): [PublicKey, number] {
 		return PublicKey.findProgramAddressSync(
 			[Buffer.from('user'), userPublicKey.toBuffer()],
-			PROGRAM_ID
+			getProgramId()
 		);
 	}
 
@@ -106,8 +209,10 @@ export class PolymarketService {
 	 * Get the PDA for a position account
 	 */
 	getPositionPDA(userPublicKey: PublicKey, positionId: number): [PublicKey, number] {
-		const positionIdBuffer = Buffer.alloc(8);
-		positionIdBuffer.writeBigUInt64LE(BigInt(positionId));
+		// Use DataView for browser compatibility (Buffer.writeBigUInt64LE not always available)
+		const positionIdBuffer = new Uint8Array(8);
+		const dataView = new DataView(positionIdBuffer.buffer, positionIdBuffer.byteOffset, 8);
+		dataView.setBigUint64(0, BigInt(positionId), true); // true = little endian
 
 		return PublicKey.findProgramAddressSync(
 			[
@@ -115,7 +220,7 @@ export class PolymarketService {
 				userPublicKey.toBuffer(),
 				positionIdBuffer
 			],
-			PROGRAM_ID
+			getProgramId()
 		);
 	}
 
@@ -125,7 +230,7 @@ export class PolymarketService {
 	getConfigPDA(): [PublicKey, number] {
 		return PublicKey.findProgramAddressSync(
 			[Buffer.from('config')],
-			PROGRAM_ID
+			getProgramId()
 		);
 	}
 
@@ -219,6 +324,7 @@ export class PolymarketService {
 
 			const userPublicKey = wallet.publicKey;
 			const [userAccountPDA] = this.getUserAccountPDA(userPublicKey);
+			const session = this.getActiveSession(userPublicKey);
 
 			// Get user account to get the next position ID
 			const userAccount = await this.getUserAccount(userPublicKey);
@@ -235,22 +341,22 @@ export class PolymarketService {
 			const stopLossBN = new BN(Math.floor(stopLoss * 1_000_000));
 			const takeProfitBN = new BN(Math.floor(takeProfit * 1_000_000));
 
-			const tx = await this.program.methods
-				.buyYes(marketId, amountUsdcBN, pricePerShareBN, stopLossBN, takeProfitBN)
-				.accounts({
+			const tx = await this.sendWithSession(
+				'buyYes',
+				[marketId, amountUsdcBN, pricePerShareBN, stopLossBN, takeProfitBN],
+				{
 					userAccount: userAccountPDA,
 					positionAccount: positionPDA,
-					user: userPublicKey,
-					systemProgram: SystemProgram.programId,
-				})
-				.rpc();
-
+				},
+				userPublicKey,
+				session
+			);
 
 			// Verify ER usage
 			if (this.verifyEREnabled) {
 				setTimeout(async () => {
 					await erVerification.logERVerification(tx, userAccountPDA);
-				}, 1000); // Wait 1 second for transaction to propagate
+				}, 1000);
 			}
 
 			return tx;
@@ -278,6 +384,7 @@ export class PolymarketService {
 
 			const userPublicKey = wallet.publicKey;
 			const [userAccountPDA] = this.getUserAccountPDA(userPublicKey);
+			const session = this.getActiveSession(userPublicKey);
 
 			// Get user account to get the next position ID
 			const userAccount = await this.getUserAccount(userPublicKey);
@@ -294,22 +401,22 @@ export class PolymarketService {
 			const stopLossBN = new BN(Math.floor(stopLoss * 1_000_000));
 			const takeProfitBN = new BN(Math.floor(takeProfit * 1_000_000));
 
-			const tx = await this.program.methods
-				.buyNo(marketId, amountUsdcBN, pricePerShareBN, stopLossBN, takeProfitBN)
-				.accounts({
+			const tx = await this.sendWithSession(
+				'buyNo',
+				[marketId, amountUsdcBN, pricePerShareBN, stopLossBN, takeProfitBN],
+				{
 					userAccount: userAccountPDA,
 					positionAccount: positionPDA,
-					user: userPublicKey,
-					systemProgram: SystemProgram.programId,
-				})
-				.rpc();
-
+				},
+				userPublicKey,
+				session
+			);
 
 			// Verify ER usage
 			if (this.verifyEREnabled) {
 				setTimeout(async () => {
 					await erVerification.logERVerification(tx, userAccountPDA);
-				}, 1000); // Wait 1 second for transaction to propagate
+				}, 1000);
 			}
 
 			return tx;
@@ -336,20 +443,22 @@ export class PolymarketService {
 			const userPublicKey = wallet.publicKey;
 			const [userAccountPDA] = this.getUserAccountPDA(userPublicKey);
 			const [positionPDA] = this.getPositionPDA(userPublicKey, positionId);
+			const session = this.getActiveSession(userPublicKey);
 
 			// Convert to 6 decimal places
 			const sharesToSellBN = new BN(Math.floor(sharesToSell * 1_000_000));
 			const currentPriceBN = new BN(Math.floor(currentPrice * 1_000_000));
 
-			const tx = await this.program.methods
-				.sellYes(sharesToSellBN, currentPriceBN)
-				.accounts({
+			const tx = await this.sendWithSession(
+				'sellYes',
+				[sharesToSellBN, currentPriceBN],
+				{
 					userAccount: userAccountPDA,
 					positionAccount: positionPDA,
-					user: userPublicKey,
-				})
-				.rpc();
-
+				},
+				userPublicKey,
+				session
+			);
 
 			// Verify ER usage
 			if (this.verifyEREnabled) {
@@ -382,20 +491,22 @@ export class PolymarketService {
 			const userPublicKey = wallet.publicKey;
 			const [userAccountPDA] = this.getUserAccountPDA(userPublicKey);
 			const [positionPDA] = this.getPositionPDA(userPublicKey, positionId);
+			const session = this.getActiveSession(userPublicKey);
 
 			// Convert to 6 decimal places
 			const sharesToSellBN = new BN(Math.floor(sharesToSell * 1_000_000));
 			const currentPriceBN = new BN(Math.floor(currentPrice * 1_000_000));
 
-			const tx = await this.program.methods
-				.sellNo(sharesToSellBN, currentPriceBN)
-				.accounts({
+			const tx = await this.sendWithSession(
+				'sellNo',
+				[sharesToSellBN, currentPriceBN],
+				{
 					userAccount: userAccountPDA,
 					positionAccount: positionPDA,
-					user: userPublicKey,
-				})
-				.rpc();
-
+				},
+				userPublicKey,
+				session
+			);
 
 			// Verify ER usage
 			if (this.verifyEREnabled) {
@@ -480,18 +591,21 @@ export class PolymarketService {
 			const userPublicKey = wallet.publicKey;
 			const [userAccountPDA] = this.getUserAccountPDA(userPublicKey);
 			const [positionPDA] = this.getPositionPDA(userPublicKey, positionId);
+			const session = this.getActiveSession(userPublicKey);
 
 			// Convert to 6 decimal places
 			const currentPriceBN = new BN(Math.floor(currentPrice * 1_000_000));
 
-			const tx = await this.program.methods
-				.closePosition(currentPriceBN)
-				.accounts({
+			const tx = await this.sendWithSession(
+				'closePosition',
+				[currentPriceBN],
+				{
 					userAccount: userAccountPDA,
 					positionAccount: positionPDA,
-					user: userPublicKey,
-				})
-				.rpc();
+				},
+				userPublicKey,
+				session
+			);
 
 			return tx;
 		} catch (error) {
@@ -515,7 +629,7 @@ export class PolymarketService {
 			}
 
 			// Get all UserAccount accounts from the program
-			const accounts = await this.connection.getProgramAccounts(PROGRAM_ID, {
+			const accounts = await this.connection.getProgramAccounts(getProgramId(), {
 				filters: [
 					{
 						memcmp: {

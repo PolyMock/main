@@ -9,18 +9,13 @@ crate-type = ["cdylib", "lib"]
 name = "polymarket_paper"
 
 [features]
-default = []
-cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
 idl-build = ["anchor-lang/idl-build"]
 
 [dependencies]
-anchor-lang = "0.30.0"
-bolt-lang = "0.1.12"
-
-[dev-dependencies]
-solana-sdk = "1.18.0"
-solana-program-test = "1.18.0"
-tokio = "1.35.0"
+anchor-lang = "=0.32.1"
+session-keys = { version = "3.0.10", features = ["no-entrypoint"] }

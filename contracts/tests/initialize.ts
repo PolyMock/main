@@ -5,7 +5,7 @@ import * as os from "os";
 import * as path from "path";
 import type { PolymarketPaper } from "../target/types/polymarket_paper";
 
-const PROGRAM_ID = new PublicKey("cWcQsqrGLagy6KfjKkFjeNWm651s85b7q2ehKp7zSmL");
+const PROGRAM_ID = new PublicKey("5sfoR6jyPc4dmdQuuAEpMPPV18aJcXLJxBhqiCv69Q3V");
 const RPC_URL = "https://api.devnet.solana.com";
 
 async function main() {

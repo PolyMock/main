@@ -24,6 +24,7 @@ Thumbs.db
 # Environment variables
 .env
 .env.local
+.env.example
 .env.development.local
 .env.test.local
 .env.production.local
@@ -67,3 +68,12 @@ contracts/package-lock.json
 
 # But keep essential deployment keypairs if needed
 # !contracts/target/deploy/*-keypair.json
+
+# Wrangler local state
+.wrangler/
+frontend/.wrangler/
+
+# SQLite files
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

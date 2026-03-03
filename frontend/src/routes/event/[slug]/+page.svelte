@@ -5,6 +5,7 @@
 	import { polymarketClient, type PolyEvent, type PolyMarket } from '$lib/polymarket';
 	import { walletStore, refreshUserBalance } from '$lib/wallet/stores';
 	import { polymarketService } from '$lib/solana/polymarket-service';
+	import { sessionKeyManager } from '$lib/solana/session-keys';
 	import { PublicKey } from '@solana/web3.js';
 	import MarketRules from '$lib/components/MarketRules.svelte';
 	import MarketComments from '$lib/components/MarketComments.svelte';
@@ -28,12 +29,25 @@
 
 	// Modal state
 	let showConfirmModal = false;
-	let showSuccessModal = false;
-	let showErrorModal = false;
+	let showSessionRequiredModal = false;
 	let modalTitle = '';
 	let modalMessage = '';
 	let modalDetails: any = null;
 	let pendingTrade: (() => Promise<void>) | null = null;
+
+	// Toast state
+	let showToast = false;
+	let toastType: 'success' | 'error' = 'success';
+	let toastMessage = '';
+	let toastTimer: ReturnType<typeof setTimeout>;
+
+	function showToastNotification(type: 'success' | 'error', message: string) {
+		clearTimeout(toastTimer);
+		toastType = type;
+		toastMessage = message;
+		showToast = true;
+		toastTimer = setTimeout(() => { showToast = false; }, 4000);
+	}
 	let userPositions: any[] = [];
 	let selectedPosition: any = null;
 	let loadingPositions = false;
@@ -201,49 +215,43 @@
 	async function handleTrade() {
 		// Check wallet connection
 		if (!walletState.connected || !walletState.adapter) {
-			showErrorModal = true;
-			modalTitle = 'Wallet Not Connected';
-			modalMessage = 'Please connect your wallet first!';
+			showToastNotification('error', 'Please connect your wallet first!');
+			return;
+		}
+
+		// Check session key
+		if (!sessionKeyManager.isSessionActive()) {
+			showSessionRequiredModal = true;
 			return;
 		}
 
 		// Validate trade parameters
 		if (!amount || amount <= 0) {
-			showErrorModal = true;
-			modalTitle = 'Invalid Amount';
-			modalMessage = 'Please enter a valid trade amount';
+			showToastNotification('error', 'Please enter a valid trade amount');
 			return;
 		}
 
 		// Check if user has sufficient balance
 		if (amount > walletState.usdcBalance) {
-			showErrorModal = true;
-			modalTitle = 'Insufficient Balance';
-			modalMessage = `You have $${walletState.usdcBalance.toFixed(2)} available.`;
+			showToastNotification('error', `Insufficient balance. You have $${walletState.usdcBalance.toFixed(2)} available.`);
 			return;
 		}
 
 		if (!selectedMarket || !selectedSide) {
-			showErrorModal = true;
-			modalTitle = 'No Selection';
-			modalMessage = 'Please select a market and outcome';
+			showToastNotification('error', 'Please select a market and outcome');
 			return;
 		}
 
 		// Prevent trading on resolved markets
 		if (isMarketResolved(selectedMarket)) {
-			showErrorModal = true;
-			modalTitle = 'Market Resolved';
-			modalMessage = 'Cannot trade on resolved markets';
+			showToastNotification('error', 'Cannot trade on resolved markets');
 			return;
 		}
 
 		const price = selectedSide === 'Yes' ? (selectedMarket.yesPrice || 0) : (selectedMarket.noPrice || 0);
 
 		if (price <= 0) {
-			showErrorModal = true;
-			modalTitle = 'Invalid Price';
-			modalMessage = 'Please refresh the page.';
+			showToastNotification('error', 'Invalid price. Please refresh the page.');
 			return;
 		}
 
@@ -292,10 +300,7 @@
 						);
 					}
 
-					// Show success modal
-					modalTitle = 'Trade Successful!';
-					modalMessage = `Transaction: ${txSignature.slice(0, 20)}...`;
-					showSuccessModal = true;
+					showToastNotification('success', `Trade successful! Tx: ${txSignature.slice(0, 20)}...`);
 
 					// Refresh user balance after successful trade
 					if (walletState.publicKey) {
@@ -306,9 +311,7 @@
 					amount = 0;
 				} catch (error: any) {
 					console.error('Trade failed:', error);
-					showErrorModal = true;
-					modalTitle = 'Trade Failed';
-					modalMessage = error.message || 'Unknown error occurred';
+					showToastNotification('error', error.message || 'Trade failed');
 				} finally {
 					trading = false;
 				}
@@ -316,9 +319,7 @@
 		} else {
 			// Sell logic
 			if (!selectedPosition) {
-				showErrorModal = true;
-				modalTitle = 'No Position Selected';
-				modalMessage = 'Please select a position to sell.';
+				showToastNotification('error', 'Please select a position to sell.');
 				return;
 			}
 
@@ -327,9 +328,7 @@
 			const remainingShares = selectedPosition.remainingShares;
 
 			if (sharesToSell <= 0 || sharesToSell > remainingShares) {
-				showErrorModal = true;
-				modalTitle = 'Invalid Amount';
-				modalMessage = `You can only sell up to ${remainingShares.toFixed(2)} shares.`;
+				showToastNotification('error', `You can only sell up to ${remainingShares.toFixed(2)} shares.`);
 				return;
 			}
 
@@ -369,10 +368,7 @@
 						);
 					}
 
-					// Show success modal
-					modalTitle = 'Sell Successful!';
-					modalMessage = `Transaction: ${txSignature.slice(0, 20)}...`;
-					showSuccessModal = true;
+					showToastNotification('success', `Sell successful! Tx: ${txSignature.slice(0, 20)}...`);
 
 					// Refresh user balance and positions after successful sell
 					if (walletState.publicKey) {
@@ -384,9 +380,7 @@
 					amount = 0;
 				} catch (error: any) {
 					console.error('Sell failed:', error);
-					showErrorModal = true;
-					modalTitle = 'Sell Failed';
-					modalMessage = error.message || 'Unknown error occurred';
+					showToastNotification('error', error.message || 'Sell failed');
 				} finally {
 					trading = false;
 				}
@@ -409,8 +403,6 @@
 
 	function closeModal() {
 		showConfirmModal = false;
-		showSuccessModal = false;
-		showErrorModal = false;
 		modalDetails = null;
 	}
 
@@ -767,61 +759,55 @@
 
 <!-- Confirmation Modal -->
 {#if showConfirmModal}
-<div class="modal-overlay" on:click={cancelTrade}>
-	<div class="modal-content" on:click|stopPropagation>
-		<div class="modal-header">
-			<h3>{modalTitle}</h3>
-			<button class="modal-close" on:click={cancelTrade}>×</button>
-		</div>
-		<div class="modal-body">
-			{#if modalDetails}
-			<div class="trade-summary">
-				<div class="summary-row">
-					<span class="summary-label">Market:</span>
-					<span class="summary-value-text">{modalDetails.market}</span>
-				</div>
-				<div class="summary-row">
-					<span class="summary-label">Action:</span>
-					<span class="summary-value">{modalDetails.action}</span>
-				</div>
-				<div class="summary-row">
-					<span class="summary-label">Amount:</span>
-					<span class="summary-value">{modalDetails.amount}</span>
-				</div>
-				<div class="summary-row">
-					<span class="summary-label">Price:</span>
-					<span class="summary-value">{modalDetails.price}</span>
-				</div>
-				<div class="summary-row">
-					<span class="summary-label">Shares:</span>
-					<span class="summary-value">{modalDetails.shares}</span>
-				</div>
-				<div class="summary-row highlight">
-					<span class="summary-label">Potential Win:</span>
-					<span class="summary-value">{modalDetails.potentialWin}</span>
-				</div>
-				{#if modalDetails.stopLoss || modalDetails.takeProfit}
-				<div class="summary-divider"></div>
-				<div class="summary-section-title">Automated Exit Conditions</div>
-				{/if}
-				{#if modalDetails.stopLoss}
-				<div class="summary-row sltp-row sl-row">
-					<span class="summary-label">Stop Loss:</span>
-					<span class="summary-value">{modalDetails.stopLoss}</span>
-				</div>
-				{/if}
-				{#if modalDetails.takeProfit}
-				<div class="summary-row sltp-row tp-row">
-					<span class="summary-label">Take Profit:</span>
-					<span class="summary-value">{modalDetails.takeProfit}</span>
-				</div>
-				{/if}
+<div class="pm-overlay" on:click={cancelTrade} on:keydown={(e) => e.key === 'Escape' && cancelTrade()} role="button" tabindex="0">
+	<div class="pm-modal" on:click|stopPropagation on:keydown|stopPropagation role="dialog" tabindex="-1">
+		<div class="pm-dot pending"></div>
+		<h3 class="pm-title">{modalTitle}</h3>
+		{#if modalDetails}
+		<div class="pm-details">
+			<div class="pm-row">
+				<span class="pm-label">Market</span>
+				<span class="pm-value" style="max-width: 200px; text-align: right;">{modalDetails.market}</span>
+			</div>
+			<div class="pm-row">
+				<span class="pm-label">Action</span>
+				<span class="pm-value">{modalDetails.action}</span>
+			</div>
+			<div class="pm-row">
+				<span class="pm-label">Amount</span>
+				<span class="pm-value">{modalDetails.amount}</span>
+			</div>
+			<div class="pm-row">
+				<span class="pm-label">Price</span>
+				<span class="pm-value">{modalDetails.price}</span>
+			</div>
+			<div class="pm-row">
+				<span class="pm-label">Shares</span>
+				<span class="pm-value">{modalDetails.shares}</span>
+			</div>
+			<div class="pm-row highlight">
+				<span class="pm-label">Potential Win</span>
+				<span class="pm-value highlight-value">{modalDetails.potentialWin}</span>
+			</div>
+			{#if modalDetails.stopLoss || modalDetails.takeProfit}
+			{#if modalDetails.stopLoss}
+			<div class="pm-row">
+				<span class="pm-label">Stop Loss</span>
+				<span class="pm-value sl-value">{modalDetails.stopLoss}</span>
 			</div>
 			{/if}
+			{#if modalDetails.takeProfit}
+			<div class="pm-row">
+				<span class="pm-label">Take Profit</span>
+				<span class="pm-value tp-value">{modalDetails.takeProfit}</span>
+			</div>
+			{/if}
+			{/if}
 		</div>
-		<div class="modal-footer">
-			<button class="modal-btn cancel-btn" on:click={cancelTrade}>Cancel</button>
-			<button class="modal-btn confirm-btn" on:click={confirmTrade} disabled={trading}>
+		{/if}
+		<div class="pm-actions">
+			<button class="pm-btn secondary" on:click={cancelTrade}>Cancel</button>
+			<button class="pm-btn primary" on:click={confirmTrade} disabled={trading}>
 				{trading ? 'Processing...' : 'Confirm Trade'}
 			</button>
 		</div>
@@ -829,38 +815,28 @@
 </div>
 {/if}
 
-<!-- Success Modal -->
-{#if showSuccessModal}
-<div class="modal-overlay" on:click={closeModal}>
-	<div class="modal-content success-modal" on:click|stopPropagation>
-		<div class="modal-header">
-			<h3>✓ {modalTitle}</h3>
-			<button class="modal-close" on:click={closeModal}>×</button>
-		</div>
-		<div class="modal-body">
-			<p class="modal-message">{modalMessage}</p>
-		</div>
-		<div class="modal-footer">
-			<button class="modal-btn confirm-btn" on:click={closeModal}>Close</button>
-		</div>
+<!-- Toast Notification -->
+{#if showToast}
+<div class="toast {toastType}">
+	<div class="toast-header">
+		<span class="toast-icon">{toastType === 'success' ? '✓' : '✕'}</span>
+		<span class="toast-title">{toastType === 'success' ? 'ORDER EXECUTED' : 'ERROR'}</span>
+		<button class="toast-close" on:click={() => showToast = false} aria-label="Close">&times;</button>
 	</div>
+	<p class="toast-msg">{toastMessage}</p>
 </div>
 {/if}
 
-<!-- Error Modal -->
-{#if showErrorModal}
-<div class="modal-overlay" on:click={closeModal}>
-	<div class="modal-content error-modal" on:click|stopPropagation>
-		<div class="modal-header">
-			<h3>⚠ {modalTitle}</h3>
-			<button class="modal-close" on:click={closeModal}>×</button>
-		</div>
-		<div class="modal-body">
-			<p class="modal-message">{modalMessage}</p>
-		</div>
-		<div class="modal-footer">
-			<button class="modal-btn confirm-btn" on:click={closeModal}>Close</button>
-		</div>
+<!-- Session Required Modal -->
+{#if showSessionRequiredModal}
+<div class="pm-overlay" on:keydown={(e) => e.key === 'Escape' && e.preventDefault()} role="dialog" tabindex="0">
+	<div class="pm-modal" on:click|stopPropagation on:keydown|stopPropagation role="dialog" tabindex="-1">
+		<div class="pm-dot pending"></div>
+		<h3 class="pm-title">Session Required</h3>
+		<p class="pm-desc">
+			You need an active session to trade. Enable one-click trading from the session button in the navbar to sign once and trade instantly.
+		</p>
+		<button class="pm-btn primary" on:click={() => showSessionRequiredModal = false}>Got it</button>
 	</div>
 </div>
 {/if}
@@ -1521,177 +1497,197 @@
 	}
 
 	/* Modal Styles */
-	.modal-overlay {
+	/* Polymock Modal System */
+	.pm-overlay {
 		position: fixed;
 		top: 0;
 		left: 0;
 		width: 100%;
 		height: 100%;
-		background: rgba(0, 0, 0, 0.85);
+		background: rgba(0, 0, 0, 0.75);
+		backdrop-filter: blur(6px);
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		z-index: 1000;
-		animation: fadeIn 0.2s ease-out;
+		z-index: 1001;
+		animation: pmFadeIn 0.2s ease-out;
 	}
 
-	@keyframes fadeIn {
+	@keyframes pmFadeIn {
 		from { opacity: 0; }
 		to { opacity: 1; }
 	}
 
-	.modal-content {
-		background: #000000;
-		border: 1px solid #404040;
-		border-radius: 12px;
-		min-width: 400px;
-		max-width: 500px;
-		animation: slideUp 0.3s ease-out;
+	.pm-modal {
+		background: #0a0a0a;
+		border: 1px solid #2a2a2a;
+		border-radius: 20px;
+		padding: 36px 32px;
+		max-width: 420px;
+		width: 90vw;
+		text-align: center;
+		animation: pmSlideUp 0.3s ease-out;
 	}
 
-	@keyframes slideUp {
-		from {
-			transform: translateY(20px);
-			opacity: 0;
-		}
-		to {
-			transform: translateY(0);
-			opacity: 1;
-		}
+	@keyframes pmSlideUp {
+		from { opacity: 0; transform: translateY(20px); }
+		to { opacity: 1; transform: translateY(0); }
 	}
 
-	.modal-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 20px;
-		border-bottom: 1px solid #404040;
+	.pm-dot {
+		width: 14px;
+		height: 14px;
+		border-radius: 50%;
+		margin: 0 auto 20px auto;
 	}
 
-	.modal-header h3 {
-		margin: 0;
-		font-size: 20px;
-		font-weight: 600;
-		color: white;
+	.pm-dot.pending {
+		background: #F97316;
+		box-shadow: 0 0 16px rgba(249, 115, 22, 0.4);
+		animation: pmPulse 2s ease-in-out infinite;
 	}
 
-	.success-modal .modal-header h3 {
-		color: #00D68F;
+	.pm-dot.success {
+		background: #10b981;
+		box-shadow: 0 0 16px rgba(16, 185, 129, 0.5);
+		animation: pmPulse 2s ease-in-out infinite;
 	}
 
-	.error-modal .modal-header h3 {
-		color: #FF6B6B;
+	.pm-dot.error {
+		background: #ef4444;
+		box-shadow: 0 0 16px rgba(239, 68, 68, 0.5);
+		animation: pmPulse 2s ease-in-out infinite;
 	}
 
-	.modal-close {
-		background: none;
-		border: none;
-		color: #8B92AB;
-		font-size: 28px;
-		cursor: pointer;
-		padding: 0;
-		width: 32px;
-		height: 32px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		transition: color 0.2s;
+	@keyframes pmPulse {
+		0%, 100% { opacity: 1; }
+		50% { opacity: 0.4; }
 	}
 
-	.modal-close:hover {
-		color: white;
+	.pm-title {
+		color: #ffffff;
+		font-size: 22px;
+		font-weight: 700;
+		margin: 0 0 12px 0;
+		letter-spacing: -0.5px;
 	}
 
-	.modal-body {
-		padding: 24px 20px;
-	}
+	.pm-title.success-title { color: #10b981; }
+	.pm-title.error-title { color: #ef4444; }
 
-	.trade-summary {
-		display: flex;
-		flex-direction: column;
-		gap: 12px;
-	}
-
-	.summary-row {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 12px;
-		background: #000000;
-		border-radius: 8px;
-	}
-
-	.summary-row.highlight {
-		background: rgba(249, 115, 22, 0.1);
-		border: 1px solid #F97316;
-	}
-
-	.summary-label {
-		color: #8B92AB;
-		font-size: 14px;
-	}
-
-	.summary-value {
-		color: white;
-		font-weight: 600;
-		font-size: 16px;
-	}
-
-	.summary-value-text {
-		color: white;
-		font-weight: 600;
-		font-size: 14px;
-		max-width: 250px;
-		text-align: right;
-		line-height: 1.4;
-	}
-
-	.modal-message {
-		color: #E8E8E8;
+	.pm-desc {
+		color: #8b92ab;
 		font-size: 14px;
 		line-height: 1.6;
-		margin: 0;
+		margin: 0 0 24px 0;
 	}
 
-	.modal-footer {
+	.pm-details {
+		background: rgba(255, 255, 255, 0.03);
+		border: 1px solid #1a1a1a;
+		border-radius: 12px;
+		padding: 16px;
+		margin-bottom: 24px;
+		text-align: left;
+	}
+
+	.pm-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 6px 0;
+	}
+
+	.pm-row + .pm-row {
+		border-top: 1px solid #1a1a1a;
+		margin-top: 6px;
+		padding-top: 12px;
+	}
+
+	.pm-row.highlight {
+		padding: 10px;
+		margin: 6px -8px 0;
+		background: rgba(249, 115, 22, 0.08);
+		border: 1px solid rgba(249, 115, 22, 0.25);
+		border-radius: 8px;
+	}
+
+	.pm-label {
+		color: #666;
+		font-size: 13px;
+	}
+
+	.pm-value {
+		color: #ccc;
+		font-size: 13px;
+		font-weight: 600;
+	}
+
+	.pm-value.highlight-value { color: #F97316; }
+	.pm-value.sl-value { color: #ef4444; }
+	.pm-value.tp-value { color: #10b981; }
+
+	.pm-actions {
 		display: flex;
 		gap: 12px;
-		padding: 20px;
-		border-top: 1px solid #404040;
-		justify-content: flex-end;
 	}
 
-	.modal-btn {
-		padding: 10px 20px;
-		border-radius: 8px;
-		font-size: 14px;
-		font-weight: 600;
+	.pm-btn {
+		flex: 1;
+		padding: 14px;
+		border: none;
+		border-radius: 12px;
+		font-size: 15px;
+		font-weight: 700;
 		cursor: pointer;
 		transition: all 0.2s;
-		border: none;
+		letter-spacing: -0.3px;
 	}
 
-	.cancel-btn {
-		background: #404040;
-		color: #E8E8E8;
-	}
-
-	.cancel-btn:hover {
-		background: #3A3F55;
-	}
-
-	.confirm-btn {
+	.pm-btn.primary {
 		background: #F97316;
-		color: white;
+		color: #000;
+		width: 100%;
 	}
 
-	.confirm-btn:hover:not(:disabled) {
+	.pm-btn.primary:hover:not(:disabled) {
 		background: #ea580c;
 	}
 
-	.confirm-btn:disabled {
-		opacity: 0.6;
+	.pm-btn.primary:disabled {
+		opacity: 0.7;
 		cursor: not-allowed;
+	}
+
+	.pm-btn.secondary {
+		background: transparent;
+		color: #8b92ab;
+		border: 1px solid #2a2a2a;
+	}
+
+	.pm-btn.secondary:hover {
+		border-color: #444;
+		color: #ccc;
+	}
+
+	.pm-btn.success-btn {
+		background: transparent;
+		color: #10b981;
+		border: 1px solid #10b981;
+	}
+
+	.pm-btn.success-btn:hover {
+		background: rgba(16, 185, 129, 0.1);
+	}
+
+	.pm-btn.error-btn {
+		background: transparent;
+		color: #ef4444;
+		border: 1px solid #ef4444;
+	}
+
+	.pm-btn.error-btn:hover {
+		background: rgba(239, 68, 68, 0.1);
 	}
 
 	/* Advanced Settings (SL/TP) Styles */
@@ -1919,5 +1915,114 @@
 
 	.tp-row .summary-value {
 		color: #00D084;
+	}
+
+	/* Toast Notification */
+	.toast {
+		position: fixed;
+		top: 16px;
+		right: 16px;
+		z-index: 10000;
+		width: 320px;
+		background: #1a1a1a;
+		border: 1px solid #333;
+		border-radius: 4px;
+		padding: 12px 14px;
+		animation: toast-in 0.25s ease-out forwards;
+	}
+
+	.toast.success {
+		border-left: 3px solid #00D084;
+	}
+
+	.toast.error {
+		border-left: 3px solid #FF4757;
+	}
+
+	.toast-header {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 6px;
+	}
+
+	.toast-icon {
+		font-size: 14px;
+		font-weight: 700;
+		line-height: 1;
+	}
+
+	.toast.success .toast-icon {
+		color: #00D084;
+	}
+
+	.toast.error .toast-icon {
+		color: #FF4757;
+	}
+
+	.toast-title {
+		font-size: 13px;
+		font-weight: 700;
+		letter-spacing: 0.03em;
+	}
+
+	.toast.success .toast-title {
+		color: #00D084;
+	}
+
+	.toast.error .toast-title {
+		color: #FF4757;
+	}
+
+	.toast-close {
+		margin-left: auto;
+		background: none;
+		border: none;
+		color: #666;
+		font-size: 18px;
+		line-height: 1;
+		cursor: pointer;
+		padding: 0 2px;
+	}
+
+	.toast-close:hover {
+		color: #fff;
+	}
+
+	.toast-msg {
+		font-size: 12px;
+		font-weight: 400;
+		color: #ccc;
+		line-height: 1.4;
+		margin: 0;
+		padding-left: 22px;
+	}
+
+	@keyframes toast-in {
+		from {
+			opacity: 0;
+			transform: translateX(20px);
+		}
+		to {
+			opacity: 1;
+			transform: translateX(0);
+		}
+	}
+
+	:global(.light-mode) .toast {
+		background: #fff;
+		border-color: #e0e0e0;
+	}
+
+	:global(.light-mode) .toast-close {
+		color: #999;
+	}
+
+	:global(.light-mode) .toast-close:hover {
+		color: #333;
+	}
+
+	:global(.light-mode) .toast-msg {
+		color: #555;
 	}
 </style>

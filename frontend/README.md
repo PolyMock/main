@@ -4,7 +4,7 @@ A paper trading platform for Polymarket prediction markets, built with SvelteKit
 
 ## Overview
 
-PolyMock is a demo trading platform that allows users to explore and simulate trading on Polymarket prediction markets. It features real-time market data, live news feeds, and SOL price tracking from Pyth Network.
+PolyMock is a demo trading platform that allows users to explore and simulate trading on Polymarket prediction markets. It features real-time market data, live news feeds,
 
 ## Features
 

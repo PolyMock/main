@@ -1,8 +1,20 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import WalletButton from '$lib/wallet/WalletButton.svelte';
-	import { walletStore } from '$lib/wallet/stores';
+	import { walletStore, setWalletAdapter, updateWalletConnection, initializeUserAccountIfNeeded } from '$lib/wallet/stores';
 	import { authStore, loginWithGoogle } from '$lib/auth/auth-store';
+	import { sessionKeyManager } from '$lib/solana/session-keys';
+	import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
+
+	declare global {
+		interface Window {
+			phantom?: { solana?: any };
+			solana?: any;
+		}
+	}
+
+	const WALLET_STORAGE_KEY = 'polymock_connected_wallet';
 
 	let walletState = $walletStore;
 	let initializing = false;
@@ -14,10 +26,137 @@
 	let settingsButtonElement: HTMLElement;
 	let profileButtonElement: HTMLElement;
 	let connectButtonElement: HTMLElement;
+	let sessionActive = false;
+	let sessionTimeRemaining = '';
+	let showSessionPrompt = false;
+	let showSessionActiveNotice = false;
+	let sessionLoading = false;
+	let showSessionDropdown = false;
+	let sessionBadgeElement: HTMLElement;
 
-	// Subscribe to wallet store
 	walletStore.subscribe(value => {
 		walletState = value;
+		checkSessionStatus();
+	});
+
+	function checkSessionStatus() {
+		sessionActive = sessionKeyManager.isSessionActive();
+		if (sessionActive) {
+			const remaining = sessionKeyManager.getSessionTimeRemaining();
+			const hours = Math.floor(remaining / 3600);
+			const mins = Math.floor((remaining % 3600) / 60);
+			sessionTimeRemaining = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+		}
+	}
+
+	function showSessionPopup() {
+		checkSessionStatus();
+		if (sessionActive) {
+			showSessionActiveNotice = true;
+		} else {
+			showSessionPrompt = true;
+		}
+	}
+
+	async function enableSession() {
+		if (!walletState.connected || !walletState.adapter) return;
+		sessionLoading = true;
+		try {
+			await sessionKeyManager.createSession(walletState.adapter);
+			sessionActive = true;
+			checkSessionStatus();
+			showSessionPrompt = false;
+		} catch (error: any) {
+			console.error('Session creation failed:', error);
+			alert(`Failed to enable session: ${error?.message || 'Unknown error'}`);
+		} finally {
+			sessionLoading = false;
+		}
+	}
+
+	async function disconnectSession() {
+		showSessionDropdown = false;
+		try {
+			if (walletState.adapter) {
+				await sessionKeyManager.revokeSession(walletState.adapter);
+			} else {
+				sessionKeyManager.clearSession();
+			}
+			sessionActive = false;
+			checkSessionStatus();
+		} catch (error: any) {
+			console.error('Session revoke failed:', error);
+			sessionKeyManager.clearSession();
+			sessionActive = false;
+		}
+	}
+
+	function toggleSessionDropdown() {
+		showSessionDropdown = !showSessionDropdown;
+	}
+
+	function createPhantomWrapper(provider: any, publicKey: any) {
+		return {
+			publicKey,
+			signTransaction: provider.signTransaction.bind(provider),
+			signAllTransactions: provider.signAllTransactions.bind(provider),
+			signMessage: provider.signMessage?.bind(provider),
+			connected: true,
+			disconnect: async () => {
+				await provider.disconnect();
+				localStorage.removeItem(WALLET_STORAGE_KEY);
+				setWalletAdapter(null);
+				await updateWalletConnection();
+			},
+			name: 'Phantom'
+		};
+	}
+
+	async function tryAutoReconnect() {
+		const savedWallet = localStorage.getItem(WALLET_STORAGE_KEY);
+		if (!savedWallet) return;
+
+		await new Promise(resolve => setTimeout(resolve, 600));
+
+		if (savedWallet === 'Phantom') {
+			const provider = window.phantom?.solana || window.solana;
+			if (provider && provider.isPhantom) {
+				try {
+					const resp = await provider.connect({ onlyIfTrusted: true });
+					const publicKey = resp.publicKey;
+					if (!publicKey) return;
+
+					const directWallet = createPhantomWrapper(provider, publicKey);
+					setWalletAdapter(directWallet as any);
+					await updateWalletConnection();
+					await initializeUserAccountIfNeeded(directWallet);
+					showSessionPopup();
+				} catch {
+					localStorage.removeItem(WALLET_STORAGE_KEY);
+				}
+			}
+		} else if (savedWallet === 'Solflare') {
+			try {
+				const adapter = new SolflareWalletAdapter();
+				await adapter.connect();
+				if (adapter.connected && adapter.publicKey) {
+					setWalletAdapter(adapter);
+					await updateWalletConnection();
+					await initializeUserAccountIfNeeded(adapter);
+					showSessionPopup();
+				}
+			} catch {
+				localStorage.removeItem(WALLET_STORAGE_KEY);
+			}
+		}
+	}
+
+	onMount(() => {
+		checkSessionStatus();
+		setInterval(() => {
+			if (sessionActive) checkSessionStatus();
+		}, 30000);
+		tryAutoReconnect();
 	});
 
 	async function handleInitialize() {
@@ -84,6 +223,9 @@
 		if (!target.closest('.connect-dropdown-container')) {
 			showConnectDropdown = false;
 		}
+		if (!target.closest('.session-dropdown-container')) {
+			showSessionDropdown = false;
+		}
 	}
 
 	function toggleSettingsDropdown() {
@@ -138,7 +280,6 @@
 	<div class="nav-links" class:mobile-open={showMobileMenu}>
 		<a href="/" class="nav-link" class:active={currentPath === '/'} on:click={closeMobileMenu}>TERMINAL</a>
 		<a href="/news" class="nav-link" class:active={currentPath === '/news'} on:click={closeMobileMenu}>NEWS</a>
-		<a href="/competition" class="nav-link" class:active={currentPath === '/competition'} on:click={closeMobileMenu}>COMPETITION</a>
 		<a href="/dashboard" class="nav-link" class:active={currentPath === '/dashboard'} on:click={closeMobileMenu}>DASHBOARD</a>
 		<a href="/backtesting?tab=summary" class="nav-link" class:active={currentPath === '/backtesting' && (!$page.url.searchParams.get('tab') || $page.url.searchParams.get('tab') === 'summary')} on:click={closeMobileMenu}>PERFORMANCE</a>
 		<a href="/backtesting?tab=strategy" class="nav-link" class:active={currentPath === '/backtesting' && $page.url.searchParams.get('tab') === 'strategy'} on:click={closeMobileMenu}>BACKTESTING</a>
@@ -146,19 +287,21 @@
 	</div>
 
 	<div class="navbar-right">
-		<!-- Social Links -->
-		<div class="social-links">
-			<a href="https://x.com/polymockxyz" target="_blank" rel="noopener noreferrer" class="social-link" title="Follow us on X">
-				<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-					<path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
-				</svg>
-			</a>
-			<a href="https://t.me/+nxDZ0dMya1NhMDlk" target="_blank" rel="noopener noreferrer" class="social-link" title="Join us on Telegram">
-				<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-					<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/>
-				</svg>
-			</a>
-		</div>
+		<!-- Social Links - hidden when wallet connected to save space -->
+		{#if !walletState.connected}
+			<div class="social-links">
+				<a href="https://x.com/polymockxyz" target="_blank" rel="noopener noreferrer" class="social-link" title="Follow us on X">
+					<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+						<path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+					</svg>
+				</a>
+				<a href="https://t.me/+nxDZ0dMya1NhMDlk" target="_blank" rel="noopener noreferrer" class="social-link" title="Join us on Telegram">
+					<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+						<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/>
+					</svg>
+				</a>
+			</div>
+		{/if}
 
 		{#if walletState.connected}
 			{#if !walletState.userAccountInitialized && !walletState.loading}
@@ -171,6 +314,41 @@
 				<div class="balance-display">
 					<span class="balance-label">Balance:</span>
 					<span class="balance-amount">${walletState.usdcBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+				</div>
+				<div class="session-dropdown-container">
+					{#if sessionActive}
+						<button class="session-btn active" on:click={toggleSessionDropdown} bind:this={sessionBadgeElement}>
+							<span class="session-btn-dot active"></span>
+							<span class="session-btn-label">Session Active</span>
+							<svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+								<path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+							</svg>
+						</button>
+
+						{#if showSessionDropdown && sessionBadgeElement}
+							<div class="session-dropdown" style="top: {sessionBadgeElement.getBoundingClientRect().bottom + 8}px; right: {window.innerWidth - sessionBadgeElement.getBoundingClientRect().right}px;">
+								<div class="session-dropdown-header">
+									<span class="session-dropdown-dot"></span>
+									<div class="session-dropdown-info">
+										<div class="session-dropdown-title">One-Click Trading</div>
+										<div class="session-dropdown-time">{sessionTimeRemaining} remaining</div>
+									</div>
+								</div>
+								<div class="session-dropdown-divider"></div>
+								<button class="session-dropdown-item disconnect" on:click={disconnectSession}>
+									<svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+										<path d="M6 14H3C2.44772 14 2 13.5523 2 13V3C2 2.44772 2.44772 2 3 2H6M11 11L14 8M14 8L11 5M14 8H6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+									</svg>
+									Disconnect Session
+								</button>
+							</div>
+						{/if}
+					{:else}
+						<button class="session-btn inactive" on:click={showSessionPopup}>
+							<span class="session-btn-dot inactive"></span>
+							<span class="session-btn-label">No Session</span>
+						</button>
+					{/if}
 				</div>
 			{/if}
 
@@ -289,7 +467,7 @@
 								<div class="connect-option-subtitle">Sign in with Google</div>
 							</div>
 						</button>
-						<WalletButton isDropdownMode={true} onClose={() => showConnectDropdown = false} />
+						<WalletButton isDropdownMode={true} onClose={() => showConnectDropdown = false} onConnected={showSessionPopup} />
 					</div>
 				{/if}
 			</div>
@@ -297,6 +475,55 @@
 
 	</div>
 </div>
+
+<!-- Session active notice popup -->
+{#if showSessionActiveNotice}
+	<div class="session-overlay" on:click={() => showSessionActiveNotice = false} on:keydown={(e) => e.key === 'Escape' && (showSessionActiveNotice = false)} role="button" tabindex="0">
+		<div class="session-modal" on:click|stopPropagation on:keydown|stopPropagation role="dialog" tabindex="-1">
+			<div class="session-status-dot active"></div>
+			<h3 class="session-title active-title">One-Click Trading Active</h3>
+			<p class="session-desc">
+				Your session key is active. Trades execute instantly without wallet popups.
+			</p>
+			<div class="session-time-badge">{sessionTimeRemaining} remaining</div>
+			<button class="session-primary-btn active-btn" on:click={() => showSessionActiveNotice = false}>Got it</button>
+		</div>
+	</div>
+{/if}
+
+<!-- Session delegation prompt (mandatory — no skip) -->
+{#if showSessionPrompt}
+	<div class="session-overlay" on:keydown={(e) => e.key === 'Escape' && e.preventDefault()} role="dialog" tabindex="0">
+		<div class="session-modal" on:click|stopPropagation on:keydown|stopPropagation role="dialog" tabindex="-1">
+			<div class="session-status-dot pending"></div>
+			<h3 class="session-title">Enable One-Click Trading</h3>
+			<p class="session-desc">
+				Sign once to delegate trading to a temporary session key. All trades will execute instantly without wallet popups.
+			</p>
+			<div class="session-details">
+				<div class="session-detail-row">
+					<span class="detail-label">Duration</span>
+					<span class="detail-value">24 hours</span>
+				</div>
+				<div class="session-detail-row">
+					<span class="detail-label">Session fee</span>
+					<span class="detail-value">0.05 SOL</span>
+				</div>
+				<div class="session-detail-row">
+					<span class="detail-label">Revocable</span>
+					<span class="detail-value">Anytime</span>
+				</div>
+			</div>
+			<button class="session-primary-btn enable-btn" on:click={enableSession} disabled={sessionLoading}>
+				{#if sessionLoading}
+					Signing...
+				{:else}
+					Enable One-Click Trading
+				{/if}
+			</button>
+		</div>
+	</div>
+{/if}
 
 <style>
 	.navbar {
@@ -365,9 +592,16 @@
 
 	.nav-links {
 		display: flex;
-		gap: 8px;
+		gap: 4px;
 		flex-shrink: 1;
 		min-width: 0;
+		overflow-x: auto;
+		overflow-y: hidden;
+		scrollbar-width: none;
+	}
+
+	.nav-links::-webkit-scrollbar {
+		display: none;
 	}
 
 	.nav-link {
@@ -397,7 +631,7 @@
 	.navbar-right {
 		display: flex;
 		align-items: center;
-		gap: 12px;
+		gap: 6px;
 		margin-left: auto;
 		flex-shrink: 0;
 	}
@@ -445,15 +679,15 @@
 	}
 
 	.initialize-btn {
-		padding: 8px 16px;
+		padding: 5px 12px;
 		background: linear-gradient(135deg, #F97316 0%, #ea580c 100%);
 		color: white;
 		border: none;
 		font-weight: 600;
-		font-size: 13px;
+		font-size: 12px;
 		cursor: pointer;
 		font-family: Inter, sans-serif;
-		border-radius: 8px;
+		border-radius: 6px;
 		transition: all 200ms ease-out;
 		white-space: nowrap;
 		flex-shrink: 0;
@@ -486,15 +720,320 @@
 		50% { opacity: 0.6; }
 	}
 
+	.session-dropdown-container {
+		position: relative;
+		flex-shrink: 0;
+	}
+
+	.session-btn {
+		display: flex;
+		align-items: center;
+		gap: 5px;
+		padding: 5px 10px;
+		min-height: 32px;
+		box-sizing: border-box;
+		border-radius: 6px;
+		font-family: Inter, sans-serif;
+		font-size: 11px;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 200ms ease-out;
+		white-space: nowrap;
+	}
+
+	.session-btn.active {
+		background: #000000;
+		border: 1px solid #10b981;
+		color: #10b981;
+	}
+
+	.session-btn.active:hover {
+		background: rgba(16, 185, 129, 0.08);
+	}
+
+	.session-btn.inactive {
+		background: #000000;
+		border: 1px solid #ef4444;
+		color: #ef4444;
+	}
+
+	.session-btn.inactive:hover {
+		background: rgba(239, 68, 68, 0.08);
+	}
+
+	.session-btn-dot {
+		display: inline-block;
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		flex-shrink: 0;
+		animation: badgePulse 2s ease-in-out infinite;
+	}
+
+	.session-btn-dot.active {
+		background: #10b981;
+	}
+
+	.session-btn-dot.inactive {
+		background: #ef4444;
+	}
+
+	.session-btn-label {
+		line-height: 1;
+	}
+
+	@keyframes badgePulse {
+		0%, 100% { opacity: 1; }
+		50% { opacity: 0.4; }
+	}
+
+	.session-dropdown {
+		position: fixed;
+		min-width: 240px;
+		background: #000000;
+		border: 1px solid #404040;
+		border-radius: 12px;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+		z-index: 1000;
+		animation: slideDown 0.2s ease-out;
+		overflow: hidden;
+	}
+
+	.session-dropdown-header {
+		padding: 14px 16px;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+
+	.session-dropdown-dot {
+		width: 10px;
+		height: 10px;
+		border-radius: 50%;
+		background: #10b981;
+		box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+		flex-shrink: 0;
+	}
+
+	.session-dropdown-info {
+		flex: 1;
+	}
+
+	.session-dropdown-title {
+		font-size: 13px;
+		font-weight: 600;
+		color: #10b981;
+		margin-bottom: 2px;
+	}
+
+	.session-dropdown-time {
+		font-size: 11px;
+		color: #8B92AB;
+	}
+
+	.session-dropdown-divider {
+		height: 1px;
+		background: #2A2F45;
+		margin: 0;
+	}
+
+	.session-dropdown-item {
+		width: 100%;
+		padding: 12px 16px;
+		background: transparent;
+		border: none;
+		color: #E8E8E8;
+		font-family: Inter, sans-serif;
+		font-size: 13px;
+		font-weight: 500;
+		cursor: pointer;
+		transition: background 200ms ease-out, color 200ms ease-out;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		text-align: left;
+	}
+
+	.session-dropdown-item.disconnect:hover {
+		background: rgba(239, 68, 68, 0.1);
+		color: #ef4444;
+	}
+
+	.session-dropdown-item svg {
+		flex-shrink: 0;
+	}
+
+	/* Session popup styles */
+	.session-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		width: 100%;
+		height: 100%;
+		background: rgba(0, 0, 0, 0.75);
+		backdrop-filter: blur(6px);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 1001;
+		animation: fadeIn 0.2s ease-out;
+	}
+
+	@keyframes fadeIn {
+		from { opacity: 0; }
+		to { opacity: 1; }
+	}
+
+	.session-modal {
+		background: #0a0a0a;
+		border: 1px solid #2a2a2a;
+		border-radius: 20px;
+		padding: 36px 32px;
+		max-width: 420px;
+		width: 90vw;
+		text-align: center;
+		animation: sessionSlideUp 0.3s ease-out;
+	}
+
+	@keyframes sessionSlideUp {
+		from { opacity: 0; transform: translateY(20px); }
+		to { opacity: 1; transform: translateY(0); }
+	}
+
+	.session-status-dot {
+		width: 14px;
+		height: 14px;
+		border-radius: 50%;
+		margin: 0 auto 20px auto;
+	}
+
+	.session-status-dot.active {
+		background: #10b981;
+		box-shadow: 0 0 16px rgba(16, 185, 129, 0.5);
+		animation: sessionPulse 2s ease-in-out infinite;
+	}
+
+	.session-status-dot.pending {
+		background: #F97316;
+		box-shadow: 0 0 16px rgba(249, 115, 22, 0.4);
+		animation: sessionPulse 2s ease-in-out infinite;
+	}
+
+	@keyframes sessionPulse {
+		0%, 100% { opacity: 1; }
+		50% { opacity: 0.4; }
+	}
+
+	.session-title {
+		color: #ffffff;
+		font-size: 22px;
+		font-weight: 700;
+		margin: 0 0 12px 0;
+		letter-spacing: -0.5px;
+	}
+
+	.session-title.active-title {
+		color: #10b981;
+	}
+
+	.session-desc {
+		color: #8b92ab;
+		font-size: 14px;
+		line-height: 1.6;
+		margin: 0 0 24px 0;
+	}
+
+	.session-time-badge {
+		display: inline-block;
+		padding: 6px 16px;
+		background: rgba(16, 185, 129, 0.1);
+		border: 1px solid rgba(16, 185, 129, 0.3);
+		border-radius: 20px;
+		color: #10b981;
+		font-size: 13px;
+		font-weight: 600;
+		margin-bottom: 24px;
+	}
+
+	.session-details {
+		background: rgba(255, 255, 255, 0.03);
+		border: 1px solid #1a1a1a;
+		border-radius: 12px;
+		padding: 16px;
+		margin-bottom: 24px;
+	}
+
+	.session-detail-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 6px 0;
+	}
+
+	.session-detail-row + .session-detail-row {
+		border-top: 1px solid #1a1a1a;
+		margin-top: 6px;
+		padding-top: 12px;
+	}
+
+	.detail-label {
+		color: #666;
+		font-size: 13px;
+	}
+
+	.detail-value {
+		color: #ccc;
+		font-size: 13px;
+		font-weight: 600;
+	}
+
+	.session-primary-btn {
+		width: 100%;
+		padding: 14px;
+		border: none;
+		border-radius: 12px;
+		font-size: 15px;
+		font-weight: 700;
+		cursor: pointer;
+		transition: all 0.2s;
+		letter-spacing: -0.3px;
+	}
+
+	.session-primary-btn.enable-btn {
+		background: #F97316;
+		color: #000;
+	}
+
+	.session-primary-btn.enable-btn:hover:not(:disabled) {
+		background: #ea580c;
+	}
+
+	.session-primary-btn.enable-btn:disabled {
+		opacity: 0.7;
+		cursor: not-allowed;
+	}
+
+	.session-primary-btn.active-btn {
+		background: transparent;
+		color: #10b981;
+		border: 1px solid #10b981;
+	}
+
+	.session-primary-btn.active-btn:hover {
+		background: rgba(16, 185, 129, 0.1);
+	}
+
 	.balance-display {
 		display: flex;
 		align-items: center;
-		gap: 6px;
-		padding: 8px 14px;
+		gap: 4px;
+		padding: 5px 10px;
+		min-height: 32px;
+		box-sizing: border-box;
 		background: #000000;
 		border: 1px solid #F97316;
-		border-radius: 8px;
-		font-size: 13px;
+		border-radius: 6px;
+		font-size: 12px;
 		font-weight: 600;
 		flex-shrink: 0;
 	}
@@ -508,7 +1047,7 @@
 	.balance-amount {
 		color: #FFFFFF;
 		font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
-		font-size: 14px;
+		font-size: 12px;
 	}
 
 	.connect-account-btn {
@@ -565,8 +1104,8 @@
 	}
 
 	.profile-pic {
-		width: 24px;
-		height: 24px;
+		width: 20px;
+		height: 20px;
 		border-radius: 50%;
 		object-fit: cover;
 	}
@@ -583,18 +1122,18 @@
 	}
 
 	.connect-btn {
-		padding: 8px 16px;
+		padding: 5px 12px;
 		background: #000000;
 		border: 1px solid #404040;
-		border-radius: 8px;
+		border-radius: 6px;
 		color: #FFFFFF;
 		font-family: Inter, sans-serif;
-		font-size: 13px;
+		font-size: 12px;
 		font-weight: 600;
 		cursor: pointer;
 		display: flex;
 		align-items: center;
-		gap: 6px;
+		gap: 5px;
 		white-space: nowrap;
 	}
 
@@ -663,13 +1202,13 @@
 
 	/* Profile Button Styles */
 	.profile-btn {
-		padding: 6px 12px;
+		padding: 4px 10px;
 		background: #000000;
 		border: 1px solid #F97316;
-		border-radius: 8px;
+		border-radius: 6px;
 		color: #FFFFFF;
 		font-family: Inter, sans-serif;
-		font-size: 13px;
+		font-size: 12px;
 		font-weight: 600;
 		cursor: pointer;
 		transition: all 200ms ease-out;
@@ -691,14 +1230,14 @@
 	}
 
 	.profile-pic-placeholder {
-		width: 24px;
-		height: 24px;
+		width: 20px;
+		height: 20px;
 		border-radius: 50%;
 		background: linear-gradient(135deg, #F97316 0%, #ea580c 100%);
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 12px;
+		font-size: 11px;
 		font-weight: 700;
 		color: white;
 		flex-shrink: 0;
@@ -1039,6 +1578,7 @@
 		.balance-display {
 			font-size: 12px;
 		}
+
 	}
 
 	@media (max-width: 768px) {
@@ -1064,6 +1604,10 @@
 		}
 
 		.balance-display {
+			display: none;
+		}
+
+		.session-dropdown-container {
 			display: none;
 		}
 

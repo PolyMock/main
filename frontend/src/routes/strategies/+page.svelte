@@ -4,6 +4,9 @@
 	import { walletStore } from '$lib/wallet/stores';
 	import { authStore } from '$lib/auth/auth-store';
 	import MiniEquityCurveChart from '$lib/components/MiniEquityCurveChart.svelte';
+	import PaperTradeConfirmModal from '$lib/components/PaperTradeConfirmModal.svelte';
+	import { polymarketService } from '$lib/solana/polymarket-service';
+	import { findSimilarActiveMarkets, calculateBatchInfo, executePaperTrading } from '$lib/services/strategy-paper-trading';
 
 	interface User {
 		id: number;
@@ -40,6 +43,15 @@
 	let strategyToDelete: Strategy | null = null;
 	let isDeleting = false;
 	let deleteError = '';
+
+	// Paper trading modal state
+	let showPaperTradeModal = false;
+	let paperTradeStrategy: Strategy | null = null;
+	let matchedMarkets: any[] = [];
+	let signaturesNeeded = 0;
+	let isPaperTrading = false;
+	let paperTradeProgress = { current: 0, total: 0 };
+	let paperTradeError = '';
 
 	// Track previous connection state to detect changes
 	let previousConnected = walletState.connected;
@@ -196,6 +208,84 @@
 		}
 	}
 
+	async function openPaperTradeModal(strategy: Strategy) {
+		paperTradeStrategy = strategy;
+		paperTradeError = '';
+
+		try {
+			// Find similar active markets
+			matchedMarkets = await findSimilarActiveMarkets(strategy, 10);
+
+			if (matchedMarkets.length === 0) {
+				paperTradeError = 'No active markets found matching your strategy criteria.';
+				return;
+			}
+
+			// Calculate batch info
+			const batchInfo = calculateBatchInfo(matchedMarkets.length);
+			signaturesNeeded = batchInfo.signaturesNeeded;
+
+			showPaperTradeModal = true;
+		} catch (err: any) {
+			console.error('Error preparing paper trade:', err);
+			paperTradeError = err.message || 'Failed to prepare paper trading';
+		}
+	}
+
+	function closePaperTradeModal() {
+		showPaperTradeModal = false;
+		paperTradeStrategy = null;
+		matchedMarkets = [];
+		paperTradeError = '';
+	}
+
+	async function confirmPaperTrade() {
+		if (!paperTradeStrategy || !walletState.publicKey) return;
+
+		isPaperTrading = true;
+		paperTradeError = '';
+		showPaperTradeModal = false;
+
+		try {
+			// Initialize program if not already
+			if (!polymarketService['program']) {
+				await polymarketService.initializeProgram(walletState);
+			}
+
+			// Get user account balance
+			const userAccount = await polymarketService.getUserAccount(walletState.publicKey);
+			if (!userAccount) {
+				throw new Error('User account not found. Please initialize your account first.');
+			}
+
+			const balance = userAccount.usdcBalance.toNumber() / 1_000_000;
+
+			// Execute paper trading
+			const result = await executePaperTrading(
+				paperTradeStrategy,
+				matchedMarkets,
+				walletState,
+				balance,
+				(current, total) => {
+					paperTradeProgress = { current, total };
+				}
+			);
+
+			alert(`Paper trading completed!\n\nSuccessful: ${result.success}\nFailed: ${result.failed}\n\nCheck your dashboard to view positions.`);
+
+			// Redirect to dashboard
+			goto('/dashboard');
+
+		} catch (err: any) {
+			console.error('Error executing paper trade:', err);
+			paperTradeError = err.message || 'Failed to execute paper trading';
+			alert(`Paper trading failed: ${paperTradeError}`);
+		} finally {
+			isPaperTrading = false;
+			paperTradeProgress = { current: 0, total: 0 };
+		}
+	}
+
 	function formatDate(dateString: string) {
 		return new Date(dateString).toLocaleDateString('en-US', {
 			year: 'numeric',
@@ -266,6 +356,17 @@
 								<span class="date">{formatDate(strategy.createdAt)}</span>
 							</div>
 							<div class="card-actions" on:click|stopPropagation>
+								<button
+									on:click={() => openPaperTradeModal(strategy)}
+									class="btn-paper-trade"
+									title="Paper Trade This Strategy"
+									disabled={isPaperTrading}
+								>
+									<svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+										<path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+										<path d="M6.271 5.055a.5.5 0 0 1 .52.038l3.5 2.5a.5.5 0 0 1 0 .814l-3.5 2.5A.5.5 0 0 1 6 10.5v-5a.5.5 0 0 1 .271-.445z"/>
+									</svg>
+								</button>
 								<button
 									on:click={() => viewStrategy(strategy.id)}
 									class="btn-view"
@@ -424,6 +525,29 @@
 					{isDeleting ? 'Deleting...' : 'Delete Strategy'}
 				</button>
 			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Paper Trade Confirmation Modal -->
+<PaperTradeConfirmModal
+	bind:show={showPaperTradeModal}
+	strategy={paperTradeStrategy}
+	matchedMarkets={matchedMarkets}
+	signaturesNeeded={signaturesNeeded}
+	totalPositions={matchedMarkets.length}
+	on:close={closePaperTradeModal}
+	on:confirm={confirmPaperTrade}
+/>
+
+<!-- Paper Trading Progress Overlay -->
+{#if isPaperTrading}
+	<div class="progress-overlay">
+		<div class="progress-content">
+			<div class="spinner"></div>
+			<h3>Executing Paper Trades...</h3>
+			<p>Batch {paperTradeProgress.current} of {paperTradeProgress.total}</p>
+			<p class="progress-note">Please approve each transaction in your wallet</p>
 		</div>
 	</div>
 {/if}
@@ -644,6 +768,30 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
+	}
+
+	.btn-paper-trade {
+		padding: 8px;
+		background: transparent;
+		border: 1px solid #00d084;
+		color: #00d084;
+		border-radius: 6px;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: all 0.2s;
+	}
+
+	.btn-paper-trade:hover:not(:disabled) {
+		background: rgba(0, 208, 132, 0.1);
+		border-color: #00e094;
+		color: #00e094;
+	}
+
+	.btn-paper-trade:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 
 	.btn-view:hover {
@@ -963,6 +1111,61 @@
 	.btn-delete-confirm:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
+	}
+
+	.progress-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0.9);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 2000;
+		backdrop-filter: blur(8px);
+	}
+
+	.progress-content {
+		background: #1a1a1a;
+		border: 1px solid #333;
+		border-radius: 16px;
+		padding: 48px;
+		text-align: center;
+		max-width: 400px;
+	}
+
+	.spinner {
+		width: 64px;
+		height: 64px;
+		border: 4px solid #333;
+		border-top-color: #00d084;
+		border-radius: 50%;
+		animation: spin 1s linear infinite;
+		margin: 0 auto 24px auto;
+	}
+
+	@keyframes spin {
+		to { transform: rotate(360deg); }
+	}
+
+	.progress-content h3 {
+		margin: 0 0 12px 0;
+		font-size: 20px;
+		font-weight: 600;
+		color: #fff;
+	}
+
+	.progress-content p {
+		margin: 0 0 8px 0;
+		color: #888;
+		font-size: 14px;
+	}
+
+	.progress-note {
+		color: #00d084 !important;
+		font-weight: 600;
 	}
 
 	@media (max-width: 768px) {

@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
-use bolt_lang::*;
+use session_keys::{SessionError, SessionToken, session_auth_or, Session};
 
-declare_id!("cWcQsqrGLagy6KfjKkFjeNWm651s85b7q2ehKp7zSmL");
+declare_id!("5sfoR6jyPc4dmdQuuAEpMPPV18aJcXLJxBhqiCv69Q3V");
 
 /// User account for Polymarket paper trading
 /// USDC balance for Yes/No predictions
@@ -32,13 +32,18 @@ pub struct PredictionPosition {
     pub status: PositionStatus,
     pub opened_at: i64,
     pub closed_at: i64,
+    pub stop_loss: u64,          // Stop loss price (6 decimals, 0 = disabled)
+    pub take_profit: u64,        // Take profit price (6 decimals, 0 = disabled)
 }
 
 /// Global configuration for the Polymarket paper trading program
 #[account]
+#[derive(InitSpace)]
 pub struct ProgramConfig {
     pub authority: Pubkey,           // Super admin
     pub treasury: Pubkey,            // Wallet that receives the fees
+    #[max_len(1)]
+    pub bot_wallet: Option<Pubkey>,  // Optional whitelisted bot wallet for auto-closing positions
     pub bump: u8,
 }
 
@@ -46,16 +51,31 @@ pub struct ProgramConfig {
 pub mod polymarket_paper {
     use super::*;
 
-    /// Initialize the program configuration 
+    /// Initialize the program configuration
     pub fn initialize_config(ctx: Context<InitializeConfig>, treasury: Pubkey) -> Result<()> {
         let config = &mut ctx.accounts.config;
         config.authority = ctx.accounts.authority.key();
         config.treasury = treasury;
+        config.bot_wallet = None; // No bot wallet initially
         config.bump = ctx.bumps.config;
 
         emit!(ConfigInitialized {
             authority: config.authority,
             treasury: config.treasury,
+            bot_wallet: None,
+        });
+
+        Ok(())
+    }
+
+    /// Update the bot wallet in the config (only callable by authority)
+    pub fn update_bot_wallet(ctx: Context<UpdateConfig>, new_bot_wallet: Pubkey) -> Result<()> {
+        let config = &mut ctx.accounts.config;
+        config.bot_wallet = Some(new_bot_wallet);
+
+        emit!(BotWalletUpdated {
+            authority: config.authority,
+            new_bot_wallet,
         });
 
         Ok(())
@@ -96,11 +116,17 @@ pub mod polymarket_paper {
     }
 
     /// Buy YES shares in a prediction market
+    #[session_auth_or(
+        ctx.accounts.user_account.owner == ctx.accounts.user.key(),
+        SessionError::InvalidToken
+    )]
     pub fn buy_yes(
-        ctx: Context<Trade>, 
+        ctx: Context<Trade>,
         market_id: String,
-        amount_usdc: u64,        // Amount of USDC to spend 
+        amount_usdc: u64,        // Amount of USDC to spend
         price_per_share: u64,    // Price per YES share
+        stop_loss: u64,          // Stop loss price (0 = disabled)
+        take_profit: u64,        // Take profit price (0 = disabled)
     ) -> Result<()> {
         let user_account = &mut ctx.accounts.user_account;
         let position_account = &mut ctx.accounts.position_account;
@@ -144,6 +170,8 @@ pub mod polymarket_paper {
         position_account.status = PositionStatus::Active;
         position_account.opened_at = clock.unix_timestamp;
         position_account.closed_at = 0;
+        position_account.stop_loss = stop_loss;
+        position_account.take_profit = take_profit;
 
         emit!(PredictionMade {
             user: user_account.owner,
@@ -159,11 +187,17 @@ pub mod polymarket_paper {
     }
 
     /// Buy NO shares in a prediction market
+    #[session_auth_or(
+        ctx.accounts.user_account.owner == ctx.accounts.user.key(),
+        SessionError::InvalidToken
+    )]
     pub fn buy_no(
-        ctx: Context<Trade>, 
+        ctx: Context<Trade>,
         market_id: String,
         amount_usdc: u64,        // Amount of USDC to spend
-        price_per_share: u64,    // Price per NO share 
+        price_per_share: u64,    // Price per NO share
+        stop_loss: u64,          // Stop loss price (0 = disabled)
+        take_profit: u64,        // Take profit price (0 = disabled)
     ) -> Result<()> {
         let user_account = &mut ctx.accounts.user_account;
         let position_account = &mut ctx.accounts.position_account;
@@ -207,6 +241,8 @@ pub mod polymarket_paper {
         position_account.status = PositionStatus::Active;
         position_account.opened_at = clock.unix_timestamp;
         position_account.closed_at = 0;
+        position_account.stop_loss = stop_loss;
+        position_account.take_profit = take_profit;
 
         emit!(PredictionMade {
             user: user_account.owner,
@@ -222,6 +258,10 @@ pub mod polymarket_paper {
     }
 
     /// Sell YES shares from an existing position
+    #[session_auth_or(
+        ctx.accounts.user_account.owner == ctx.accounts.user.key(),
+        SessionError::InvalidToken
+    )]
     pub fn sell_yes(
         ctx: Context<SellShares>,
         shares_to_sell: u64,      // Number of shares to sell (6 decimals)
@@ -238,7 +278,7 @@ pub mod polymarket_paper {
 
         // Validate ownership
         require!(
-            position_account.owner == ctx.accounts.user.key(),
+            position_account.owner == user_account.owner,
             ErrorCode::Unauthorized
         );
 
@@ -324,6 +364,10 @@ pub mod polymarket_paper {
     }
 
     /// Sell NO shares from an existing position
+    #[session_auth_or(
+        ctx.accounts.user_account.owner == ctx.accounts.user.key(),
+        SessionError::InvalidToken
+    )]
     pub fn sell_no(
         ctx: Context<SellShares>,
         shares_to_sell: u64,      // Number of shares to sell (6 decimals)
@@ -340,7 +384,7 @@ pub mod polymarket_paper {
 
         // Validate ownership
         require!(
-            position_account.owner == ctx.accounts.user.key(),
+            position_account.owner == user_account.owner,
             ErrorCode::Unauthorized
         );
 
@@ -425,10 +469,81 @@ pub mod polymarket_paper {
         Ok(())
     }
 
-    /// Close a position and realize profit/loss
+    /// Close a position automatically when SL/TP conditions are met (callable only by whitelisted bot)
+    pub fn close_position_auto(
+        ctx: Context<ClosePositionAuto>,
+        current_price: u64,  // Current market price from Polymarket API
+    ) -> Result<()> {
+        let user_account = &mut ctx.accounts.user_account;
+        let position_account = &mut ctx.accounts.position_account;
+        let config = &ctx.accounts.config;
+
+        // Verify caller is the whitelisted bot (if bot_wallet is set)
+        if let Some(bot_wallet) = config.bot_wallet {
+            require!(
+                ctx.accounts.bot.key() == bot_wallet,
+                ErrorCode::UnauthorizedBot
+            );
+        }
+
+        require!(
+            position_account.status == PositionStatus::Active,
+            ErrorCode::PositionNotActive
+        );
+
+        require!(
+            current_price > 0 && current_price <= 1_000_000,
+            ErrorCode::InvalidPrice
+        );
+
+        // Validate SL/TP conditions
+        let sl_triggered = position_account.stop_loss > 0 && current_price <= position_account.stop_loss;
+        let tp_triggered = position_account.take_profit > 0 && current_price >= position_account.take_profit;
+
+        require!(
+            sl_triggered || tp_triggered,
+            ErrorCode::StopLossTakeProfitNotMet
+        );
+
+        // Calculate payout: remaining_shares * current_price
+        let payout = (position_account.remaining_shares as u128)
+            .checked_mul(current_price as u128)
+            .unwrap()
+            .checked_div(1_000_000u128)
+            .unwrap() as u64;
+
+        // Update user balance with payout
+        user_account.usdc_balance = user_account
+            .usdc_balance
+            .checked_add(payout)
+            .unwrap();
+
+        // Close the position
+        let clock = Clock::get()?;
+        position_account.status = PositionStatus::Closed;
+        position_account.closed_at = clock.unix_timestamp;
+
+        emit!(PositionClosedAuto {
+            user: position_account.owner,
+            market_id: position_account.market_id.clone(),
+            position_id: position_account.position_id,
+            close_price: current_price,
+            payout,
+            reason: if sl_triggered { "StopLoss" } else { "TakeProfit" }.to_string(),
+            timestamp: clock.unix_timestamp,
+        });
+
+        Ok(())
+    }
+
+    /// Close a position and realize profit/loss (manual close by user)
+    #[session_auth_or(
+        ctx.accounts.user_account.owner == ctx.accounts.user.key(),
+        SessionError::InvalidToken
+    )]
     pub fn close_position(
         ctx: Context<ClosePosition>,
-        current_price: u64,  // Current market price for the shares 
+        current_price: u64,  // Current market price for the shares
     ) -> Result<()> {
         let user_account = &mut ctx.accounts.user_account;
         let position_account = &mut ctx.accounts.position_account;
@@ -439,7 +554,7 @@ pub mod polymarket_paper {
         );
 
         require!(
-            position_account.owner == ctx.accounts.user.key(),
+            position_account.owner == user_account.owner,
             ErrorCode::Unauthorized
         );
 
@@ -486,7 +601,7 @@ pub struct InitializeConfig<'info> {
     #[account(
         init,
         payer = authority,
-        space = 8 + 32 + 32 + 1, // authority + treasury + bump
+        space = 8 + ProgramConfig::INIT_SPACE,
         seeds = [b"config"],
         bump
     )]
@@ -526,14 +641,13 @@ pub struct InitializeAccount<'info> {
     pub system_program: Program<'info, System>,
 }
 
-#[derive(Accounts)]
+#[derive(Accounts, Session)]
 #[instruction(market_id: String, amount_usdc: u64, price_per_share: u64)]
 pub struct Trade<'info> {
     #[account(
         mut,
-        seeds = [b"user", user.key().as_ref()],
+        seeds = [b"user", user_account.owner.as_ref()],
         bump,
-        constraint = user_account.owner == user.key() @ ErrorCode::Unauthorized
     )]
     pub user_account: Account<'info, UserAccount>,
 
@@ -543,12 +657,15 @@ pub struct Trade<'info> {
         space = 8 + std::mem::size_of::<PredictionPosition>(),
         seeds = [
             b"position",
-            user.key().as_ref(),
+            user_account.owner.as_ref(),
             user_account.total_trades.to_le_bytes().as_ref()
         ],
         bump
     )]
     pub position_account: Account<'info, PredictionPosition>,
+
+    #[session(signer = user, authority = user_account.owner.key())]
+    pub session_token: Option<Account<'info, SessionToken>>,
 
     #[account(mut)]
     pub user: Signer<'info>,
@@ -556,14 +673,13 @@ pub struct Trade<'info> {
     pub system_program: Program<'info, System>,
 }
 
-#[derive(Accounts)]
+#[derive(Accounts, Session)]
 #[instruction(shares_to_sell: u64, current_price: u64)]
 pub struct SellShares<'info> {
     #[account(
         mut,
-        seeds = [b"user", user.key().as_ref()],
+        seeds = [b"user", user_account.owner.as_ref()],
         bump,
-        constraint = user_account.owner == user.key() @ ErrorCode::Unauthorized
     )]
     pub user_account: Account<'info, UserAccount>,
 
@@ -571,23 +687,64 @@ pub struct SellShares<'info> {
         mut,
         seeds = [
             b"position",
-            user.key().as_ref(),
+            user_account.owner.as_ref(),
             position_account.position_id.to_le_bytes().as_ref()
         ],
         bump,
     )]
     pub position_account: Account<'info, PredictionPosition>,
+
+    #[session(signer = user, authority = user_account.owner.key())]
+    pub session_token: Option<Account<'info, SessionToken>>,
+
+    pub user: Signer<'info>,
+}
+
+#[derive(Accounts, Session)]
+pub struct ClosePosition<'info> {
+    #[account(
+        mut,
+        seeds = [b"user", user_account.owner.as_ref()],
+        bump,
+    )]
+    pub user_account: Account<'info, UserAccount>,
+
+    #[account(
+        mut,
+        seeds = [
+            b"position",
+            user_account.owner.as_ref(),
+            position_account.position_id.to_le_bytes().as_ref()
+        ],
+        bump,
+    )]
+    pub position_account: Account<'info, PredictionPosition>,
+
+    #[session(signer = user, authority = user_account.owner.key())]
+    pub session_token: Option<Account<'info, SessionToken>>,
 
     pub user: Signer<'info>,
 }
 
 #[derive(Accounts)]
-pub struct ClosePosition<'info> {
+pub struct UpdateConfig<'info> {
     #[account(
         mut,
-        seeds = [b"user", user.key().as_ref()],
+        seeds = [b"config"],
+        bump = config.bump,
+        constraint = config.authority == authority.key() @ ErrorCode::Unauthorized
+    )]
+    pub config: Account<'info, ProgramConfig>,
+
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct ClosePositionAuto<'info> {
+    #[account(
+        mut,
+        seeds = [b"user", position_account.owner.as_ref()],
         bump,
-        constraint = user_account.owner == user.key() @ ErrorCode::Unauthorized
     )]
     pub user_account: Account<'info, UserAccount>,
 
@@ -595,14 +752,20 @@ pub struct ClosePosition<'info> {
         mut,
         seeds = [
             b"position",
-            user.key().as_ref(),
+            position_account.owner.as_ref(),
             position_account.position_id.to_le_bytes().as_ref()
         ],
         bump,
     )]
     pub position_account: Account<'info, PredictionPosition>,
 
-    pub user: Signer<'info>,
+    #[account(
+        seeds = [b"config"],
+        bump = config.bump,
+    )]
+    pub config: Account<'info, ProgramConfig>,
+
+    pub bot: Signer<'info>,
 }
 
 // ============= ENUMS =============
@@ -629,6 +792,7 @@ pub enum PositionStatus {
 pub struct ConfigInitialized {
     pub authority: Pubkey,
     pub treasury: Pubkey,
+    pub bot_wallet: Option<Pubkey>,
 }
 
 #[event]
@@ -672,6 +836,23 @@ pub struct SharesSold {
     pub timestamp: i64,
 }
 
+#[event]
+pub struct PositionClosedAuto {
+    pub user: Pubkey,
+    pub market_id: String,
+    pub position_id: u64,
+    pub close_price: u64,
+    pub payout: u64,
+    pub reason: String,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct BotWalletUpdated {
+    pub authority: Pubkey,
+    pub new_bot_wallet: Pubkey,
+}
+
 // ============= ERRORS =============
 
 #[error_code]
@@ -696,4 +877,10 @@ pub enum ErrorCode {
 
     #[msg("Wrong prediction type (trying to sell YES when position is NO or vice versa)")]
     WrongPredictionType,
+
+    #[msg("Stop loss or take profit condition not met")]
+    StopLossTakeProfitNotMet,
+
+    #[msg("Unauthorized bot (only whitelisted bot can close positions automatically)")]
+    UnauthorizedBot,
 }

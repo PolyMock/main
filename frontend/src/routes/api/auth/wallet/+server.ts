@@ -21,14 +21,23 @@ export const POST: RequestHandler = async (event) => {
 		// In production, you should verify the signature server-side
 		// using @solana/web3.js to ensure the user owns the wallet
 
-		const db = event.platform?.env?.DB as D1Database;
-		if (!db) {
-			console.error('[POST /api/auth/wallet] Database not available');
-			return json({ error: 'Database not available' }, { status: 500 });
-		}
+		const db = event.platform?.env?.DB as D1Database | undefined;
 
-		// Create or update user with wallet address
-		const user = await upsertWalletUser(db, walletAddress);
+		let user;
+		if (db) {
+			// Production (Cloudflare): persist user in D1
+			user = await upsertWalletUser(db, walletAddress);
+		} else {
+			// Local dev: no database — create a session user in memory so wallet connect works
+			const displayName = `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`;
+			user = {
+				id: 0,
+				solanaAddress: walletAddress,
+				email: null as string | null,
+				name: displayName,
+				picture: null as string | null
+			};
+		}
 
 		console.log('[POST /api/auth/wallet] User created/updated:', user.id, user.solanaAddress);
 

@@ -1,13 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { walletStore, setWalletAdapter, setWalletConnecting, setWalletDisconnecting, updateWalletConnection, initializeUserAccountIfNeeded } from './stores';
-	import {
-		PhantomWalletAdapter,
-		SolflareWalletAdapter
-	} from '@solana/wallet-adapter-wallets';
+	import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
 	import type { Adapter } from '@solana/wallet-adapter-base';
 
-	// Declare window types for wallet extensions
 	declare global {
 		interface Window {
 			phantom?: {
@@ -17,8 +13,11 @@
 		}
 	}
 
+	const WALLET_STORAGE_KEY = 'polymock_connected_wallet';
+
 	export let isDropdownMode = false;
 	export let onClose: (() => void) | undefined = undefined;
+	export let onConnected: (() => void) | undefined = undefined;
 
 	let walletState = $walletStore;
 	let showWalletModal = false;
@@ -28,15 +27,26 @@
 		walletState = value;
 	});
 
+	function createPhantomWrapper(provider: any, publicKey: any) {
+		return {
+			publicKey,
+			signTransaction: provider.signTransaction.bind(provider),
+			signAllTransactions: provider.signAllTransactions.bind(provider),
+			signMessage: provider.signMessage?.bind(provider),
+			connected: true,
+			disconnect: async () => {
+				await provider.disconnect();
+				localStorage.removeItem(WALLET_STORAGE_KEY);
+				setWalletAdapter(null);
+				await updateWalletConnection();
+			},
+			name: 'Phantom'
+		};
+	}
 
 	onMount(() => {
-		// Wait a bit for wallet extensions to load
 		const initWallets = () => {
 			try {
-				// Check if Phantom is available
-				const isPhantomAvailable = typeof window !== 'undefined' &&
-					(window.phantom?.solana?.isPhantom || window.solana?.isPhantom);
-
 				availableWallets = [
 					new PhantomWalletAdapter(),
 					new SolflareWalletAdapter()
@@ -47,13 +57,10 @@
 			}
 		};
 
-		// Try immediately, then retry after a short delay if needed
 		initWallets();
 
-		// Retry after a short delay to catch wallets that load asynchronously
 		setTimeout(() => {
 			if (availableWallets.length === 0 || availableWallets.every(w => w.readyState === 'NotDetected')) {
-				console.log('Retrying wallet initialization...');
 				initWallets();
 			}
 		}, 500);
@@ -61,13 +68,10 @@
 
 	async function selectWallet(wallet: Adapter) {
 		try {
-			console.log('Attempting to connect wallet:', wallet.name, 'Ready state:', wallet.readyState);
-
 			setWalletConnecting(true);
 			showWalletModal = false;
 			if (onClose) onClose();
 
-			// Ensure wallet is ready before connecting
 			if (wallet.readyState === 'NotDetected') {
 				throw new Error(`${wallet.name} is not installed. Please install the wallet extension first.`);
 			}
@@ -76,133 +80,71 @@
 				throw new Error(`Wallet is not ready. Status: ${wallet.readyState}`);
 			}
 
-			// For Phantom, try connecting directly to window.phantom.solana as a workaround
+			// Phantom direct provider connection
 			if (wallet.name === 'Phantom' && typeof window !== 'undefined') {
 				const provider = window.phantom?.solana || window.solana;
 				if (provider && provider.isPhantom) {
-					console.log('Using direct Phantom provider connection');
-					console.log('Provider state:', {
-						isConnected: provider.isConnected,
-						publicKey: provider.publicKey?.toString()
-					});
-
 					try {
-						// Try different connection methods
 						let publicKey = provider.publicKey;
 
 						if (!provider.isConnected || !publicKey) {
-							console.log('Attempting Phantom connection...');
-
-							// Try the standard connect method first
 							try {
-								// Just call connect without any options
 								const resp = await provider.connect();
 								publicKey = resp.publicKey;
-								console.log('Phantom connected successfully:', resp);
 							} catch (connectErr: any) {
-								console.error('Standard connect failed, trying request method:', connectErr);
-
-								// Try using the request method directly as a fallback
 								try {
 									const resp = await provider.request({ method: 'connect' });
 									publicKey = resp.publicKey || provider.publicKey;
-									console.log('Connected via request method:', resp);
-								} catch (requestErr) {
-									console.error('Request method also failed:', requestErr);
-									throw connectErr; // Throw original error
+								} catch {
+									throw connectErr;
 								}
 							}
-						} else {
-							console.log('Phantom already connected');
 						}
 
 						if (!publicKey) {
 							throw new Error('Failed to get public key from Phantom');
 						}
 
-						// Create a wrapper that mimics the adapter interface
-						const directWallet = {
-							publicKey: publicKey,
-							signTransaction: provider.signTransaction.bind(provider),
-							signAllTransactions: provider.signAllTransactions.bind(provider),
-							signMessage: provider.signMessage?.bind(provider),
-							connected: true,
-							disconnect: async () => {
-								await provider.disconnect();
-								setWalletAdapter(null);
-								await updateWalletConnection();
-							},
-							name: 'Phantom'
-						};
+						const directWallet = createPhantomWrapper(provider, publicKey);
+						localStorage.setItem(WALLET_STORAGE_KEY, 'Phantom');
 
 						setWalletAdapter(directWallet as any);
 						await updateWalletConnection();
 
-						// Initialize user account
 						try {
 							await initializeUserAccountIfNeeded(directWallet);
 						} catch (initError) {
 							console.error('Failed to initialize user account:', initError);
-							alert('Wallet connected but failed to initialize on-chain account. You can try again later.');
 						}
 
 						setWalletConnecting(false);
+						onConnected?.();
 						return;
 					} catch (directError: any) {
 						console.error('Direct Phantom connection failed:', directError);
-						console.error('Error details:', directError?.message, directError?.code);
 
-						// If it's error -32603, this is likely a Phantom wallet issue
 						if (directError?.code === -32603 || directError?.message?.includes('32603')) {
 							setWalletConnecting(false);
 							setWalletAdapter(null);
-
-							// Provide helpful instructions
-							const instructions = `Phantom Wallet Error (Code -32603)
-
-This usually means there's an issue with the Phantom wallet extension. Please try these steps:
-
-1. **Unlock your Phantom wallet** - Make sure it's not locked
-2. **Check your network** - Open Phantom and switch to Devnet:
-   • Click the gear icon (Settings)
-   • Go to "Developer Settings"
-   • Enable "Testnet Mode"
-   • Switch to "Devnet"
-3. **Clear permissions**:
-   • Open Phantom settings
-   • Go to "Trusted Apps"
-   • Remove this site if listed, then try connecting again
-4. **Refresh the page** - Sometimes a simple refresh helps
-5. **Last resort**: Close all browser tabs, restart your browser, or reinstall Phantom
-
-Would you like to try again?`;
-
-							if (confirm(instructions)) {
-								// Reload the page to reset everything
-								window.location.reload();
-							}
+							alert('Phantom Wallet Error. Please unlock your wallet, switch to Devnet, and try again.');
 							return;
 						}
-						// Fall through to use adapter for other errors
 					}
 				}
 			}
 
-			// Set up event listeners before connecting
+			// Adapter-based fallback
 			wallet.on('connect', async () => {
-				console.log('Wallet connected event triggered');
 				updateWalletConnection();
-				// Initialize user account on blockchain
 				try {
 					await initializeUserAccountIfNeeded(wallet);
 				} catch (initError) {
 					console.error('Failed to initialize user account:', initError);
-					alert('Wallet connected but failed to initialize on-chain account. You can try again later.');
 				}
 			});
 
 			wallet.on('disconnect', () => {
-				console.log('Wallet disconnected event triggered');
+				localStorage.removeItem(WALLET_STORAGE_KEY);
 				updateWalletConnection();
 			});
 
@@ -212,34 +154,25 @@ Would you like to try again?`;
 				setWalletDisconnecting(false);
 			});
 
-			// Set adapter before connecting
 			setWalletAdapter(wallet);
 
-			// Connect to the wallet with timeout
-			console.log('Calling wallet.connect()...');
 			const connectTimeout = new Promise((_, reject) =>
 				setTimeout(() => reject(new Error('Connection timeout')), 30000)
 			);
 
 			await Promise.race([wallet.connect(), connectTimeout]);
 
-			console.log('Wallet connect completed successfully');
+			localStorage.setItem(WALLET_STORAGE_KEY, wallet.name);
 			updateWalletConnection();
+			onConnected?.();
 		} catch (error: any) {
 			console.error('Failed to connect wallet:', error);
-			console.error('Error type:', error?.constructor?.name);
-			console.error('Error message:', error?.message);
-			console.error('Error stack:', error?.stack);
-
 			setWalletConnecting(false);
 			setWalletAdapter(null);
 
-			// Show user-friendly error message
 			let errorMessage = 'Failed to connect wallet: ';
 			if (error?.message?.includes('not installed')) {
 				errorMessage = error.message;
-			} else if (error?.message?.includes('not ready')) {
-				errorMessage = 'Wallet is not ready. Please try again.';
 			} else if (error?.message?.includes('User rejected') || error?.message?.includes('User denied')) {
 				errorMessage = 'Connection request was cancelled';
 			} else if (error?.message?.includes('timeout')) {
@@ -256,6 +189,7 @@ Would you like to try again?`;
 
 		try {
 			setWalletDisconnecting(true);
+			localStorage.removeItem(WALLET_STORAGE_KEY);
 			await walletState.adapter.disconnect();
 			setWalletAdapter(null);
 			updateWalletConnection();
@@ -280,7 +214,6 @@ Would you like to try again?`;
 </script>
 
 {#if isDropdownMode}
-	<!-- Render as dropdown option -->
 	<button class="connect-option" on:click={openWalletModal} disabled={walletState.connecting}>
 		<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
 			<rect x="2" y="5" width="16" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/>
@@ -295,7 +228,6 @@ Would you like to try again?`;
 		</div>
 	</button>
 {:else}
-	<!-- Render as standalone button -->
 	<div class="wallet-section">
 		{#if walletState.connected && walletState.publicKey}
 			<div class="wallet-info">
@@ -496,12 +428,8 @@ Would you like to try again?`;
 	}
 
 	@keyframes fadeIn {
-		from {
-			opacity: 0;
-		}
-		to {
-			opacity: 1;
-		}
+		from { opacity: 0; }
+		to { opacity: 1; }
 	}
 
 	.wallet-modal {
@@ -520,14 +448,8 @@ Would you like to try again?`;
 	}
 
 	@keyframes slideUp {
-		from {
-			opacity: 0;
-			transform: translateY(20px);
-		}
-		to {
-			opacity: 1;
-			transform: translateY(0);
-		}
+		from { opacity: 0; transform: translateY(20px); }
+		to { opacity: 1; transform: translateY(0); }
 	}
 
 	.wallet-modal-header {
@@ -605,7 +527,6 @@ Would you like to try again?`;
 	.wallet-option:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
-		transform: none;
 	}
 
 	.wallet-option-left {
@@ -616,11 +537,6 @@ Would you like to try again?`;
 	.wallet-name {
 		font-size: 15px;
 		font-weight: bold;
-	}
-
-	.wallet-status {
-		font-size: 10px;
-		color: #666;
 	}
 
 	.wallet-option-right {

@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { walletStore, refreshUserBalance } from '$lib/wallet/stores';
 	import { polymarketService } from '$lib/solana/polymarket-service';
+	import { sessionKeyManager } from '$lib/solana/session-keys';
 	import { polymarketClient } from '$lib/polymarket';
 	import { PublicKey } from '@solana/web3.js';
 
@@ -43,14 +44,27 @@
 
 	// Modal state
 	let showConfirmModal = false;
-	let showSuccessModal = false;
-	let showErrorModal = false;
+	let showSessionRequiredModal = false;
 	let modalTitle = '';
 	let modalMessage = '';
 	let modalDetails: any = null;
 	let pendingClose: (() => Promise<void>) | null = null;
 	let sharesToSell = 0;
 	let maxShares = 0;
+
+	// Toast state
+	let showToast = false;
+	let toastType: 'success' | 'error' = 'success';
+	let toastMessage = '';
+	let toastTimer: ReturnType<typeof setTimeout>;
+
+	function showToastNotification(type: 'success' | 'error', message: string) {
+		clearTimeout(toastTimer);
+		toastType = type;
+		toastMessage = message;
+		showToast = true;
+		toastTimer = setTimeout(() => { showToast = false; }, 4000);
+	}
 
 	let lastLoadedWallet: string | null = null;
 
@@ -289,9 +303,13 @@
 
 	async function sellPosition(positionId: string, currentPrice: number, position: Position) {
 		if (!walletState.connected || !walletState.adapter) {
-			showErrorModal = true;
-			modalTitle = 'Wallet Not Connected';
-			modalMessage = 'Please connect your wallet first!';
+			showToastNotification('error', 'Please connect your wallet first!');
+			return;
+		}
+
+		// Check session key
+		if (!sessionKeyManager.isSessionActive()) {
+			showSessionRequiredModal = true;
 			return;
 		}
 
@@ -318,9 +336,7 @@
 			try {
 				// Validate shares to sell
 				if (sharesToSell <= 0 || sharesToSell > maxShares) {
-					showErrorModal = true;
-					modalTitle = 'Invalid Amount';
-					modalMessage = `Please enter a valid number of shares between 0 and ${maxShares.toFixed(2)}`;
+					showToastNotification('error', `Please enter a valid number of shares between 0 and ${maxShares.toFixed(2)}`);
 					return;
 				}
 
@@ -349,10 +365,9 @@
 					closedPositionsCache.set(positionId, closedPosition);
 				}
 
-				// Show success modal
-				modalTitle = isFullyClosed ? 'Position Closed!' : 'Shares Sold!';
-				modalMessage = `Sold ${sharesToSell.toFixed(2)} shares. Transaction: ${tx.slice(0, 20)}...`;
-				showSuccessModal = true;
+				// Show success toast
+				const action = isFullyClosed ? 'Position closed' : 'Shares sold';
+				showToastNotification('success', `${action}! Sold ${sharesToSell.toFixed(2)} shares. Tx: ${tx.slice(0, 20)}...`);
 
 				// Refresh balance and positions
 				if (walletState.publicKey) {
@@ -361,9 +376,7 @@
 				await loadPositions();
 			} catch (error: any) {
 				console.error('Error selling shares:', error);
-				showErrorModal = true;
-				modalTitle = 'Failed to Sell Shares';
-				modalMessage = error.message || 'Unknown error occurred';
+				showToastNotification('error', error.message || 'Failed to sell shares');
 			}
 		};
 	}
@@ -383,8 +396,6 @@
 
 	function closeModal() {
 		showConfirmModal = false;
-		showSuccessModal = false;
-		showErrorModal = false;
 		modalDetails = null;
 	}
 </script>
@@ -579,113 +590,84 @@
 
 <!-- Confirmation Modal -->
 {#if showConfirmModal}
-<div class="modal-overlay" on:click={cancelClose}>
-	<div class="modal-content" on:click|stopPropagation>
-		<div class="modal-header">
-			<h3>{modalTitle}</h3>
-			<button class="modal-close" on:click={cancelClose}>×</button>
-		</div>
-		<div class="modal-body">
-			{#if modalDetails}
-			<div class="trade-summary">
-				<div class="summary-row">
-					<span class="summary-label">Market:</span>
-					<span class="summary-value">{modalDetails.market}</span>
-				</div>
-				<div class="summary-row">
-					<span class="summary-label">Type:</span>
-					<span class="summary-value">{modalDetails.type}</span>
-				</div>
-				<div class="summary-row">
-					<span class="summary-label">Amount Invested:</span>
-					<span class="summary-value">{modalDetails.amount}</span>
-				</div>
-				<div class="summary-row">
-					<span class="summary-label">Available Shares:</span>
-					<span class="summary-value">{modalDetails.shares}</span>
-				</div>
-				<div class="summary-row">
-					<span class="summary-label">Entry Price:</span>
-					<span class="summary-value">{modalDetails.entryPrice}</span>
-				</div>
-				<div class="summary-row">
-					<span class="summary-label">Current Price:</span>
-					<span class="summary-value">{modalDetails.currentPrice}</span>
-				</div>
-				<div class="summary-row highlight">
-					<span class="summary-label">Estimated P&L:</span>
-					<span class="summary-value">{modalDetails.pnl} ({modalDetails.pnlPercentage})</span>
-				</div>
-				<div class="shares-input-section">
-					<label for="sharesToSell" class="shares-label">
-						Shares to Sell:
-					</label>
-					<div class="input-with-max">
-						<input
-							id="sharesToSell"
-							type="number"
-							bind:value={sharesToSell}
-							min="0"
-							max={maxShares}
-							step="0.01"
-							class="shares-input"
-						/>
-						<button
-							class="max-btn"
-							on:click={() => sharesToSell = maxShares}
-						>
-							MAX
-						</button>
-					</div>
-					<div class="shares-info">
-						Available: {maxShares.toFixed(2)} shares
-					</div>
-				</div>
+<div class="pm-overlay" on:click={cancelClose} on:keydown={(e) => e.key === 'Escape' && cancelClose()} role="button" tabindex="0">
+	<div class="pm-modal" on:click|stopPropagation on:keydown|stopPropagation role="dialog" tabindex="-1">
+		<div class="pm-dot pending"></div>
+		<h3 class="pm-title">{modalTitle}</h3>
+		{#if modalDetails}
+		<div class="pm-details">
+			<div class="pm-row">
+				<span class="pm-label">Market</span>
+				<span class="pm-value" style="max-width: 200px; text-align: right;">{modalDetails.market}</span>
 			</div>
-			{/if}
+			<div class="pm-row">
+				<span class="pm-label">Type</span>
+				<span class="pm-value">{modalDetails.type}</span>
+			</div>
+			<div class="pm-row">
+				<span class="pm-label">Invested</span>
+				<span class="pm-value">{modalDetails.amount}</span>
+			</div>
+			<div class="pm-row">
+				<span class="pm-label">Entry Price</span>
+				<span class="pm-value">{modalDetails.entryPrice}</span>
+			</div>
+			<div class="pm-row">
+				<span class="pm-label">Current Price</span>
+				<span class="pm-value">{modalDetails.currentPrice}</span>
+			</div>
+			<div class="pm-row highlight">
+				<span class="pm-label">Est. P&L</span>
+				<span class="pm-value highlight-value">{modalDetails.pnl} ({modalDetails.pnlPercentage})</span>
+			</div>
 		</div>
-		<div class="modal-footer">
-			<button class="modal-btn cancel-btn" on:click={cancelClose}>Cancel</button>
-			<button class="modal-btn confirm-btn" on:click={confirmClose}>
-				Confirm Sell
-			</button>
+		<div class="pm-shares-section">
+			<label for="sharesToSell" class="pm-shares-label">Shares to Sell</label>
+			<div class="pm-input-row">
+				<input
+					id="sharesToSell"
+					type="number"
+					bind:value={sharesToSell}
+					min="0"
+					max={maxShares}
+					step="0.01"
+					class="pm-shares-input"
+				/>
+				<button class="pm-max-btn" on:click={() => sharesToSell = maxShares}>MAX</button>
+			</div>
+			<div class="pm-shares-info">Available: {maxShares.toFixed(2)} shares</div>
+		</div>
+		{/if}
+		<div class="pm-actions">
+			<button class="pm-btn secondary" on:click={cancelClose}>Cancel</button>
+			<button class="pm-btn primary" on:click={confirmClose}>Confirm Sell</button>
 		</div>
 	</div>
 </div>
 {/if}
 
-<!-- Success Modal -->
-{#if showSuccessModal}
-<div class="modal-overlay" on:click={closeModal}>
-	<div class="modal-content success-modal" on:click|stopPropagation>
-		<div class="modal-header">
-			<h3>✓ {modalTitle}</h3>
-			<button class="modal-close" on:click={closeModal}>×</button>
-		</div>
-		<div class="modal-body">
-			<p class="modal-message">{modalMessage}</p>
-		</div>
-		<div class="modal-footer">
-			<button class="modal-btn confirm-btn" on:click={closeModal}>Close</button>
-		</div>
+<!-- Toast Notification -->
+{#if showToast}
+<div class="toast {toastType}">
+	<div class="toast-header">
+		<span class="toast-icon">{toastType === 'success' ? '✓' : '✕'}</span>
+		<span class="toast-title">{toastType === 'success' ? 'ORDER EXECUTED' : 'ERROR'}</span>
+		<button class="toast-close" on:click={() => showToast = false} aria-label="Close">&times;</button>
 	</div>
+	<p class="toast-msg">{toastMessage}</p>
 </div>
 {/if}
 
-<!-- Error Modal -->
-{#if showErrorModal}
-<div class="modal-overlay" on:click={closeModal}>
-	<div class="modal-content error-modal" on:click|stopPropagation>
-		<div class="modal-header">
-			<h3>⚠ {modalTitle}</h3>
-			<button class="modal-close" on:click={closeModal}>×</button>
-		</div>
-		<div class="modal-body">
-			<p class="modal-message">{modalMessage}</p>
-		</div>
-		<div class="modal-footer">
-			<button class="modal-btn confirm-btn" on:click={closeModal}>Close</button>
-		</div>
+<!-- Session Required Modal -->
+{#if showSessionRequiredModal}
+<div class="pm-overlay" on:keydown={(e) => e.key === 'Escape' && e.preventDefault()} role="dialog" tabindex="0">
+	<div class="pm-modal" on:click|stopPropagation on:keydown|stopPropagation role="dialog" tabindex="-1">
+		<div class="pm-dot pending"></div>
+		<h3 class="pm-title">Session Required</h3>
+		<p class="pm-desc">
+			You need an active session to trade. Enable one-click trading from the session button in the navbar to sign once and trade instantly.
+		</p>
+		<button class="pm-btn primary" on:click={() => showSessionRequiredModal = false}>Got it</button>
 	</div>
 </div>
 {/if}
@@ -811,19 +793,6 @@
 
 	:global(.light-mode) .pnl-display.negative {
 		color: #FF6B6B;
-	}
-
-	:global(.light-mode) .modal-overlay {
-		background: rgba(0, 0, 0, 0.85);
-	}
-
-	:global(.light-mode) .modal-content {
-		background: #FFFFFF;
-		border-color: #E0E0E0;
-	}
-
-	:global(.light-mode) .modal-header h2 {
-		color: #1A1A1A;
 	}
 
 	:global(.light-mode) .close-modal-btn {
@@ -1352,214 +1321,173 @@
 	}
 
 	/* Modal Styles */
-	.modal-overlay {
+	/* Polymock Modal System */
+	.pm-overlay {
 		position: fixed;
 		top: 0;
 		left: 0;
 		width: 100%;
 		height: 100%;
-		background: rgba(0, 0, 0, 0.85);
+		background: rgba(0, 0, 0, 0.75);
+		backdrop-filter: blur(6px);
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		z-index: 1000;
-		animation: fadeIn 0.2s ease-out;
+		z-index: 1001;
+		animation: pmFadeIn 0.2s ease-out;
 	}
 
-	@keyframes fadeIn {
+	@keyframes pmFadeIn {
 		from { opacity: 0; }
 		to { opacity: 1; }
 	}
 
-	.modal-content {
-		background: #000000;
-		border: 1px solid #404040;
-		border-radius: 12px;
-		min-width: 400px;
-		max-width: 500px;
-		animation: slideUp 0.3s ease-out;
+	.pm-modal {
+		background: #0a0a0a;
+		border: 1px solid #2a2a2a;
+		border-radius: 20px;
+		padding: 36px 32px;
+		max-width: 420px;
+		width: 90vw;
+		text-align: center;
+		animation: pmSlideUp 0.3s ease-out;
 	}
 
-	@keyframes slideUp {
-		from {
-			transform: translateY(20px);
-			opacity: 0;
-		}
-		to {
-			transform: translateY(0);
-			opacity: 1;
-		}
+	@keyframes pmSlideUp {
+		from { opacity: 0; transform: translateY(20px); }
+		to { opacity: 1; transform: translateY(0); }
 	}
 
-	.modal-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 20px;
-		border-bottom: 1px solid #404040;
+	.pm-dot {
+		width: 14px;
+		height: 14px;
+		border-radius: 50%;
+		margin: 0 auto 20px auto;
 	}
 
-	.modal-header h3 {
-		margin: 0;
-		font-size: 20px;
-		font-weight: 600;
-		color: white;
+	.pm-dot.pending {
+		background: #F97316;
+		box-shadow: 0 0 16px rgba(249, 115, 22, 0.4);
+		animation: pmPulse 2s ease-in-out infinite;
 	}
 
-	.success-modal .modal-header h3 {
-		color: #00D68F;
+	.pm-dot.success {
+		background: #10b981;
+		box-shadow: 0 0 16px rgba(16, 185, 129, 0.5);
+		animation: pmPulse 2s ease-in-out infinite;
 	}
 
-	.error-modal .modal-header h3 {
-		color: #FF6B6B;
+	.pm-dot.error {
+		background: #ef4444;
+		box-shadow: 0 0 16px rgba(239, 68, 68, 0.5);
+		animation: pmPulse 2s ease-in-out infinite;
 	}
 
-	.modal-close {
-		background: none;
-		border: none;
-		color: #8B92AB;
-		font-size: 28px;
-		cursor: pointer;
-		padding: 0;
-		width: 32px;
-		height: 32px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		transition: color 0.2s;
+	@keyframes pmPulse {
+		0%, 100% { opacity: 1; }
+		50% { opacity: 0.4; }
 	}
 
-	.modal-close:hover {
-		color: white;
+	.pm-title {
+		color: #ffffff;
+		font-size: 22px;
+		font-weight: 700;
+		margin: 0 0 12px 0;
+		letter-spacing: -0.5px;
 	}
 
-	.modal-body {
-		padding: 24px 20px;
-	}
+	.pm-title.success-title { color: #10b981; }
+	.pm-title.error-title { color: #ef4444; }
 
-	.trade-summary {
-		display: flex;
-		flex-direction: column;
-		gap: 12px;
-	}
-
-	.summary-row {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 12px;
-		background: #000000;
-		border-radius: 8px;
-	}
-
-	.summary-row.highlight {
-		background: rgba(249, 115, 22, 0.1);
-		border: 1px solid #F97316;
-	}
-
-	.summary-label {
-		color: #8B92AB;
-		font-size: 14px;
-	}
-
-	.summary-value {
-		color: white;
-		font-weight: 600;
-		font-size: 16px;
-	}
-
-	.modal-message {
-		color: #E8E8E8;
+	.pm-desc {
+		color: #8b92ab;
 		font-size: 14px;
 		line-height: 1.6;
-		margin: 0;
+		margin: 0 0 24px 0;
 	}
 
-	.modal-footer {
-		display: flex;
-		gap: 12px;
-		padding: 20px;
-		border-top: 1px solid #404040;
-		justify-content: flex-end;
-	}
-
-	.modal-btn {
-		padding: 10px 20px;
-		border-radius: 8px;
-		font-size: 14px;
-		font-weight: 600;
-		cursor: pointer;
-		transition: all 0.2s;
-		border: none;
-	}
-
-	.cancel-btn {
-		background: #000000;
-		color: #E8E8E8;
-	}
-
-	.cancel-btn:hover {
-		background: rgba(249, 115, 22, 0.1);
-	}
-
-	.confirm-btn {
-		background: #F97316;
-		color: white;
-	}
-
-	.confirm-btn:hover:not(:disabled) {
-		background: #ea580c;
-		transform: translateY(-1px);
-	}
-
-	.confirm-btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-
-	.shares-input-section {
-		margin-top: 20px;
+	.pm-details {
+		background: rgba(255, 255, 255, 0.03);
+		border: 1px solid #1a1a1a;
+		border-radius: 12px;
 		padding: 16px;
-		background: #000000;
-		border-radius: 8px;
-		border: 1px solid #404040;
+		margin-bottom: 24px;
+		text-align: left;
 	}
 
-	.shares-label {
-		display: block;
-		color: #8B92AB;
-		font-size: 14px;
+	.pm-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 6px 0;
+	}
+
+	.pm-row + .pm-row {
+		border-top: 1px solid #1a1a1a;
+		margin-top: 6px;
+		padding-top: 12px;
+	}
+
+	.pm-row.highlight {
+		padding: 10px;
+		margin: 6px -8px 0;
+		background: rgba(249, 115, 22, 0.08);
+		border: 1px solid rgba(249, 115, 22, 0.25);
+		border-radius: 8px;
+	}
+
+	.pm-label {
+		color: #666;
+		font-size: 13px;
+	}
+
+	.pm-value {
+		color: #ccc;
+		font-size: 13px;
 		font-weight: 600;
+	}
+
+	.pm-value.highlight-value { color: #F97316; }
+
+	.pm-shares-section {
+		margin-bottom: 24px;
+		text-align: left;
+	}
+
+	.pm-shares-label {
+		display: block;
+		color: #666;
+		font-size: 13px;
 		margin-bottom: 8px;
 	}
 
-	.input-with-max {
+	.pm-input-row {
 		display: flex;
 		gap: 8px;
-		margin-bottom: 8px;
+		margin-bottom: 6px;
 	}
 
-	.shares-input {
+	.pm-shares-input {
 		flex: 1;
 		padding: 10px 12px;
-		background: #000000;
-		border: 1px solid #FFFFFF;
-		border-radius: 6px;
+		background: #0a0a0a;
+		border: 1px solid #2a2a2a;
+		border-radius: 8px;
 		color: white;
-		font-size: 16px;
+		font-size: 15px;
 		font-weight: 600;
 	}
 
-	.shares-input:focus {
+	.pm-shares-input:focus {
 		outline: none;
 		border-color: #F97316;
 	}
 
-	.max-btn {
+	.pm-max-btn {
 		padding: 10px 16px;
 		background: rgba(249, 115, 22, 0.1);
-		border: 1px solid #F97316;
-		border-radius: 6px;
+		border: 1px solid rgba(249, 115, 22, 0.3);
+		border-radius: 8px;
 		color: #F97316;
 		font-size: 12px;
 		font-weight: 700;
@@ -1567,47 +1495,190 @@
 		transition: all 0.2s;
 	}
 
-	.max-btn:hover {
+	.pm-max-btn:hover {
 		background: #F97316;
-		color: #0A0E1A;
+		color: #000;
 	}
 
-	.shares-info {
-		color: #8B92AB;
+	.pm-shares-info {
+		color: #555;
 		font-size: 12px;
 	}
 
-	:global(.light-mode) .shares-input-section {
-		background: #F5F5F5;
-		border-color: #E0E0E0;
+	.pm-actions {
+		display: flex;
+		gap: 12px;
 	}
 
-	:global(.light-mode) .shares-label {
-		color: #666;
+	.pm-btn {
+		flex: 1;
+		padding: 14px;
+		border: none;
+		border-radius: 12px;
+		font-size: 15px;
+		font-weight: 700;
+		cursor: pointer;
+		transition: all 0.2s;
+		letter-spacing: -0.3px;
 	}
 
-	:global(.light-mode) .shares-input {
+	.pm-btn.primary {
+		background: #F97316;
+		color: #000;
+		width: 100%;
+	}
+
+	.pm-btn.primary:hover:not(:disabled) {
+		background: #ea580c;
+	}
+
+	.pm-btn.primary:disabled {
+		opacity: 0.7;
+		cursor: not-allowed;
+	}
+
+	.pm-btn.secondary {
+		background: transparent;
+		color: #8b92ab;
+		border: 1px solid #2a2a2a;
+	}
+
+	.pm-btn.secondary:hover {
+		border-color: #444;
+		color: #ccc;
+	}
+
+	:global(.light-mode) .pm-shares-input {
 		background: #FFFFFF;
 		border-color: #E0E0E0;
 		color: #1A1A1A;
 	}
 
-	:global(.light-mode) .shares-input:focus {
+	:global(.light-mode) .pm-shares-input:focus {
 		border-color: #00B570;
 	}
 
-	:global(.light-mode) .max-btn {
+	:global(.light-mode) .pm-max-btn {
 		background: rgba(0, 181, 112, 0.1);
 		border-color: #00B570;
 		color: #00B570;
 	}
 
-	:global(.light-mode) .max-btn:hover {
+	:global(.light-mode) .pm-max-btn:hover {
 		background: #00B570;
 		color: #FFFFFF;
 	}
 
-	:global(.light-mode) .shares-info {
+	:global(.light-mode) .pm-shares-info {
 		color: #666;
+	}
+
+	/* Toast Notification */
+	.toast {
+		position: fixed;
+		top: 16px;
+		right: 16px;
+		z-index: 10000;
+		width: 320px;
+		background: #1a1a1a;
+		border: 1px solid #333;
+		border-radius: 4px;
+		padding: 12px 14px;
+		animation: toast-in 0.25s ease-out forwards;
+	}
+
+	.toast.success {
+		border-left: 3px solid #00D084;
+	}
+
+	.toast.error {
+		border-left: 3px solid #FF4757;
+	}
+
+	.toast-header {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 6px;
+	}
+
+	.toast-icon {
+		font-size: 14px;
+		font-weight: 700;
+		line-height: 1;
+	}
+
+	.toast.success .toast-icon {
+		color: #00D084;
+	}
+
+	.toast.error .toast-icon {
+		color: #FF4757;
+	}
+
+	.toast-title {
+		font-size: 13px;
+		font-weight: 700;
+		letter-spacing: 0.03em;
+	}
+
+	.toast.success .toast-title {
+		color: #00D084;
+	}
+
+	.toast.error .toast-title {
+		color: #FF4757;
+	}
+
+	.toast-close {
+		margin-left: auto;
+		background: none;
+		border: none;
+		color: #666;
+		font-size: 18px;
+		line-height: 1;
+		cursor: pointer;
+		padding: 0 2px;
+	}
+
+	.toast-close:hover {
+		color: #fff;
+	}
+
+	.toast-msg {
+		font-size: 12px;
+		font-weight: 400;
+		color: #ccc;
+		line-height: 1.4;
+		margin: 0;
+		padding-left: 22px;
+	}
+
+	@keyframes toast-in {
+		from {
+			opacity: 0;
+			transform: translateX(20px);
+		}
+		to {
+			opacity: 1;
+			transform: translateX(0);
+		}
+	}
+
+	:global(.light-mode) .toast {
+		background: #fff;
+		border-color: #e0e0e0;
+	}
+
+	:global(.light-mode) .toast-close {
+		color: #999;
+	}
+
+	:global(.light-mode) .toast-close:hover {
+		color: #333;
+	}
+
+	:global(.light-mode) .toast-msg {
+		color: #555;
 	}
 </style>
