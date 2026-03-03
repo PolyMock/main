@@ -8,7 +8,7 @@ const mainApps = [
     title: "Polymock",
     description:
       "Paper trading and backtesting for prediction markets. Test your market intuition with historical data from Polymarket.",
-    link: "https://polymock.hashfoxlabs.com/",
+    link: "https://polymock.app/",
     linkText: "Open Polymock",
     badge: "Production",
     badgeColor: "bg-orange-500",

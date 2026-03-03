@@ -31,7 +31,7 @@ export default function Footer() {
           <div>
             <h4 className="text-white font-semibold mb-4 text-sm">Products</h4>
             <a
-              href="https://polymock.hashfoxlabs.com/"
+              href="https://polymock.app/"
               target="_blank"
               rel="noopener noreferrer"
               className="block text-gray-400 hover:text-orange-500 transition-colors mb-2 text-sm"

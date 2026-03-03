@@ -1,19 +1,14 @@
-import { NextResponse } from "next/server";
+interface Env {
+  TWELVE_DATA_API_KEY: string;
+}
 
-const TWELVE_DATA_API_KEY = process.env.TWELVE_DATA_API_KEY || "";
-
-// 8 symbols max (free tier limit per minute)
 const SYMBOLS = [
-  // Crypto
   { symbol: "BTC/USD", type: "crypto" },
   { symbol: "ETH/USD", type: "crypto" },
-  // Forex
   { symbol: "EUR/USD", type: "forex" },
   { symbol: "GBP/USD", type: "forex" },
-  // Stocks
   { symbol: "AAPL", type: "stock" },
   { symbol: "TSLA", type: "stock" },
-  // Commodities
   { symbol: "XAU/USD", type: "commodity" },
   { symbol: "XAG/USD", type: "commodity" },
 ];
@@ -40,42 +35,23 @@ const LOGOS: Record<string, string> = {
   "XAG/USD": "",
 };
 
-let cachedData: TickerItem[] | null = null;
-let lastFetch = 0;
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
-
-interface TickerItem {
-  symbol: string;
-  displayName: string;
-  price: string;
-  change: string;
-  up: boolean;
-  type: string;
-  logo: string;
-}
-
-export async function GET() {
-  const now = Date.now();
-
-  if (cachedData && now - lastFetch < CACHE_DURATION) {
-    return NextResponse.json(cachedData);
-  }
-
-  if (!TWELVE_DATA_API_KEY) {
-    return NextResponse.json(
-      { error: "TWELVE_DATA_API_KEY not configured" },
-      { status: 500 }
-    );
+export const onRequest: PagesFunction<Env> = async (context) => {
+  const apiKey = context.env.TWELVE_DATA_API_KEY;
+  if (!apiKey) {
+    return new Response(JSON.stringify({ error: "API key not configured" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   try {
     const symbolList = SYMBOLS.map((s) => s.symbol).join(",");
     const response = await fetch(
-      `https://api.twelvedata.com/quote?symbol=${symbolList}&apikey=${TWELVE_DATA_API_KEY}`
+      `https://api.twelvedata.com/quote?symbol=${symbolList}&apikey=${apiKey}`
     );
-    const data = await response.json();
+    const data = await response.json() as Record<string, any>;
 
-    const tickerItems: TickerItem[] = [];
+    const tickerItems = [];
 
     for (const item of SYMBOLS) {
       const quote = data[item.symbol] || data;
@@ -86,11 +62,12 @@ export async function GET() {
         tickerItems.push({
           symbol: item.symbol,
           displayName: DISPLAY_NAMES[item.symbol] || item.symbol,
-          price: price >= 1000
-            ? `$${price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-            : price >= 1
-            ? `$${price.toFixed(2)}`
-            : `$${price.toFixed(4)}`,
+          price:
+            price >= 1000
+              ? `$${price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              : price >= 1
+              ? `$${price.toFixed(2)}`
+              : `$${price.toFixed(4)}`,
           change: `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`,
           up: change >= 0,
           type: item.type,
@@ -99,20 +76,16 @@ export async function GET() {
       }
     }
 
-    if (tickerItems.length > 0) {
-      cachedData = tickerItems;
-      lastFetch = now;
-    }
-
-    return NextResponse.json(tickerItems);
+    return new Response(JSON.stringify(tickerItems), {
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "public, max-age=300",
+      },
+    });
   } catch (error) {
-    console.error("Ticker API error:", error);
-    if (cachedData) {
-      return NextResponse.json(cachedData);
-    }
-    return NextResponse.json(
-      { error: "Failed to fetch ticker data" },
-      { status: 500 }
-    );
+    return new Response(JSON.stringify({ error: "Failed to fetch ticker data" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
   }
-}
+};
