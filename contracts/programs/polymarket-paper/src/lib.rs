@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use session_keys::{SessionError, SessionToken, session_auth_or, Session};
 
-declare_id!("5sfoR6jyPc4dmdQuuAEpMPPV18aJcXLJxBhqiCv69Q3V");
+declare_id!("6a5sw2ZVXkAqPF5F8jSvBFVWZSBenaMGnRjnhPoVD31Z");
 
 /// User account for Polymarket paper trading
 /// USDC balance for Yes/No predictions

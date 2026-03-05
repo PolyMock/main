@@ -210,14 +210,19 @@ export async function initializeUserAccountIfNeeded(wallet: any) {
 /**
  * Refresh user balance
  */
-export async function refreshUserBalance(publicKey: PublicKey) {
-	try {
-		const userAccount = await polymarketService.getUserAccount(publicKey);
-		if (userAccount) {
-			const balance = userAccount.usdcBalance.toNumber() / 1_000_000;
-			setUserBalance(balance);
+export async function refreshUserBalance(publicKey: PublicKey, retries = 3) {
+	for (let i = 0; i < retries; i++) {
+		try {
+			// Wait a bit for on-chain state to propagate after TX confirmation
+			if (i > 0) await new Promise(r => setTimeout(r, 1000));
+			const userAccount = await polymarketService.getUserAccount(publicKey);
+			if (userAccount) {
+				const balance = userAccount.usdcBalance.toNumber() / 1_000_000;
+				setUserBalance(balance);
+				return;
+			}
+		} catch (error) {
+			console.error('Error refreshing balance (attempt ' + (i + 1) + '):', error);
 		}
-	} catch (error) {
-		console.error('Error refreshing balance:', error);
 	}
 }

@@ -11,7 +11,6 @@ import type { Idl } from '@coral-xyz/anchor';
 import BN from 'bn.js';
 import { PUBLIC_SOLANA_PROGRAM_ID, PUBLIC_SOLANA_RPC_ENDPOINT } from '$env/static/public';
 import IDL from './polymarket_paper.json';
-import { erVerification } from './er-verification';
 import { sessionKeyManager, SESSION_KEYS_PROGRAM_ID } from './session-keys';
 
 // Lazy init to avoid "Cannot read properties of undefined (reading '_bn')" during SSR
@@ -27,9 +26,6 @@ function getProgramId(): PublicKey {
 	return _programId;
 }
 
-// Use standard devnet RPC for all operations. MagicBlock RPC has issues with:
-// 1. Session key transaction simulation (incorrectly reports AccountNotSigner)
-// 2. Data consistency when writes go to devnet but reads go through MagicBlock
 const RPC_ENDPOINT = 'https://api.devnet.solana.com';
 
 // IDL type - we'll use the generic Idl type from Anchor
@@ -63,10 +59,8 @@ export interface PredictionPosition {
 export class PolymarketService {
 	private connection: Connection;
 	program: Program | null = null;
-	private verifyEREnabled: boolean = true; // Enable ER verification by default
 
 	constructor() {
-		// MagicBlock RPC handles ER automatically - no need for separate connections
 		this.connection = new Connection(RPC_ENDPOINT, 'confirmed');
 	}
 
@@ -134,11 +128,19 @@ export class PolymarketService {
 				skipPreflight: true,
 			});
 
-			await this.connection.confirmTransaction({
+			const confirmation = await this.connection.confirmTransaction({
 				signature: sig,
 				blockhash,
 				lastValidBlockHeight,
 			}, 'confirmed');
+
+			if (confirmation.value.err) {
+				// Fetch logs for debugging
+				const txDetails = await this.connection.getTransaction(sig, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
+				const logs = txDetails?.meta?.logMessages?.join('\n') || 'No logs available';
+				console.error('[Session] TX failed on-chain:', sig, '\nLogs:', logs);
+				throw new Error(`Transaction failed on-chain: ${JSON.stringify(confirmation.value.err)}`);
+			}
 
 			console.log('[Session] TX confirmed:', sig);
 			return sig;
@@ -155,15 +157,7 @@ export class PolymarketService {
 	}
 
 	/**
-	 * Enable or disable ER verification logging
-	 */
-	setERVerification(enabled: boolean) {
-		this.verifyEREnabled = enabled;
-	}
-
-	/**
 	 * Initialize the Anchor program
-	 * MagicBlock RPC automatically routes to ER when needed
 	 */
 	async initializeProgram(wallet: any): Promise<void> {
 		try {
@@ -307,7 +301,7 @@ export class PolymarketService {
 	}
 
 	/**
-	 * Buy YES shares (MagicBlock RPC handles ER routing automatically)
+	 * Buy YES shares
 	 */
 	async buyYes(
 		wallet: any,
@@ -352,12 +346,6 @@ export class PolymarketService {
 				session
 			);
 
-			// Verify ER usage
-			if (this.verifyEREnabled) {
-				setTimeout(async () => {
-					await erVerification.logERVerification(tx, userAccountPDA);
-				}, 1000);
-			}
 
 			return tx;
 		} catch (error) {
@@ -367,7 +355,7 @@ export class PolymarketService {
 	}
 
 	/**
-	 * Buy NO shares (MagicBlock RPC handles ER routing automatically)
+	 * Buy NO shares
 	 */
 	async buyNo(
 		wallet: any,
@@ -412,12 +400,6 @@ export class PolymarketService {
 				session
 			);
 
-			// Verify ER usage
-			if (this.verifyEREnabled) {
-				setTimeout(async () => {
-					await erVerification.logERVerification(tx, userAccountPDA);
-				}, 1000);
-			}
 
 			return tx;
 		} catch (error) {
@@ -460,12 +442,6 @@ export class PolymarketService {
 				session
 			);
 
-			// Verify ER usage
-			if (this.verifyEREnabled) {
-				setTimeout(async () => {
-					await erVerification.logERVerification(tx, userAccountPDA);
-				}, 1000);
-			}
 
 			return tx;
 		} catch (error) {
@@ -508,12 +484,6 @@ export class PolymarketService {
 				session
 			);
 
-			// Verify ER usage
-			if (this.verifyEREnabled) {
-				setTimeout(async () => {
-					await erVerification.logERVerification(tx, userAccountPDA);
-				}, 1000);
-			}
 
 			return tx;
 		} catch (error) {
@@ -576,7 +546,7 @@ export class PolymarketService {
 	}
 
 	/**
-	 * Close a position (MagicBlock RPC handles ER routing automatically)
+	 * Close a position
 	 */
 	async closePosition(
 		wallet: any,
