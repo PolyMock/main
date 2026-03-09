@@ -6,6 +6,7 @@
 	import { authStore, loginWithGoogle } from '$lib/auth/auth-store';
 	import { sessionKeyManager } from '$lib/solana/session-keys';
 	import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
+	import hashfoxLogo from '$lib/assets/hashfoxlogo.png';
 
 	declare global {
 		interface Window {
@@ -300,7 +301,7 @@
 
 <div class="navbar">
 	<a href="/" class="logo">
-		<img src="/1.png" alt="Polymock Logo" class="logo-img" />
+		<img src={hashfoxLogo} alt="HashFox Labs Logo" class="logo-img" />
 		<div class="logo-text">
 			<span class="logo-title">POLYMOCK</span>
 			<span class="logo-subtitle">by Hash<span class="fox-text">Fox</span> Labs</span>
@@ -398,11 +399,15 @@
 		{#if $authStore.isAuthenticated || walletState.connected}
 			<div class="profile-dropdown-container">
 				<button class="profile-btn" on:click={toggleProfileDropdown} bind:this={profileButtonElement}>
-					{#if $authStore.user?.picture}
+					{#if walletState.avatarUrl}
+						<img src={walletState.avatarUrl} alt="Profile" class="profile-pic" />
+					{:else if $authStore.user?.picture}
 						<img src={$authStore.user.picture} alt="Profile" class="profile-pic" />
 					{:else}
 						<div class="profile-pic-placeholder">
-							{#if walletState.publicKey}
+							{#if walletState.username}
+								{walletState.username.charAt(0).toUpperCase()}
+							{:else if walletState.publicKey}
 								{walletState.publicKey.toString().charAt(0).toUpperCase()}
 							{:else}
 								?
@@ -412,6 +417,8 @@
 					<span class="profile-name">
 						{#if $authStore.user?.name}
 							{$authStore.user.name.split(' ')[0]}
+						{:else if walletState.username}
+							@{walletState.username}
 						{:else if walletState.publicKey}
 							{walletState.publicKey.toString().slice(0, 4)}...{walletState.publicKey.toString().slice(-4)}
 						{:else}
@@ -426,11 +433,15 @@
 				{#if showProfileDropdown && profileButtonElement}
 					<div class="profile-dropdown" style="top: {profileButtonElement.getBoundingClientRect().bottom + 8}px; right: {window.innerWidth - profileButtonElement.getBoundingClientRect().right}px;">
 						<div class="dropdown-header">
-							{#if $authStore.user?.picture}
+							{#if walletState.avatarUrl}
+								<img src={walletState.avatarUrl} alt="Profile" class="dropdown-profile-pic" />
+							{:else if $authStore.user?.picture}
 								<img src={$authStore.user.picture} alt="Profile" class="dropdown-profile-pic" />
 							{:else}
 								<div class="dropdown-profile-pic-placeholder">
-									{#if walletState.publicKey}
+									{#if walletState.username}
+										{walletState.username.charAt(0).toUpperCase()}
+									{:else if walletState.publicKey}
 										{walletState.publicKey.toString().charAt(0).toUpperCase()}
 									{:else}
 										?
@@ -441,6 +452,8 @@
 								<div class="dropdown-user-name">
 									{#if $authStore.user?.name}
 										{$authStore.user.name}
+									{:else if walletState.username}
+										@{walletState.username}
 									{:else if walletState.publicKey}
 										{walletState.publicKey.toString().slice(0, 4)}...{walletState.publicKey.toString().slice(-4)}
 									{:else}
@@ -450,7 +463,7 @@
 								{#if $authStore.user?.email}
 									<div class="dropdown-user-email">{$authStore.user.email}</div>
 								{:else if walletState.publicKey}
-									<div class="dropdown-user-email">Wallet Connected</div>
+									<div class="dropdown-user-email">{walletState.publicKey.toString().slice(0, 4)}...{walletState.publicKey.toString().slice(-4)}</div>
 								{/if}
 							</div>
 						</div>
@@ -627,9 +640,10 @@
 	}
 
 	.logo-img {
-		width: 40px;
-		height: 40px;
+		width: 56px;
+		height: 56px;
 		object-fit: contain;
+		margin: -8px 0;
 	}
 
 	.logo:hover {

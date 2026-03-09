@@ -4,10 +4,17 @@
 	import { polymarketService } from '$lib/solana/polymarket-service';
 	import { polymarketClient } from '$lib/polymarket';
 	import { authStore } from '$lib/auth/auth-store';
+	import { supabase } from '$lib/supabase';
 	import { PublicKey } from '@solana/web3.js';
 
 	let walletState = $walletStore;
 	let loading = true;
+
+	// Profile data from Supabase
+	let profileUsername = '';
+	let profileAvatarUrl = '';
+	let uploadingAvatar = false;
+	let fileInput: HTMLInputElement;
 	let positionsValue = 0;
 	let biggestWin = 0;
 	let biggestLoss = 0;
@@ -71,13 +78,14 @@
 		if (value.connected && value.publicKey && currentWallet !== lastLoadedWallet) {
 			lastLoadedWallet = currentWallet;
 			loadProfileData();
+			loadProfile();
 		}
 	});
 
 	onMount(async () => {
 		if (walletState.connected && walletState.publicKey) {
 			lastLoadedWallet = walletState.publicKey.toString();
-			await loadProfileData();
+			await Promise.all([loadProfileData(), loadProfile()]);
 		} else {
 			loading = false;
 		}
@@ -278,6 +286,78 @@
 		}
 	}
 
+	async function loadProfile() {
+		if (!walletState.publicKey) return;
+		const walletAddress = walletState.publicKey.toString();
+		const { data } = await supabase
+			.from('users')
+			.select('username, avatar_url')
+			.eq('wallet_address', walletAddress)
+			.maybeSingle();
+		if (data) {
+			profileUsername = data.username || '';
+			profileAvatarUrl = data.avatar_url || '';
+		}
+	}
+
+	async function handleAvatarUpload(event: Event) {
+		const input = event.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file || !walletState.publicKey) return;
+
+		if (!file.type.startsWith('image/')) {
+			alert('Please select an image file');
+			return;
+		}
+		if (file.size > 2 * 1024 * 1024) {
+			alert('Image must be under 2MB');
+			return;
+		}
+
+		uploadingAvatar = true;
+		try {
+			const walletAddress = walletState.publicKey.toString();
+			const ext = file.name.split('.').pop() || 'png';
+			const filePath = `${walletAddress}.${ext}`;
+
+			// Delete any existing avatar files for this wallet
+			const { data: existingFiles } = await supabase.storage
+				.from('avatar')
+				.list('', { search: walletAddress });
+			if (existingFiles && existingFiles.length > 0) {
+				await supabase.storage
+					.from('avatar')
+					.remove(existingFiles.map(f => f.name));
+			}
+
+			const { error: uploadErr } = await supabase.storage
+				.from('avatar')
+				.upload(filePath, file, { upsert: true });
+
+			if (uploadErr) throw new Error(uploadErr.message);
+
+			const { data: urlData } = supabase.storage
+				.from('avatar')
+				.getPublicUrl(filePath);
+
+			const avatarUrl = urlData.publicUrl + '?t=' + Date.now();
+
+			const { error: updateErr } = await supabase
+				.from('users')
+				.update({ avatar_url: avatarUrl })
+				.eq('wallet_address', walletAddress);
+
+			if (updateErr) throw new Error(updateErr.message);
+
+			profileAvatarUrl = avatarUrl;
+		} catch (err: any) {
+			console.error('Avatar upload error:', err);
+			alert('Failed to upload avatar: ' + err.message);
+		} finally {
+			uploadingAvatar = false;
+		}
+	}
+
 	function formatCurrency(amount: number): string {
 		return new Intl.NumberFormat('en-US', {
 			style: 'currency',
@@ -317,33 +397,57 @@
 			<!-- User Info Card -->
 			<div class="user-card">
 				<div class="user-header">
-					<div class="avatar-container">
-						{#if $authStore.isAuthenticated && $authStore.user?.picture}
-							<img src={$authStore.user.picture} alt="Profile" class="user-avatar" />
+					<div class="avatar-container" on:click={() => fileInput.click()}>
+						{#if profileAvatarUrl}
+							<img src={profileAvatarUrl} alt="Profile" class="user-avatar" />
 						{:else}
 							<div class="user-avatar-placeholder">
-								{#if walletState.publicKey}
+								{#if profileUsername}
+									{profileUsername.charAt(0).toUpperCase()}
+								{:else if walletState.publicKey}
 									{walletState.publicKey.toString().charAt(0).toUpperCase()}
 								{:else}
 									?
 								{/if}
 							</div>
 						{/if}
+						<div class="avatar-edit-overlay">
+							{#if uploadingAvatar}
+								<div class="avatar-spinner"></div>
+							{:else}
+								<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+									<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+									<circle cx="12" cy="13" r="4"/>
+								</svg>
+							{/if}
+						</div>
+						<input
+							type="file"
+							accept="image/*"
+							bind:this={fileInput}
+							on:change={handleAvatarUpload}
+							style="display:none"
+						/>
 					</div>
 					<div class="user-info">
 						<h1 class="username">
-							{#if $authStore.isAuthenticated && $authStore.user?.name}
-								{$authStore.user.name}
+							{#if profileUsername}
+								@{profileUsername}
 							{:else if walletState.publicKey}
 								{walletState.publicKey.toString().slice(0, 4)}...{walletState.publicKey.toString().slice(-4)}
 							{:else}
 								Anonymous
 							{/if}
 						</h1>
+						{#if walletState.publicKey}
+							<div class="wallet-address-display">
+								{walletState.publicKey.toString()}
+							</div>
+						{/if}
 						<div class="user-meta">
-							<span>Joined Oct 2025</span>
+							<span>{totalPredictions} predictions</span>
 							<span class="meta-separator">•</span>
-							<span>{(Math.random() * 100).toFixed(1)}k views</span>
+							<span>{openPositions.length} open positions</span>
 						</div>
 					</div>
 				</div>
@@ -588,56 +692,72 @@
 
 	.avatar-container {
 		position: relative;
-		width: 80px;
-		height: 80px;
+		width: 84px;
+		height: 84px;
+		cursor: pointer;
+		border-radius: 50%;
+		flex-shrink: 0;
+		border: 2px solid #F97316;
+		padding: 0;
+		background: #000;
 	}
 
 	.user-avatar {
-		width: 80px;
-		height: 80px;
+		width: 100%;
+		height: 100%;
 		border-radius: 50%;
 		object-fit: cover;
-		border: 2px solid #404040;
+		display: block;
 	}
 
 	.user-avatar-placeholder {
-		width: 80px;
-		height: 80px;
+		width: 100%;
+		height: 100%;
 		border-radius: 50%;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		background: linear-gradient(135deg, #F97316 0%, #ea580c 100%);
-		border: 2px solid #404040;
 		font-size: 36px;
 		font-weight: 700;
 		color: white;
 	}
 
-	.edit-avatar-btn {
+	.avatar-edit-overlay {
 		position: absolute;
-		bottom: 0;
-		right: 0;
-		width: 32px;
-		height: 32px;
-		background: #F97316;
-		border: 2px solid #000000;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.6);
 		border-radius: 50%;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		cursor: pointer;
-		transition: all 0.2s;
-		padding: 0;
-	}
-
-	.edit-avatar-btn:hover {
-		background: #ea580c;
-		transform: scale(1.1);
-	}
-
-	.edit-avatar-btn svg {
+		opacity: 0;
+		transition: opacity 0.2s;
 		color: white;
+	}
+
+	.avatar-container:hover .avatar-edit-overlay {
+		opacity: 1;
+	}
+
+	.avatar-spinner {
+		width: 22px;
+		height: 22px;
+		border: 2px solid rgba(255, 255, 255, 0.3);
+		border-top-color: white;
+		border-radius: 50%;
+		animation: spin 0.8s linear infinite;
+	}
+
+	.wallet-address-display {
+		font-size: 12px;
+		color: #8B92AB;
+		font-family: 'SF Mono', Consolas, monospace;
+		margin-bottom: 4px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		max-width: 300px;
 	}
 
 	.user-info {

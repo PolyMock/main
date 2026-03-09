@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { walletStore } from '$lib/wallet/stores';
 	import { authStore } from '$lib/auth/auth-store';
+	import { supabase } from '$lib/supabase';
 	import MiniEquityCurveChart from '$lib/components/MiniEquityCurveChart.svelte';
 	import PaperTradeConfirmModal from '$lib/components/PaperTradeConfirmModal.svelte';
 	import { polymarketService } from '$lib/solana/polymarket-service';
@@ -30,13 +31,36 @@
 		createdAt: string;
 	}
 
+	interface PostedTrade {
+		id: number;
+		marketTitle: string;
+		positionType: string;
+		entryPrice: number;
+		exitPrice: number | null;
+		pnl: number | null;
+		status: string;
+		platform: string;
+		source: string;
+		analysis: string | null;
+		createdAt: string;
+	}
+
 	let user: User | null = null;
 	let strategies: Strategy[] = [];
+	let postedTrades: PostedTrade[] = [];
 	let loading = true;
 	let error = '';
 	let walletState = $walletStore;
 	let authState = $authStore;
 	let walletButtonRef: any;
+	let activeTab: 'all' | 'strategies' | 'trades' = 'all';
+
+	// Profile state
+	let profileUsername = '';
+	let profileWalletAddress = '';
+	let profileAvatarUrl = '';
+	let uploadingAvatar = false;
+	let fileInput: HTMLInputElement;
 
 	// Delete modal state
 	let showDeleteModal = false;
@@ -70,10 +94,11 @@
 			loadStrategies();
 		}
 
-		// Clear strategies when wallet disconnects (but not if Google user is still logged in)
-		if (!value.connected && previousConnected && !user?.googleId) {
+		// Clear strategies when wallet disconnects
+		if (!value.connected && previousConnected) {
 			user = null;
 			strategies = [];
+			postedTrades = [];
 		}
 
 		previousConnected = value.connected;
@@ -102,58 +127,105 @@
 		error = '';
 
 		try {
-			// Check if user is logged in with Google or Wallet
-			const userRes = await fetch('/api/auth/user', {
-				credentials: 'include' // Ensure cookies are sent
-			});
+			// Determine wallet address from session or connected wallet
+			let walletAddress = '';
+
+			const userRes = await fetch('/api/auth/user', { credentials: 'include' });
 			const userData = await userRes.json();
-			user = userData.user;
-
-			// Fetch strategies if we have a session OR a connected wallet
-			if (user) {
-				// Fetch user's strategies (session-based)
-				const strategiesRes = await fetch('/api/strategies', {
-					credentials: 'include'
-				});
-
-				if (strategiesRes.ok) {
-					const strategiesData = await strategiesRes.json();
-					strategies = strategiesData.strategies || [];
-				} else if (strategiesRes.status === 401) {
-					// Session expired or invalid
-					user = null;
-					strategies = [];
-				} else {
-					throw new Error('Failed to fetch strategies');
-				}
-			} else if (walletState.connected && walletState.publicKey) {
-				// No session but wallet is connected - fetch by wallet address (read-only mode)
-				const walletAddress = walletState.publicKey.toString();
-				console.log('Fetching strategies for wallet (no session):', walletAddress);
-
-				const strategiesRes = await fetch(`/api/strategies?wallet=${walletAddress}`);
-
-				if (strategiesRes.ok) {
-					const strategiesData = await strategiesRes.json();
-					strategies = strategiesData.strategies || [];
-					// Set user object for display purposes
-					user = {
-						id: 0,
-						name: `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`,
-						email: '',
-						picture: '',
-						solanaAddress: walletAddress
-					};
-				} else {
-					strategies = [];
-				}
-			} else {
-				strategies = [];
+			if (userData.user) {
+				user = userData.user;
+				walletAddress = userData.user.solanaAddress || userData.user.walletAddress || '';
 			}
+
+			if (!walletAddress && walletState.connected && walletState.publicKey) {
+				walletAddress = walletState.publicKey.toString();
+				user = {
+					id: 0,
+					name: `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`,
+					email: '',
+					picture: ''
+				};
+			}
+
+			if (!walletAddress) {
+				strategies = [];
+				postedTrades = [];
+				return;
+			}
+
+			// Look up user from Supabase
+			const { data: dbUser } = await supabase
+				.from('users')
+				.select('id, username, avatar_url')
+				.eq('wallet_address', walletAddress)
+				.maybeSingle();
+
+			if (!dbUser) {
+				strategies = [];
+				postedTrades = [];
+				return;
+			}
+
+			// Set profile info
+			profileUsername = dbUser.username || '';
+			profileWalletAddress = walletAddress;
+			profileAvatarUrl = dbUser.avatar_url || '';
+
+			// Fetch backtest strategies
+			const { data: strats, error: stratErr } = await supabase
+				.from('backtest_strategies')
+				.select('*')
+				.eq('user_id', dbUser.id)
+				.order('created_at', { ascending: false });
+
+			if (stratErr) throw new Error(stratErr.message);
+
+			strategies = (strats || []).map((s: any) => ({
+				id: s.id,
+				strategyName: s.strategy_name,
+				marketQuestion: s.market_question || '',
+				initialCapital: s.initial_capital || 0,
+				finalCapital: s.final_capital || 0,
+				totalReturnPercent: s.total_return_percent || 0,
+				totalTrades: s.total_trades || 0,
+				winRate: s.win_rate || 0,
+				profitFactor: s.profit_factor || 0,
+				maxDrawdown: s.max_drawdown || 0,
+				equityCurve: s.equity_curve || [],
+				createdAt: s.created_at,
+				avgWin: s.avg_win || 0,
+				avgLoss: s.avg_loss || 0
+			}));
+
+			// Fetch posted trades
+			const { data: trades, error: tradeErr } = await supabase
+				.from('trades')
+				.select('*')
+				.eq('user_id', dbUser.id)
+				.eq('is_published', true)
+				.order('created_at', { ascending: false });
+
+			if (tradeErr) throw new Error(tradeErr.message);
+
+			postedTrades = (trades || []).map((t: any) => ({
+				id: t.id,
+				marketTitle: t.market_title || 'Unknown Market',
+				positionType: t.position_type || '',
+				entryPrice: t.entry_price || 0,
+				exitPrice: t.exit_price,
+				pnl: t.pnl,
+				status: t.status || 'closed',
+				platform: t.platform || '',
+				source: t.source || '',
+				analysis: t.analysis,
+				createdAt: t.created_at
+			}));
+
 		} catch (err: any) {
 			console.error('Error loading strategies:', err);
 			error = err.message || 'Failed to load strategies';
 			strategies = [];
+			postedTrades = [];
 		} finally {
 			loading = false;
 		}
@@ -193,11 +265,12 @@
 		deleteError = '';
 
 		try {
-			const response = await fetch(`/api/strategies/${strategyToDelete.id}`, { method: 'DELETE' });
+			const { error: delErr } = await supabase
+				.from('backtest_strategies')
+				.delete()
+				.eq('id', strategyToDelete.id);
 
-			if (!response.ok) {
-				throw new Error('Failed to delete strategy');
-			}
+			if (delErr) throw new Error(delErr.message);
 
 			strategies = strategies.filter(s => s.id !== strategyToDelete.id);
 			closeDeleteModal();
@@ -286,6 +359,67 @@
 		}
 	}
 
+	async function handleAvatarUpload(event: Event) {
+		const input = event.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file || !profileWalletAddress) return;
+
+		// Validate file
+		if (!file.type.startsWith('image/')) {
+			alert('Please select an image file');
+			return;
+		}
+		if (file.size > 2 * 1024 * 1024) {
+			alert('Image must be under 2MB');
+			return;
+		}
+
+		uploadingAvatar = true;
+		try {
+			const ext = file.name.split('.').pop() || 'png';
+			const filePath = `${profileWalletAddress}.${ext}`;
+
+			// Delete any existing avatar files for this wallet
+			const { data: existingFiles } = await supabase.storage
+				.from('avatar')
+				.list('', { search: profileWalletAddress });
+			if (existingFiles && existingFiles.length > 0) {
+				await supabase.storage
+					.from('avatar')
+					.remove(existingFiles.map(f => f.name));
+			}
+
+			// Upload to Supabase Storage
+			const { error: uploadErr } = await supabase.storage
+				.from('avatar')
+				.upload(filePath, file, { upsert: true });
+
+			if (uploadErr) throw new Error(uploadErr.message);
+
+			// Get public URL
+			const { data: urlData } = supabase.storage
+				.from('avatar')
+				.getPublicUrl(filePath);
+
+			const avatarUrl = urlData.publicUrl + '?t=' + Date.now();
+
+			// Update user record
+			const { error: updateErr } = await supabase
+				.from('users')
+				.update({ avatar_url: avatarUrl })
+				.eq('wallet_address', profileWalletAddress);
+
+			if (updateErr) throw new Error(updateErr.message);
+
+			profileAvatarUrl = avatarUrl;
+		} catch (err: any) {
+			console.error('Avatar upload error:', err);
+			alert('Failed to upload avatar: ' + err.message);
+		} finally {
+			uploadingAvatar = false;
+		}
+	}
+
 	function formatDate(dateString: string) {
 		return new Date(dateString).toLocaleDateString('en-US', {
 			year: 'numeric',
@@ -305,8 +439,66 @@
 <div class="strategies-page">
 	<div class="container">
 		<div class="header">
-			<h1>My Backtest Strategies</h1>
+			<h1>My Profile</h1>
 		</div>
+
+		<!-- Profile Section -->
+		{#if !loading && profileUsername}
+			<div class="profile-section">
+				<div class="profile-avatar-wrapper" on:click={() => fileInput.click()}>
+					{#if profileAvatarUrl}
+						<img src={profileAvatarUrl} alt="avatar" class="profile-avatar" />
+					{:else}
+						<div class="profile-avatar-placeholder">
+							{profileUsername.charAt(0).toUpperCase()}
+						</div>
+					{/if}
+					<div class="avatar-overlay">
+						{#if uploadingAvatar}
+							<span class="upload-spinner"></span>
+						{:else}
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+								<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+								<circle cx="12" cy="13" r="4"/>
+							</svg>
+						{/if}
+					</div>
+					<input
+						type="file"
+						accept="image/*"
+						bind:this={fileInput}
+						on:change={handleAvatarUpload}
+						style="display:none"
+					/>
+				</div>
+				<div class="profile-info">
+					<span class="profile-username">@{profileUsername}</span>
+					<span class="profile-address" title={profileWalletAddress}>
+						{profileWalletAddress.slice(0, 6)}...{profileWalletAddress.slice(-4)}
+					</span>
+					<div class="profile-stats">
+						<span class="profile-stat">{strategies.length} strategies</span>
+						<span class="profile-stat-sep">|</span>
+						<span class="profile-stat">{postedTrades.length} trades</span>
+					</div>
+				</div>
+			</div>
+		{/if}
+
+		<!-- Tabs -->
+		{#if user}
+			<div class="tabs">
+				<button class="tab" class:active={activeTab === 'all'} on:click={() => activeTab = 'all'}>
+					All ({strategies.length + postedTrades.length})
+				</button>
+				<button class="tab" class:active={activeTab === 'strategies'} on:click={() => activeTab = 'strategies'}>
+					Strategies ({strategies.length})
+				</button>
+				<button class="tab" class:active={activeTab === 'trades'} on:click={() => activeTab = 'trades'}>
+					Trades ({postedTrades.length})
+				</button>
+			</div>
+		{/if}
 
 		{#if loading}
 			<div class="loading">Loading...</div>
@@ -340,125 +532,183 @@
 					</button>
 				</div>
 			</div>
-		{:else if strategies.length === 0}
+		{:else if strategies.length === 0 && postedTrades.length === 0}
 			<div class="empty-state">
-				<h2>No Strategies Yet</h2>
-				<p>Complete a backtest to save your first strategy.</p>
+				<h2>Nothing Here Yet</h2>
+				<p>Complete a backtest or post a trade to see it here.</p>
 				<a href="/backtesting?tab=strategy" class="btn-primary">Start Backtesting</a>
 			</div>
 		{:else}
 			<div class="strategies-grid">
-				{#each strategies as strategy}
-					<div class="strategy-card" on:click={() => viewStrategy(strategy.id)}>
-						<div class="card-header">
-							<div class="header-left">
-								<h3>{strategy.strategyName}</h3>
-								<span class="date">{formatDate(strategy.createdAt)}</span>
+				<!-- Strategy Cards -->
+				{#if activeTab === 'all' || activeTab === 'strategies'}
+					{#each strategies as strategy}
+						<div class="strategy-card" on:click={() => viewStrategy(strategy.id)}>
+							<div class="card-type-badge strategy-badge">STRATEGY</div>
+							<div class="card-header">
+								<div class="header-left">
+									<h3>{strategy.strategyName}</h3>
+									<span class="date">{formatDate(strategy.createdAt)}</span>
+								</div>
+								<div class="card-actions" on:click|stopPropagation>
+									<button
+										on:click={() => openPaperTradeModal(strategy)}
+										class="btn-paper-trade"
+										title="Paper Trade This Strategy"
+										disabled={isPaperTrading}
+									>
+										<svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+											<path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+											<path d="M6.271 5.055a.5.5 0 0 1 .52.038l3.5 2.5a.5.5 0 0 1 0 .814l-3.5 2.5A.5.5 0 0 1 6 10.5v-5a.5.5 0 0 1 .271-.445z"/>
+										</svg>
+									</button>
+									<button
+										on:click={() => viewStrategy(strategy.id)}
+										class="btn-view"
+										title="View Details"
+									>
+										<svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+											<path d="M8 2.5c-3.5 0-6.5 2.5-8 5.5 1.5 3 4.5 5.5 8 5.5s6.5-2.5 8-5.5c-1.5-3-4.5-5.5-8-5.5zM8 11c-1.7 0-3-1.3-3-3s1.3-3 3-3 3 1.3 3 3-1.3 3-3 3zm0-5c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
+										</svg>
+									</button>
+									<button
+										on:click={() => openDeleteModal(strategy)}
+										class="btn-delete"
+										title="Delete"
+									>
+										<svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+											<path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+											<path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+										</svg>
+									</button>
+								</div>
 							</div>
-							<div class="card-actions" on:click|stopPropagation>
-								<button
-									on:click={() => openPaperTradeModal(strategy)}
-									class="btn-paper-trade"
-									title="Paper Trade This Strategy"
-									disabled={isPaperTrading}
-								>
-									<svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-										<path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
-										<path d="M6.271 5.055a.5.5 0 0 1 .52.038l3.5 2.5a.5.5 0 0 1 0 .814l-3.5 2.5A.5.5 0 0 1 6 10.5v-5a.5.5 0 0 1 .271-.445z"/>
-									</svg>
-								</button>
-								<button
-									on:click={() => viewStrategy(strategy.id)}
-									class="btn-view"
-									title="View Details"
-								>
-									<svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-										<path d="M8 2.5c-3.5 0-6.5 2.5-8 5.5 1.5 3 4.5 5.5 8 5.5s6.5-2.5 8-5.5c-1.5-3-4.5-5.5-8-5.5zM8 11c-1.7 0-3-1.3-3-3s1.3-3 3-3 3 1.3 3 3-1.3 3-3 3zm0-5c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
-									</svg>
-								</button>
-								<button
-									on:click={() => openDeleteModal(strategy)}
-									class="btn-delete"
-									title="Delete"
-								>
-									<svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-										<path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
-										<path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
-									</svg>
-								</button>
+
+							<p class="market-question">{strategy.marketQuestion}</p>
+
+							<div class="return-badge" class:positive={strategy.totalReturnPercent > 0} class:negative={strategy.totalReturnPercent < 0}>
+								<span class="return-label">RETURN</span>
+								<span class="return-value">
+									{strategy.totalReturnPercent > 0 ? '+' : ''}{strategy.totalReturnPercent.toFixed(2)}%
+								</span>
+							</div>
+
+							{#if strategy.equityCurve && strategy.equityCurve.length > 0}
+								<div class="equity-curve-container">
+									<MiniEquityCurveChart
+										equityCurve={strategy.equityCurve}
+										initialCapital={strategy.initialCapital}
+										isPositive={strategy.totalReturnPercent > 0}
+									/>
+								</div>
+							{/if}
+
+							<div class="metrics">
+								<div class="metric">
+									<span class="metric-label">WIN RATE</span>
+									<span class="metric-value" class:positive={strategy.winRate > 50} class:negative={strategy.winRate < 50}>
+										{strategy.winRate.toFixed(1)}%
+									</span>
+								</div>
+								<div class="metric">
+									<span class="metric-label">TRADES</span>
+									<span class="metric-value">{strategy.totalTrades}</span>
+								</div>
+								<div class="metric">
+									<span class="metric-label">PROFIT FACTOR</span>
+									<span class="metric-value" class:positive={strategy.profitFactor && strategy.profitFactor > 1} class:negative={strategy.profitFactor && strategy.profitFactor < 1}>
+										{strategy.profitFactor ? strategy.profitFactor.toFixed(2) : 'N/A'}
+									</span>
+								</div>
+								<div class="metric">
+									<span class="metric-label">MAX DRAWDOWN</span>
+									<span class="metric-value negative">
+										{strategy.maxDrawdown ? strategy.maxDrawdown.toFixed(2) + '%' : 'N/A'}
+									</span>
+								</div>
+								<div class="metric">
+									<span class="metric-label">AVG WIN</span>
+									<span class="metric-value positive">
+										{formatCurrency(strategy.avgWin)}
+									</span>
+								</div>
+								<div class="metric">
+									<span class="metric-label">AVG LOSS</span>
+									<span class="metric-value negative">
+										{formatCurrency(strategy.avgLoss)}
+									</span>
+								</div>
+							</div>
+
+							<div class="card-footer">
+								<span class="capital-flow">
+									{formatCurrency(strategy.initialCapital)} → {formatCurrency(strategy.finalCapital)}
+								</span>
 							</div>
 						</div>
+					{/each}
+				{/if}
 
-						<p class="market-question">{strategy.marketQuestion}</p>
+				<!-- Trade Cards -->
+				{#if activeTab === 'all' || activeTab === 'trades'}
+					{#each postedTrades as trade}
+						<div class="strategy-card trade-card-item">
+							<div class="card-type-badge trade-badge">TRADE</div>
+							<div class="card-header">
+								<div class="header-left">
+									<h3>{trade.marketTitle}</h3>
+									<span class="date">{formatDate(trade.createdAt)}</span>
+								</div>
+								<div class="trade-position-badge" class:pos-yes={trade.positionType === 'Yes'} class:pos-no={trade.positionType === 'No'}>
+									{trade.positionType}
+								</div>
+							</div>
 
-						<!-- Return Badge -->
-						<div class="return-badge" class:positive={strategy.totalReturnPercent > 0} class:negative={strategy.totalReturnPercent < 0}>
-							<span class="return-label">RETURN</span>
-							<span class="return-value">
-								{strategy.totalReturnPercent > 0 ? '+' : ''}{strategy.totalReturnPercent.toFixed(2)}%
-							</span>
+							{#if trade.pnl != null}
+								<div class="return-badge" class:positive={trade.pnl >= 0} class:negative={trade.pnl < 0}>
+									<span class="return-label">PnL</span>
+									<span class="return-value">
+										{trade.pnl >= 0 ? '+' : ''}{formatCurrency(trade.pnl)}
+									</span>
+								</div>
+							{/if}
+
+							<div class="metrics trade-metrics">
+								<div class="metric">
+									<span class="metric-label">ENTRY</span>
+									<span class="metric-value">${trade.entryPrice.toFixed(4)}</span>
+								</div>
+								{#if trade.exitPrice != null}
+									<div class="metric">
+										<span class="metric-label">EXIT</span>
+										<span class="metric-value">${trade.exitPrice.toFixed(4)}</span>
+									</div>
+								{/if}
+								<div class="metric">
+									<span class="metric-label">STATUS</span>
+									<span class="metric-value" class:positive={trade.status === 'closed'}>
+										{trade.status}
+									</span>
+								</div>
+								<div class="metric">
+									<span class="metric-label">PLATFORM</span>
+									<span class="metric-value">{trade.platform}</span>
+								</div>
+								<div class="metric">
+									<span class="metric-label">SOURCE</span>
+									<span class="metric-value">{trade.source}</span>
+								</div>
+							</div>
+
+							{#if trade.analysis}
+								<div class="trade-analysis">
+									<span class="analysis-label">Analysis</span>
+									<p>{trade.analysis}</p>
+								</div>
+							{/if}
 						</div>
-
-						<!-- Equity Curve -->
-						{#if strategy.equityCurve && strategy.equityCurve.length > 0}
-							<div class="equity-curve-container">
-								<MiniEquityCurveChart
-									equityCurve={strategy.equityCurve}
-									initialCapital={strategy.initialCapital}
-									isPositive={strategy.totalReturnPercent > 0}
-								/>
-							</div>
-						{/if}
-
-						<div class="metrics">
-							<div class="metric">
-								<span class="metric-label">WIN RATE</span>
-								<span class="metric-value" class:positive={strategy.winRate > 50} class:negative={strategy.winRate < 50}>
-									{strategy.winRate.toFixed(1)}%
-								</span>
-							</div>
-
-							<div class="metric">
-								<span class="metric-label">TRADES</span>
-								<span class="metric-value">{strategy.totalTrades}</span>
-							</div>
-
-							<div class="metric">
-								<span class="metric-label">PROFIT FACTOR</span>
-								<span class="metric-value" class:positive={strategy.profitFactor && strategy.profitFactor > 1} class:negative={strategy.profitFactor && strategy.profitFactor < 1}>
-									{strategy.profitFactor ? strategy.profitFactor.toFixed(2) : 'N/A'}
-								</span>
-							</div>
-
-							<div class="metric">
-								<span class="metric-label">MAX DRAWDOWN</span>
-								<span class="metric-value negative">
-									{strategy.maxDrawdown ? strategy.maxDrawdown.toFixed(2) + '%' : 'N/A'}
-								</span>
-							</div>
-
-							<div class="metric">
-								<span class="metric-label">AVG WIN</span>
-								<span class="metric-value positive">
-									{formatCurrency(strategy.avgWin)}
-								</span>
-							</div>
-
-							<div class="metric">
-								<span class="metric-label">AVG LOSS</span>
-								<span class="metric-value negative">
-									{formatCurrency(strategy.avgLoss)}
-								</span>
-							</div>
-						</div>
-
-						<div class="card-footer">
-							<span class="capital-flow">
-								{formatCurrency(strategy.initialCapital)} → {formatCurrency(strategy.finalCapital)}
-							</span>
-						</div>
-					</div>
-				{/each}
+					{/each}
+				{/if}
 			</div>
 		{/if}
 	</div>
@@ -1168,6 +1418,224 @@
 		font-weight: 600;
 	}
 
+	/* Profile Section */
+	.profile-section {
+		display: flex;
+		align-items: center;
+		gap: 24px;
+		padding: 28px;
+		background: #000;
+		border: 1px solid #FFFFFF;
+		border-radius: 16px;
+		margin-bottom: 32px;
+	}
+
+	.profile-avatar-wrapper {
+		position: relative;
+		width: 84px;
+		height: 84px;
+		border-radius: 50%;
+		cursor: pointer;
+		flex-shrink: 0;
+		border: 2px solid #F97316;
+		background: #000;
+	}
+
+	.profile-avatar {
+		width: 100%;
+		height: 100%;
+		border-radius: 50%;
+		object-fit: cover;
+		display: block;
+	}
+
+	.profile-avatar-placeholder {
+		width: 100%;
+		height: 100%;
+		border-radius: 50%;
+		background: linear-gradient(135deg, #F97316, #ea580c);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 32px;
+		font-weight: 800;
+		color: white;
+	}
+
+	.avatar-overlay {
+		position: absolute;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.6);
+		border-radius: 50%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		opacity: 0;
+		transition: opacity 0.2s;
+		color: white;
+	}
+
+	.profile-avatar-wrapper:hover .avatar-overlay {
+		opacity: 1;
+	}
+
+	.upload-spinner {
+		width: 20px;
+		height: 20px;
+		border: 2px solid rgba(255, 255, 255, 0.3);
+		border-top-color: white;
+		border-radius: 50%;
+		animation: spin 0.8s linear infinite;
+	}
+
+	.profile-info {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+
+	.profile-username {
+		font-size: 24px;
+		font-weight: 800;
+		color: white;
+		letter-spacing: -0.02em;
+	}
+
+	.profile-address {
+		font-size: 13px;
+		color: #8b92ab;
+		font-family: 'SF Mono', Consolas, monospace;
+		cursor: pointer;
+	}
+
+	.profile-address:hover {
+		color: #F97316;
+	}
+
+	.profile-stats {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-top: 4px;
+	}
+
+	.profile-stat {
+		font-size: 13px;
+		color: #8b92ab;
+		font-weight: 600;
+	}
+
+	.profile-stat-sep {
+		color: #2a2f45;
+		font-size: 13px;
+	}
+
+	/* Tabs */
+	.tabs {
+		display: flex;
+		gap: 8px;
+		margin-bottom: 32px;
+	}
+
+	.tab {
+		padding: 10px 20px;
+		background: transparent;
+		border: 1px solid #2a2f45;
+		color: #8b92ab;
+		border-radius: 8px;
+		cursor: pointer;
+		font-size: 14px;
+		font-weight: 600;
+		transition: all 0.2s;
+	}
+
+	.tab:hover {
+		border-color: #F97316;
+		color: #F97316;
+	}
+
+	.tab.active {
+		background: #F97316;
+		border-color: #F97316;
+		color: white;
+	}
+
+	/* Type badges */
+	.card-type-badge {
+		display: inline-block;
+		padding: 4px 10px;
+		border-radius: 4px;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0.8px;
+		text-transform: uppercase;
+		margin-bottom: 12px;
+	}
+
+	.strategy-badge {
+		background: rgba(99, 102, 241, 0.15);
+		color: #818cf8;
+		border: 1px solid rgba(99, 102, 241, 0.3);
+	}
+
+	.trade-badge {
+		background: rgba(249, 115, 22, 0.15);
+		color: #F97316;
+		border: 1px solid rgba(249, 115, 22, 0.3);
+	}
+
+	/* Trade card specifics */
+	.trade-card-item {
+		cursor: default;
+	}
+
+	.trade-position-badge {
+		padding: 4px 12px;
+		border-radius: 6px;
+		font-size: 12px;
+		font-weight: 700;
+		text-transform: uppercase;
+	}
+
+	.pos-yes {
+		background: rgba(16, 185, 129, 0.15);
+		color: #10b981;
+		border: 1px solid rgba(16, 185, 129, 0.3);
+	}
+
+	.pos-no {
+		background: rgba(239, 68, 68, 0.15);
+		color: #ef4444;
+		border: 1px solid rgba(239, 68, 68, 0.3);
+	}
+
+	.trade-metrics {
+		grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+	}
+
+	.trade-analysis {
+		margin-top: 12px;
+		padding: 12px;
+		background: rgba(255, 255, 255, 0.03);
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		border-radius: 8px;
+	}
+
+	.analysis-label {
+		font-size: 10px;
+		color: #8B92AB;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+		font-weight: 700;
+	}
+
+	.trade-analysis p {
+		color: #ccc;
+		font-size: 13px;
+		margin: 6px 0 0 0;
+		line-height: 1.5;
+	}
+
 	@media (max-width: 768px) {
 		.header {
 			flex-direction: column;
@@ -1177,6 +1645,10 @@
 
 		.strategies-grid {
 			grid-template-columns: 1fr;
+		}
+
+		.tabs {
+			flex-wrap: wrap;
 		}
 	}
 </style>

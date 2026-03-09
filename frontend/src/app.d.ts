@@ -7,9 +7,7 @@ declare global {
 		// interface PageData {}
 		// interface PageState {}
 		interface Platform {
-			env?: {
-				DB?: D1Database;
-			};
+			env?: {};
 		}
 	}
 }

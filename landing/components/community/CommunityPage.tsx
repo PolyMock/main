@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { supabase } from "@/lib/supabase";
+import WalletButton, { type ConnectedUser } from "./WalletButton";
 
 // --- Types ---
 
@@ -17,6 +19,9 @@ type Filters = {
 
 type SharedTrade = {
   id: string;
+  dbId?: string; // Supabase UUID for real posts
+  isFromDb?: boolean;
+  dbType?: "trade" | "strategy"; // which Supabase table
   username: string;
   marketType: MarketType;
   tradeType: TradeType;
@@ -45,6 +50,22 @@ type SharedTrade = {
   multiMarket?: boolean;
   marketCount?: number;
   equityCurve?: number[];
+  amount?: number;
+  avatarUrl?: string;
+  takeProfit?: number;
+  stopLoss?: number;
+  status?: string;
+  platform?: string;
+  // Backtest extras
+  winningTrades?: number;
+  losingTrades?: number;
+  entryType?: string;
+  backtestStopLoss?: number;
+  backtestTakeProfit?: number;
+  positionSizingType?: string;
+  positionSizingValue?: number;
+  initialCapital?: number;
+  finalCapital?: number;
 };
 
 // --- Asset options per market ---
@@ -59,278 +80,8 @@ const assetOptions: Record<MarketType, string[]> = {
 
 // --- Mock Data ---
 
-const mockTrades: SharedTrade[] = [
-  {
-    id: "1",
-    username: "cryptowhale42",
-    marketType: "crypto",
-    tradeType: "paper-trade",
-    asset: "BTC/USDT",
-    direction: "long",
-    entryPrice: 67250,
-    exitPrice: 71800,
-    pnl: 4550,
-    pnlPercent: 6.77,
-    duration: "3d 14h",
-    strategy: "Breakout Momentum",
-    timestamp: "2025-12-28T14:30:00Z",
-    comment: "Clean breakout above resistance, held through the pullback. Patience paid off!",
-    likes: 12,
-    commentCount: 12,
-  },
-  {
-    id: "2",
-    username: "bearish_dev",
-    marketType: "crypto",
-    tradeType: "paper-trade",
-    asset: "ETH/USDT",
-    direction: "short",
-    entryPrice: 3850,
-    exitPrice: 3420,
-    pnl: 430,
-    pnlPercent: 11.17,
-    duration: "1d 8h",
-    strategy: "Mean Reversion",
-    timestamp: "2025-12-27T09:15:00Z",
-    comment: "Rejection at the 200 EMA, textbook short setup",
-    likes: 8,
-    commentCount: 2,
-  },
-  {
-    id: "3",
-    username: "algo_trader_x",
-    marketType: "crypto",
-    tradeType: "backtest",
-    asset: "SOL",
-    direction: "long",
-    entryPrice: 0,
-    exitPrice: null,
-    pnl: 12400,
-    pnlPercent: 34.2,
-    duration: "90d",
-    strategy: "RSI + MACD Crossover",
-    timestamp: "2025-12-25T18:00:00Z",
-    comment: "90 day backtest on SOL with RSI + MACD. Very consistent results.",
-    likes: 24,
-    commentCount: 9,
-    winRate: 62.5,
-    sharpeRatio: 1.84,
-    maxDrawdown: 12.3,
-    totalTrades: 48,
-    profitFactor: 1.81,
-    avgWin: 76.21,
-    avgLoss: 27.18,
-    startBalance: 10000,
-    endBalance: 13420,
-    multiMarket: false,
-    equityCurve: [10000, 10120, 10350, 10280, 10500, 10780, 10650, 10900, 11200, 11100, 11400, 11650, 11500, 11800, 12100, 12050, 12400, 12650, 12800, 13000, 13200, 13100, 13300, 13420],
-  },
-  {
-    id: "4",
-    username: "quant_fox",
-    marketType: "crypto",
-    tradeType: "backtest",
-    asset: "BTC",
-    direction: "long",
-    entryPrice: 0,
-    exitPrice: null,
-    pnl: -2100,
-    pnlPercent: -8.4,
-    duration: "30d",
-    strategy: "Grid Trading Bot",
-    timestamp: "2025-12-24T12:00:00Z",
-    comment: "Grid bot didn't handle the volatility spike well. Need to adjust ranges.",
-    likes: 3,
-    commentCount: 6,
-    winRate: 45.0,
-    sharpeRatio: 0.72,
-    maxDrawdown: 18.6,
-    totalTrades: 120,
-    profitFactor: 0.72,
-    avgWin: 41.81,
-    avgLoss: 55.90,
-    startBalance: 5000,
-    endBalance: 4189.21,
-    multiMarket: true,
-    marketCount: 2,
-    equityCurve: [5000, 5100, 5050, 4900, 4800, 4950, 4700, 4600, 4500, 4650, 4400, 4350, 4200, 4300, 4150, 4189],
-  },
-  {
-    id: "4b",
-    username: "macro_king",
-    marketType: "prediction",
-    tradeType: "backtest",
-    asset: "POLITICS",
-    direction: "long",
-    entryPrice: 0,
-    exitPrice: null,
-    pnl: 376.23,
-    pnlPercent: 0.75,
-    duration: "60d",
-    strategy: "Sentiment Divergence",
-    timestamp: "2025-12-20T10:00:00Z",
-    comment: "Political prediction markets have consistent alpha if you track polling data.",
-    likes: 31,
-    commentCount: 12,
-    winRate: 39.3,
-    sharpeRatio: 1.12,
-    maxDrawdown: 139.57,
-    totalTrades: 28,
-    profitFactor: 1.81,
-    avgWin: 76.21,
-    avgLoss: 27.18,
-    startBalance: 50000,
-    endBalance: 50376.23,
-    multiMarket: false,
-    equityCurve: [50000, 50100, 50250, 50200, 50350, 50300, 50400, 50320, 50450, 50500, 50380, 50420, 50500, 50480, 50550, 50376],
-  },
-  {
-    id: "5",
-    username: "sports_oracle",
-    marketType: "prediction",
-    tradeType: "paper-trade",
-    asset: "NBA Finals MVP",
-    subcategory: "Sports",
-    direction: "yes",
-    entryPrice: 0.35,
-    exitPrice: 0.82,
-    pnl: 470,
-    pnlPercent: 134.3,
-    duration: "14d",
-    strategy: "Statistical Model",
-    timestamp: "2025-12-26T20:00:00Z",
-    comment: "Got in early before the odds shifted. Statistical model nailed it.",
-    likes: 18,
-    commentCount: 7,
-  },
-  {
-    id: "6",
-    username: "policy_wonk",
-    marketType: "prediction",
-    tradeType: "paper-trade",
-    asset: "Fed Rate Decision",
-    subcategory: "Politics",
-    direction: "no",
-    entryPrice: 0.6,
-    exitPrice: 0.28,
-    pnl: 320,
-    pnlPercent: 53.3,
-    duration: "7d",
-    strategy: "Contrarian Sentiment",
-    timestamp: "2025-12-23T16:30:00Z",
-    comment: "Market was too hawkish, faded the consensus. Easy money.",
-    likes: 6,
-    commentCount: 3,
-  },
-  {
-    id: "7",
-    username: "fx_ninja",
-    marketType: "forex",
-    tradeType: "paper-trade",
-    asset: "EUR/USD",
-    direction: "long",
-    entryPrice: 1.0842,
-    exitPrice: 1.0921,
-    pnl: 790,
-    pnlPercent: 0.73,
-    duration: "2d 6h",
-    strategy: "Support Bounce",
-    timestamp: "2025-12-27T08:00:00Z",
-    comment: "Strong support at 1.084, bounced perfectly. Love this pair.",
-    likes: 5,
-    commentCount: 1,
-  },
-  {
-    id: "8",
-    username: "cable_trader",
-    marketType: "forex",
-    tradeType: "paper-trade",
-    asset: "GBP/USD",
-    direction: "short",
-    entryPrice: 1.2715,
-    exitPrice: 1.2802,
-    pnl: -870,
-    pnlPercent: -0.68,
-    duration: "1d 12h",
-    strategy: "Trendline Break",
-    timestamp: "2025-12-26T11:45:00Z",
-    comment: "Got stopped out on the news spike. Should have waited for confirmation.",
-    likes: 2,
-    commentCount: 5,
-  },
-  {
-    id: "9",
-    username: "tech_bull",
-    marketType: "stocks",
-    tradeType: "paper-trade",
-    asset: "AAPL",
-    direction: "long",
-    entryPrice: 192.5,
-    exitPrice: 198.3,
-    pnl: 580,
-    pnlPercent: 3.01,
-    duration: "5d",
-    strategy: "Earnings Momentum",
-    timestamp: "2025-12-22T14:00:00Z",
-    comment: "Earnings beat drove this one. Simple momentum play.",
-    likes: 9,
-    commentCount: 2,
-  },
-  {
-    id: "10",
-    username: "ev_skeptic",
-    marketType: "stocks",
-    tradeType: "paper-trade",
-    asset: "TSLA",
-    direction: "short",
-    entryPrice: 248.9,
-    exitPrice: 231.4,
-    pnl: 1750,
-    pnlPercent: 7.03,
-    duration: "4d 3h",
-    strategy: "Resistance Rejection",
-    timestamp: "2025-12-21T10:30:00Z",
-    comment: "TSLA couldn't break 250 again. Clean rejection short.",
-    likes: 15,
-    commentCount: 8,
-  },
-  {
-    id: "11",
-    username: "gold_bug_99",
-    marketType: "commodities",
-    tradeType: "paper-trade",
-    asset: "Gold",
-    direction: "long",
-    entryPrice: 2045,
-    exitPrice: 2098,
-    pnl: 530,
-    pnlPercent: 2.59,
-    duration: "6d",
-    strategy: "Safe Haven Play",
-    timestamp: "2025-12-20T09:00:00Z",
-    comment: "Geopolitical tension = gold goes up. Never fails.",
-    likes: 7,
-    commentCount: 3,
-  },
-  {
-    id: "12",
-    username: "oil_baron_jr",
-    marketType: "commodities",
-    tradeType: "paper-trade",
-    asset: "Oil",
-    direction: "short",
-    entryPrice: 74.2,
-    exitPrice: 76.8,
-    pnl: -260,
-    pnlPercent: -3.5,
-    duration: "2d",
-    strategy: "OPEC Fade",
-    timestamp: "2025-12-19T15:00:00Z",
-    comment: "OPEC surprised everyone. Bad timing on this one.",
-    likes: 1,
-    commentCount: 0,
-  },
-];
+const mockTrades: SharedTrade[] = [];
+
 
 // --- Colors per market ---
 
@@ -469,7 +220,7 @@ function EquityCurve({ data, positive }: { data: number[]; positive: boolean }) 
   const fillPoints = `${pad},${h - pad} ${points.join(" ")} ${w - pad},${h - pad}`;
 
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-20 rounded-lg border border-gray-800 bg-white/[0.02]" preserveAspectRatio="none">
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-14 rounded-lg border border-gray-800 bg-white/[0.02]" preserveAspectRatio="none">
       <defs>
         <linearGradient id={`grad-${positive}`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={lineColor} stopOpacity="0.3" />
@@ -506,14 +257,15 @@ const mockComments: Record<string, { user: string; text: string }[]> = {
   "10": [{ user: "tsla_fan", text: "Bold short" }, { user: "ev_bull", text: "Lucky timing imo" }],
 };
 
-function TradeCard({ trade }: { trade: SharedTrade }) {
+function TradeCard({ trade, connectedUser }: { trade: SharedTrade; connectedUser: ConnectedUser | null }) {
   const isPositive = trade.pnl >= 0;
   const ts = new Date(trade.timestamp);
   const dateStr = ts.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const timeStr = ts.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
   const [showComments, setShowComments] = useState(false);
   const [commentText, setCommentText] = useState("");
-  const [comments, setComments] = useState(mockComments[trade.id] ?? []);
+  const [comments, setComments] = useState<{ user: string; text: string; avatarUrl?: string }[]>(mockComments[trade.id] ?? []);
+  const [commentsLoaded, setCommentsLoaded] = useState(!trade.isFromDb);
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(trade.likes);
 
@@ -522,16 +274,77 @@ function TradeCard({ trade }: { trade: SharedTrade }) {
 
   const isLongish = trade.direction === "long" || trade.direction === "yes";
 
-  const handleLike = () => {
+  // Load comments from Supabase when opening comments on a real post
+  const loadDbComments = useCallback(async () => {
+    if (!trade.isFromDb || !trade.dbId || commentsLoaded) return;
+    const table = trade.dbType === "trade" ? "trade_comments" : "strategy_comments";
+    const fk = trade.dbType === "trade" ? "trade_id" : "strategy_id";
+    const { data } = await supabase
+      .from(table)
+      .select("*, users!inner(username, avatar_url)")
+      .eq(fk, trade.dbId)
+      .order("created_at", { ascending: true });
+    if (data) {
+      setComments(data.map((c: any) => ({
+        user: c.users?.username || "anon",
+        text: c.content,
+        avatarUrl: c.users?.avatar_url || undefined,
+      })));
+    }
+    setCommentsLoaded(true);
+  }, [trade.isFromDb, trade.dbId, trade.dbType, commentsLoaded]);
+
+  const handleLike = async () => {
     setLiked((l) => !l);
     setLikeCount((c) => (liked ? c - 1 : c + 1));
+    // For real posts, update Supabase counter (best-effort, no auth required for display)
+    if (trade.isFromDb && trade.dbId) {
+      const countTable = trade.dbType === "trade" ? "trades" : "backtest_strategies";
+      const newCount = liked ? likeCount - 1 : likeCount + 1;
+      await supabase.from(countTable).update({ likes_count: Math.max(0, newCount) }).eq("id", trade.dbId);
+    }
   };
 
-  const handleAddComment = () => {
+  const [submittingComment, setSubmittingComment] = useState(false);
+
+  const handleAddComment = async () => {
     const trimmed = commentText.trim();
-    if (!trimmed) return;
-    setComments((prev) => [...prev, { user: "you", text: trimmed }]);
+    if (!trimmed || !connectedUser) return;
+
+    setSubmittingComment(true);
+
+    // Optimistically add to UI
+    setComments((prev) => [...prev, {
+      user: connectedUser.username,
+      text: trimmed,
+      avatarUrl: connectedUser.avatarUrl || undefined,
+    }]);
     setCommentText("");
+
+    // Save to Supabase if it's a real post
+    if (trade.isFromDb && trade.dbId) {
+      const table = trade.dbType === "trade" ? "trade_comments" : "strategy_comments";
+      const fk = trade.dbType === "trade" ? "trade_id" : "strategy_id";
+      await supabase.from(table).insert({
+        [fk]: trade.dbId,
+        user_id: connectedUser.userId,
+        content: trimmed,
+      });
+      // Update comment count
+      const countTable = trade.dbType === "trade" ? "trades" : "backtest_strategies";
+      await supabase
+        .from(countTable)
+        .update({ comments_count: comments.length + 1 })
+        .eq("id", trade.dbId);
+    }
+
+    setSubmittingComment(false);
+  };
+
+  const handleToggleComments = () => {
+    const next = !showComments;
+    setShowComments(next);
+    if (next && trade.isFromDb) loadDbComments();
   };
 
   // Shared like/comment buttons
@@ -551,7 +364,7 @@ function TradeCard({ trade }: { trade: SharedTrade }) {
         <span>{likeCount}</span>
       </button>
       <button
-        onClick={() => setShowComments((s) => !s)}
+        onClick={handleToggleComments}
         className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors text-sm ${
           showComments
             ? "bg-orange-500/15 text-orange-400 border-orange-500/30"
@@ -561,7 +374,7 @@ function TradeCard({ trade }: { trade: SharedTrade }) {
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
         </svg>
-        <span>{comments.length}</span>
+        <span>{commentsLoaded ? comments.length : (trade.commentCount || comments.length)}</span>
       </button>
     </div>
   );
@@ -581,80 +394,138 @@ function TradeCard({ trade }: { trade: SharedTrade }) {
       </button>
 
       {/* Comments list */}
-      <div className="flex-1 overflow-y-auto space-y-2 mb-2 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
+      <div className="flex-1 overflow-y-auto space-y-2.5 mb-2 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
         {comments.length === 0 ? (
           <p className="text-gray-600 text-xs text-center py-4">No comments yet. Be the first!</p>
         ) : (
           comments.map((c, i) => (
-            <div key={i} className="flex gap-2">
-              <span className="text-orange-400 text-xs font-medium shrink-0">@{c.user}</span>
-              <span className="text-gray-300 text-xs">{c.text}</span>
+            <div key={i} className="flex items-start gap-2">
+              {c.avatarUrl ? (
+                <img src={c.avatarUrl} alt={c.user} className="w-5 h-5 rounded-full object-cover shrink-0 mt-0.5" />
+              ) : (
+                <div className="w-5 h-5 rounded-full bg-orange-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                  <span className="text-orange-400 text-[9px] font-bold">{c.user[0]?.toUpperCase()}</span>
+                </div>
+              )}
+              <div className="min-w-0">
+                <span className="text-orange-400 text-xs font-medium">@{c.user}</span>
+                <span className="text-gray-300 text-xs ml-1.5">{c.text}</span>
+              </div>
             </div>
           ))
         )}
       </div>
 
       {/* Input */}
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={commentText}
-          onChange={(e) => setCommentText(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleAddComment()}
-          placeholder="Write a comment..."
-          className="flex-1 px-3 py-1.5 rounded-lg text-xs bg-white/5 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-orange-500/50 transition-colors"
-        />
-        <button
-          onClick={handleAddComment}
-          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-orange-500/15 text-orange-400 border border-orange-500/30 hover:bg-orange-500/25 transition-colors"
-        >
-          Post
-        </button>
-      </div>
+      {connectedUser ? (
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={commentText}
+            onChange={(e) => setCommentText(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleAddComment()}
+            placeholder="Write a comment..."
+            className="flex-1 px-3 py-1.5 rounded-lg text-xs bg-white/5 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-orange-500/50 transition-colors"
+          />
+          <button
+            onClick={handleAddComment}
+            disabled={submittingComment || !commentText.trim()}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-orange-500/15 text-orange-400 border border-orange-500/30 hover:bg-orange-500/25 disabled:opacity-40 transition-colors"
+          >
+            Post
+          </button>
+        </div>
+      ) : (
+        <p className="text-gray-500 text-xs text-center py-1">Connect your wallet to comment</p>
+      )}
     </div>
   );
 
-  const CARD = "glass-card rounded-xl p-4 border border-gray-800 transition-colors h-[340px] flex flex-col";
+  const CARD = "glass-card rounded-xl p-4 border border-gray-800 transition-colors h-[420px] flex flex-col";
 
   const backtestDate = ts.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
   // Paper trade body
+  const hasTpSl = trade.takeProfit != null || trade.stopLoss != null;
+
   const paperBody = (
     <>
-      <div className="mb-3">
-        <span className={`text-lg font-bold ${isLongish ? "text-green-400" : "text-red-400"}`}>
+      {/* Title — fixed 2-line area */}
+      <div className="min-h-[40px] max-h-[40px] mb-2 overflow-hidden">
+        <p className={`text-sm font-bold leading-tight line-clamp-2 ${isLongish ? "text-green-400" : "text-red-400"}`}>
           {trade.asset}
-        </span>
-        {trade.subcategory && (
-          <span className="text-gray-500 text-xs ml-2">({trade.subcategory})</span>
-        )}
-        <div className="text-gray-500 text-[10px]">{dateStr}, {timeStr}</div>
+        </p>
       </div>
-      <div className="rounded-lg bg-white/[0.03] border border-gray-800 p-2.5 mb-3">
-        <div className="grid grid-cols-3 gap-2 text-xs">
+      {/* Meta row */}
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-gray-500 text-[10px]">{dateStr}, {timeStr}</span>
+        <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${marketColors[trade.marketType]}`}>
+          {trade.marketType.toUpperCase()}
+        </span>
+        {trade.platform && (
+          <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-gray-400 border border-gray-700 font-medium">
+            {trade.platform.toUpperCase()}
+          </span>
+        )}
+        {trade.status && (
+          <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${
+            trade.status === "closed" ? "bg-gray-500/15 text-gray-400 border border-gray-600" : "bg-green-500/15 text-green-400 border border-green-600"
+          }`}>
+            {trade.status.toUpperCase()}
+          </span>
+        )}
+      </div>
+      {/* Stats grid */}
+      <div className="rounded-lg bg-white/[0.03] border border-gray-800 p-2.5 mb-2">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+          {trade.amount != null && (
+            <div>
+              <span className="text-gray-500">Invested:</span>
+              <p className="text-white font-semibold text-sm">${trade.amount.toFixed(2)}</p>
+            </div>
+          )}
           <div>
-            <span className="text-gray-500">Entry Price:</span>
+            <span className="text-gray-500">Entry:</span>
             <p className="text-white font-semibold text-sm">{formatPrice(trade.entryPrice)}</p>
-            <span className="text-gray-600 text-[10px]">{dateStr}, {timeStr}</span>
           </div>
           <div>
-            <span className="text-gray-500">Exit Price:</span>
+            <span className="text-gray-500">Exit:</span>
             <p className="text-white font-semibold text-sm">
               {trade.exitPrice !== null ? formatPrice(trade.exitPrice) : "—"}
             </p>
-            <span className="text-gray-600 text-[10px]">{dateStr}, {timeStr}</span>
           </div>
           <div>
             <span className="text-gray-500">P&L:</span>
             <p className={`font-bold text-sm ${isPositive ? "text-green-400" : "text-red-400"}`}>
-              {isPositive ? "+" : ""}{trade.pnlPercent.toFixed(2)}%
+              {isPositive ? "+" : ""}${Math.abs(trade.pnl).toFixed(2)}
+              <span className={`text-[10px] ml-1 ${isPositive ? "text-green-500/60" : "text-red-500/60"}`}>
+                ({isPositive ? "+" : ""}{trade.pnlPercent.toFixed(2)}%)
+              </span>
             </p>
           </div>
         </div>
       </div>
+      {/* TP / SL row */}
+      {hasTpSl && (
+        <div className="flex gap-3 mb-2 text-[10px]">
+          {trade.takeProfit != null && (
+            <div className="flex items-center gap-1 px-2 py-1 rounded bg-green-500/10 border border-green-500/20">
+              <span className="text-gray-400">TP:</span>
+              <span className="text-green-400 font-semibold">{formatPrice(trade.takeProfit)}</span>
+            </div>
+          )}
+          {trade.stopLoss != null && (
+            <div className="flex items-center gap-1 px-2 py-1 rounded bg-red-500/10 border border-red-500/20">
+              <span className="text-gray-400">SL:</span>
+              <span className="text-red-400 font-semibold">{formatPrice(trade.stopLoss)}</span>
+            </div>
+          )}
+        </div>
+      )}
+      {/* Comment */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {trade.comment && (
-          <p className="text-gray-300 text-xs leading-relaxed line-clamp-3">{trade.comment}</p>
+          <p className="text-gray-300 text-xs leading-relaxed line-clamp-2">{trade.comment}</p>
         )}
       </div>
     </>
@@ -663,37 +534,98 @@ function TradeCard({ trade }: { trade: SharedTrade }) {
   // Backtest body
   const backtestBody = (
     <>
-      <div className="mb-2">
-        <span className="text-lg font-bold text-purple-400 uppercase">{trade.asset}</span>
-        <div className="flex items-center gap-2">
-          <span className="text-gray-500 text-[10px]">{backtestDate}</span>
-          {trade.multiMarket && (
-            <span className="text-orange-400/80 text-[10px]">Multi-market ({trade.marketCount})</span>
-          )}
-        </div>
+      {/* Title */}
+      <div className="min-h-[32px] max-h-[32px] mb-1 overflow-hidden">
+        <p className="text-xs font-bold text-purple-400 uppercase leading-tight line-clamp-2">{trade.asset}</p>
       </div>
+      {/* Meta row */}
+      <div className="flex items-center flex-wrap gap-1.5 mb-1.5">
+        <span className="text-gray-500 text-[9px]">{backtestDate}</span>
+        {trade.platform && (
+          <span className="text-[8px] px-1 py-0.5 rounded bg-white/5 text-gray-400 border border-gray-700 font-medium">
+            {trade.platform.toUpperCase()}
+          </span>
+        )}
+        {trade.entryType && (
+          <span className="text-[8px] px-1 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 font-medium">
+            {trade.entryType.toUpperCase()}
+          </span>
+        )}
+      </div>
+      {/* Equity curve — compact */}
       {trade.equityCurve && (
-        <div className="mb-3">
+        <div className="mb-1.5">
           <EquityCurve data={trade.equityCurve} positive={isPositive} />
         </div>
       )}
-      <div className="grid grid-cols-3 gap-2 mb-3">
-        <div className="rounded-lg bg-white/[0.03] border border-gray-800 p-2 text-center">
-          <span className="text-gray-500 text-[10px] uppercase block">Win Rate</span>
-          <span className={`font-bold text-sm ${(trade.winRate ?? 0) >= 50 ? "text-green-400" : "text-red-400"}`}>{trade.winRate}%</span>
+      {/* Capital + Return — single compact row */}
+      <div className="grid grid-cols-4 gap-1 mb-1.5 text-[10px]">
+        <div className="rounded bg-white/[0.03] border border-gray-800 px-1.5 py-1 text-center">
+          <span className="text-gray-500 block text-[8px] uppercase">Start</span>
+          <span className="text-white font-semibold">${(trade.initialCapital ?? trade.startBalance ?? 0).toLocaleString()}</span>
         </div>
-        <div className="rounded-lg bg-white/[0.03] border border-gray-800 p-2 text-center">
-          <span className="text-gray-500 text-[10px] uppercase block">Trades</span>
-          <span className="font-bold text-sm text-white">{trade.totalTrades}</span>
+        <div className="rounded bg-white/[0.03] border border-gray-800 px-1.5 py-1 text-center">
+          <span className="text-gray-500 block text-[8px] uppercase">Final</span>
+          <span className={`font-semibold ${isPositive ? "text-green-400" : "text-red-400"}`}>${(trade.finalCapital ?? trade.endBalance ?? 0).toLocaleString()}</span>
         </div>
-        <div className="rounded-lg bg-white/[0.03] border border-gray-800 p-2 text-center">
-          <span className="text-gray-500 text-[10px] uppercase block">Max DD</span>
-          <span className="font-bold text-sm text-red-400">{trade.maxDrawdown}%</span>
+        <div className="rounded bg-white/[0.03] border border-gray-800 px-1.5 py-1 text-center">
+          <span className="text-gray-500 block text-[8px] uppercase">Return</span>
+          <span className={`font-bold ${isPositive ? "text-green-400" : "text-red-400"}`}>{isPositive ? "+" : ""}{trade.pnlPercent.toFixed(1)}%</span>
+        </div>
+        <div className="rounded bg-white/[0.03] border border-gray-800 px-1.5 py-1 text-center">
+          <span className="text-gray-500 block text-[8px] uppercase">P&L</span>
+          <span className={`font-bold ${isPositive ? "text-green-400" : "text-red-400"}`}>{isPositive ? "+" : ""}${Math.abs(trade.pnl).toFixed(0)}</span>
         </div>
       </div>
-      <div className="flex-1 min-h-0 overflow-hidden">
-        {trade.comment && (
-          <p className="text-gray-300 text-xs leading-relaxed line-clamp-3">{trade.comment}</p>
+      {/* Stats grid — 2 rows of 4 */}
+      <div className="grid grid-cols-4 gap-1 mb-1">
+        <div className="rounded bg-white/[0.03] border border-gray-800 px-1 py-1 text-center">
+          <span className="text-gray-500 text-[8px] uppercase block">Win</span>
+          <span className={`font-bold text-[10px] ${(trade.winRate ?? 0) >= 50 ? "text-green-400" : "text-red-400"}`}>{trade.winRate ?? "—"}%</span>
+        </div>
+        <div className="rounded bg-white/[0.03] border border-gray-800 px-1 py-1 text-center">
+          <span className="text-gray-500 text-[8px] uppercase block">Trades</span>
+          <span className="font-bold text-[10px] text-white">{trade.totalTrades ?? "—"}</span>
+        </div>
+        <div className="rounded bg-white/[0.03] border border-gray-800 px-1 py-1 text-center">
+          <span className="text-gray-500 text-[8px] uppercase block">Max DD</span>
+          <span className="font-bold text-[10px] text-red-400">{trade.maxDrawdown ?? "—"}%</span>
+        </div>
+        <div className="rounded bg-white/[0.03] border border-gray-800 px-1 py-1 text-center">
+          <span className="text-gray-500 text-[8px] uppercase block">Sharpe</span>
+          <span className="font-bold text-[10px] text-white">{trade.sharpeRatio ?? "—"}</span>
+        </div>
+      </div>
+      <div className="grid grid-cols-4 gap-1">
+        <div className="rounded bg-white/[0.03] border border-gray-800 px-1 py-1 text-center">
+          <span className="text-gray-500 text-[8px] uppercase block">PF</span>
+          <span className="font-bold text-[10px] text-white">{trade.profitFactor ?? "—"}</span>
+        </div>
+        <div className="rounded bg-white/[0.03] border border-gray-800 px-1 py-1 text-center">
+          <span className="text-gray-500 text-[8px] uppercase block">W/L</span>
+          <span className="font-bold text-[10px] text-white">{trade.winningTrades ?? "—"}/{trade.losingTrades ?? "—"}</span>
+        </div>
+        {trade.backtestTakeProfit != null ? (
+          <div className="rounded bg-green-500/5 border border-green-500/15 px-1 py-1 text-center">
+            <span className="text-gray-500 text-[8px] uppercase block">TP</span>
+            <span className="font-bold text-[10px] text-green-400">{trade.backtestTakeProfit}%</span>
+          </div>
+        ) : (
+          <div className="rounded bg-white/[0.03] border border-gray-800 px-1 py-1 text-center">
+            <span className="text-gray-500 text-[8px] uppercase block">TP</span>
+            <span className="font-bold text-[10px] text-gray-600">—</span>
+          </div>
+        )}
+        {trade.backtestStopLoss != null ? (
+          <div className="rounded bg-red-500/5 border border-red-500/15 px-1 py-1 text-center">
+            <span className="text-gray-500 text-[8px] uppercase block">SL</span>
+            <span className="font-bold text-[10px] text-red-400">{trade.backtestStopLoss}%</span>
+          </div>
+        ) : (
+          <div className="rounded bg-white/[0.03] border border-gray-800 px-1 py-1 text-center">
+            <span className="text-gray-500 text-[8px] uppercase block">SL</span>
+            <span className="font-bold text-[10px] text-gray-600">—</span>
+          </div>
         )}
       </div>
     </>
@@ -705,6 +637,13 @@ function TradeCard({ trade }: { trade: SharedTrade }) {
   const header = (
     <div className="flex items-center justify-between mb-2">
       <div className="flex items-center gap-2">
+        {trade.avatarUrl ? (
+          <img src={trade.avatarUrl} alt={trade.username} className="w-6 h-6 rounded-full object-cover border border-gray-600" />
+        ) : (
+          <div className="w-6 h-6 rounded-full bg-orange-500/20 border border-orange-500/30 flex items-center justify-center">
+            <span className="text-orange-400 text-[10px] font-bold">{trade.username[0]?.toUpperCase()}</span>
+          </div>
+        )}
         <span className="text-white font-medium text-sm">@{trade.username}</span>
         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border uppercase ${
           isPaper
@@ -750,10 +689,145 @@ export default function CommunityPage() {
   });
   const [search, setSearch] = useState("");
   const hasAnimated = useRef(false);
+  const [dbTrades, setDbTrades] = useState<SharedTrade[]>([]);
+  const [dbLoading, setDbLoading] = useState(true);
+  const [connectedUser, setConnectedUser] = useState<ConnectedUser | null>(null);
+
+  const PAIR_SYMBOLS: Record<number, string> = {
+    0: "SOL/USDT", 1: "BTC/USDT", 2: "ETH/USDT", 3: "AVAX/USDT", 4: "LINK/USDT",
+  };
+
+  // Load real data from Supabase
+  useEffect(() => {
+    async function loadFromSupabase() {
+      try {
+        // Fetch published trades
+        const { data: trades, error: tradeErr } = await supabase
+          .from("trades")
+          .select("id, user_id, source, position_type, entry_price, exit_price, amount, pnl, market_id, market_title, pair_index, analysis, is_published, likes_count, comments_count, created_at, take_profit_price, stop_loss_price, status, platform, users(username, avatar_url)")
+          .eq("is_published", true)
+          .order("created_at", { ascending: false })
+          .limit(50);
+
+        if (tradeErr) console.error("Trade fetch error:", tradeErr);
+
+        // Fetch published strategies
+        const { data: strategies, error: stratErr } = await supabase
+          .from("backtest_strategies")
+          .select("id, user_id, strategy_name, total_return_percent, initial_capital, final_capital, win_rate, sharpe_ratio, max_drawdown, total_trades, winning_trades, losing_trades, profit_factor, equity_curve, is_published, likes_count, comments_count, created_at, entry_type, stop_loss, take_profit, position_sizing_type, position_sizing_value, platform, users(username, avatar_url)")
+          .eq("is_published", true)
+          .order("created_at", { ascending: false })
+          .limit(50);
+
+        if (stratErr) console.error("Strategy fetch error:", stratErr);
+
+        const items: SharedTrade[] = [];
+
+        // Convert trades
+        for (const t of trades || []) {
+          const isBlockberg = t.source === "blockberg";
+          const symbol = isBlockberg && t.pair_index != null
+            ? PAIR_SYMBOLS[t.pair_index] || "UNKNOWN"
+            : t.market_title || t.market_id || "Market";
+          const posType = (t.position_type || "").toLowerCase();
+          const direction = (posType === "long" || posType === "yes" || posType === "no" || posType === "short")
+            ? posType as "long" | "short" | "yes" | "no"
+            : "long";
+          const entry = Number(t.entry_price) || 0;
+          const exit = t.exit_price != null ? Number(t.exit_price) : null;
+          const pnl = Number(t.pnl) || 0;
+          const pnlPct = entry > 0 && exit != null ? ((exit - entry) / entry) * 100 : 0;
+
+          items.push({
+            id: `db-trade-${t.id}`,
+            dbId: t.id,
+            isFromDb: true,
+            dbType: "trade",
+            username: (t.users as any)?.username || "anon",
+            avatarUrl: (t.users as any)?.avatar_url || undefined,
+            marketType: isBlockberg ? "crypto" : "prediction",
+            tradeType: "paper-trade",
+            asset: symbol,
+            direction,
+            entryPrice: entry,
+            exitPrice: exit,
+            pnl,
+            pnlPercent: pnlPct,
+            duration: "",
+            strategy: "",
+            timestamp: t.created_at,
+            comment: t.analysis || undefined,
+            likes: t.likes_count || 0,
+            commentCount: t.comments_count || 0,
+            amount: Number(t.amount) || undefined,
+            takeProfit: t.take_profit_price != null ? Number(t.take_profit_price) : undefined,
+            stopLoss: t.stop_loss_price != null ? Number(t.stop_loss_price) : undefined,
+            status: t.status || undefined,
+            platform: t.platform || t.source || undefined,
+          });
+        }
+
+        // Convert strategies
+        for (const s of strategies || []) {
+          const roi = Number(s.total_return_percent) || 0;
+          items.push({
+            id: `db-strat-${s.id}`,
+            dbId: s.id,
+            isFromDb: true,
+            dbType: "strategy",
+            username: (s.users as any)?.username || "anon",
+            avatarUrl: (s.users as any)?.avatar_url || undefined,
+            marketType: "prediction",
+            tradeType: "backtest",
+            asset: s.strategy_name || "Strategy",
+            direction: roi >= 0 ? "long" : "short",
+            entryPrice: 0,
+            exitPrice: null,
+            pnl: (Number(s.final_capital) || 0) - (Number(s.initial_capital) || 0),
+            pnlPercent: roi,
+            duration: "",
+            strategy: s.strategy_name,
+            timestamp: s.created_at,
+            comment: undefined,
+            likes: s.likes_count || 0,
+            commentCount: s.comments_count || 0,
+            winRate: Number(s.win_rate) || undefined,
+            sharpeRatio: Number(s.sharpe_ratio) || undefined,
+            maxDrawdown: Number(s.max_drawdown) || undefined,
+            totalTrades: s.total_trades || undefined,
+            startBalance: Number(s.initial_capital) || undefined,
+            endBalance: Number(s.final_capital) || undefined,
+            equityCurve: s.equity_curve || undefined,
+            profitFactor: Number(s.profit_factor) || undefined,
+            winningTrades: s.winning_trades || undefined,
+            losingTrades: s.losing_trades || undefined,
+            entryType: s.entry_type || undefined,
+            backtestStopLoss: s.stop_loss != null ? Number(s.stop_loss) : undefined,
+            backtestTakeProfit: s.take_profit != null ? Number(s.take_profit) : undefined,
+            positionSizingType: s.position_sizing_type || undefined,
+            positionSizingValue: s.position_sizing_value != null ? Number(s.position_sizing_value) : undefined,
+            initialCapital: Number(s.initial_capital) || undefined,
+            finalCapital: Number(s.final_capital) || undefined,
+            platform: Array.isArray(s.platform) ? s.platform.join(", ") : s.platform || undefined,
+          });
+        }
+
+        setDbTrades(items);
+      } catch (err) {
+        console.error("Failed to load from Supabase:", err);
+      } finally {
+        setDbLoading(false);
+      }
+    }
+    loadFromSupabase();
+  }, []);
+
+  // Merge real + mock data (real first)
+  const allTrades = useMemo(() => [...dbTrades, ...mockTrades], [dbTrades]);
 
   const filteredTrades = useMemo(() => {
     const q = search.toLowerCase().trim();
-    return mockTrades.filter((trade) => {
+    return allTrades.filter((trade) => {
       if (filters.marketType !== "all" && trade.marketType !== filters.marketType) return false;
       if (filters.tradeType !== "all" && trade.tradeType !== filters.tradeType) return false;
       if (filters.pnl === "positive" && trade.pnl < 0) return false;
@@ -778,7 +852,7 @@ export default function CommunityPage() {
       }
       return true;
     });
-  }, [filters, search]);
+  }, [filters, search, allTrades]);
 
   const currentAssetOptions =
     filters.marketType !== "all" ? assetOptions[filters.marketType] : null;
@@ -829,6 +903,16 @@ export default function CommunityPage() {
             Browse shared paper trades and backtested strategies across all markets.
             Learn from the community and discover winning setups.
           </p>
+        </motion.div>
+
+        {/* Wallet Connect */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.15 }}
+          className="flex justify-center mb-6"
+        >
+          <WalletButton onUserChange={setConnectedUser} />
         </motion.div>
 
         {/* Filter Bar */}
@@ -936,7 +1020,7 @@ export default function CommunityPage() {
           >
             {filteredTrades.map((trade) => (
               <div key={trade.id}>
-                <TradeCard trade={trade} />
+                <TradeCard trade={trade} connectedUser={connectedUser} />
               </div>
             ))}
           </motion.div>

@@ -6,6 +6,8 @@
 	import { sessionKeyManager } from '$lib/solana/session-keys';
 	import { polymarketClient } from '$lib/polymarket';
 	import { PublicKey } from '@solana/web3.js';
+	import PostTradeModal from '$lib/components/PostTradeModal.svelte';
+	import { supabase } from '$lib/supabase';
 
 	interface Position {
 		id: string;
@@ -52,6 +54,67 @@
 	let sharesToSell = 0;
 	let maxShares = 0;
 
+	// Post trade modal state
+	let showPostModal = false;
+	let postTradeData: any = null;
+	let postedPositionKeys = new Set<string>();
+
+	function getPositionKey(marketId: string, positionType: string, entryPrice: number): string {
+		return `${marketId}:${positionType}:${entryPrice.toFixed(6)}`;
+	}
+
+	async function loadPostedTrades() {
+		const wallet = walletState.publicKey?.toString();
+		if (!wallet) return;
+
+		const { data: user } = await supabase
+			.from('users')
+			.select('id')
+			.eq('wallet_address', wallet)
+			.maybeSingle();
+		if (!user) return;
+
+		const { data: trades } = await supabase
+			.from('trades')
+			.select('market_id, position_type, entry_price')
+			.eq('user_id', user.id)
+			.eq('is_published', true);
+
+		if (trades) {
+			postedPositionKeys = new Set(
+				trades.map(t => getPositionKey(t.market_id, t.position_type, Number(t.entry_price)))
+			);
+		}
+	}
+
+	function isPositionPosted(position: Position): boolean {
+		return postedPositionKeys.has(getPositionKey(position.marketId, position.predictionType, position.pricePerShare));
+	}
+
+	function openPostModal(position: Position) {
+		postTradeData = {
+			marketId: position.marketId,
+			marketName: position.marketName,
+			positionType: position.predictionType,
+			entryPrice: position.pricePerShare,
+			exitPrice: position.status === 'Closed' ? position.closedPrice || position.currentPrice : undefined,
+			pnl: position.pnl,
+			amount: position.amountUsdc,
+			status: position.status.toLowerCase()
+		};
+		showPostModal = true;
+	}
+
+	function handleTradePosted() {
+		if (postTradeData) {
+			postedPositionKeys.add(getPositionKey(postTradeData.marketId, postTradeData.positionType, postTradeData.entryPrice));
+			postedPositionKeys = postedPositionKeys; // trigger reactivity
+		}
+		showPostModal = false;
+		postTradeData = null;
+		showToastNotification('success', 'Trade posted to community feed!');
+	}
+
 	// Toast state
 	let showToast = false;
 	let toastType: 'success' | 'error' = 'success';
@@ -82,7 +145,7 @@
 	onMount(async () => {
 		if (walletState.connected && walletState.publicKey) {
 			lastLoadedWallet = walletState.publicKey.toString();
-			await loadPositions();
+			await Promise.all([loadPositions(), loadPostedTrades()]);
 		} else {
 			loading = false;
 		}
@@ -577,6 +640,10 @@
 								<td>
 									{#if position.status === 'Active'}
 										<button class="action-btn" on:click={() => sellPosition(position.id, position.currentPrice, position)}>Sell</button>
+									{:else if isPositionPosted(position)}
+										<span class="posted-label">Posted</span>
+									{:else}
+										<button class="action-btn post-btn" on:click={() => openPostModal(position)}>Post</button>
 									{/if}
 								</td>
 							</tr>
@@ -670,6 +737,14 @@
 		<button class="pm-btn primary" on:click={() => showSessionRequiredModal = false}>Got it</button>
 	</div>
 </div>
+{/if}
+
+{#if showPostModal && postTradeData}
+	<PostTradeModal
+		trade={postTradeData}
+		onClose={() => { showPostModal = false; postTradeData = null; }}
+		onPosted={handleTradePosted}
+	/>
 {/if}
 
 <style>
@@ -1296,6 +1371,28 @@
 	.action-btn:hover {
 		background: #FF6B6B;
 		border-color: #FF6B6B;
+	}
+
+	.action-btn.post-btn {
+		border-color: #F97316;
+		color: #F97316;
+		margin-left: 4px;
+	}
+
+	.action-btn.post-btn:hover {
+		background: #F97316;
+		color: #fff;
+		border-color: #F97316;
+	}
+
+	.posted-label {
+		font-size: 12px;
+		font-weight: 600;
+		color: #10b981;
+		padding: 4px 10px;
+		border: 1px solid rgba(16, 185, 129, 0.3);
+		border-radius: 4px;
+		background: rgba(16, 185, 129, 0.1);
 	}
 
 	@media (max-width: 768px) {

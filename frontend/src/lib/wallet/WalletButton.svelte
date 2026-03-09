@@ -256,6 +256,9 @@
 						disabled={wallet.readyState === 'NotDetected'}
 					>
 						<div class="wallet-option-left">
+							{#if wallet.icon}
+								<img src={wallet.icon} alt={wallet.name} class="wallet-icon" />
+							{/if}
 							<span class="wallet-name">{wallet.name}</span>
 						</div>
 
@@ -520,6 +523,13 @@
 	.wallet-option-left {
 		display: flex;
 		align-items: center;
+		gap: 12px;
+	}
+
+	.wallet-icon {
+		width: 28px;
+		height: 28px;
+		border-radius: 6px;
 	}
 
 	.wallet-name {

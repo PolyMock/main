@@ -5,7 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
-		"dev:wrangler": "npm run build && wrangler pages dev .svelte-kit/cloudflare --compatibility-date=2024-01-01 --d1 DB=polymock-db --port=8788 --live-reload",
+		"dev:wrangler": "npm run build && wrangler pages dev .svelte-kit/cloudflare --compatibility-date=2024-01-01 --port=8788 --live-reload",
 		"dev:watch": "vite build --watch",
 		"build": "vite build",
 		"preview": "vite preview",
@@ -33,6 +33,7 @@
 		"@solana/wallet-adapter-react-ui": "^0.9.39",
 		"@solana/wallet-adapter-wallets": "^0.19.37",
 		"@solana/web3.js": "^1.98.4",
+		"@supabase/supabase-js": "^2.99.0",
 		"axios": "^1.12.2"
 	}
 }

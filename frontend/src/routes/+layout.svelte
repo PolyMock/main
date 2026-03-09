@@ -2,13 +2,32 @@
 	import { onMount } from 'svelte';
 	import favicon from '$lib/assets/favicon.svg';
 	import Navbar from '$lib/components/Navbar.svelte';
+	import UsernameModal from '$lib/components/UsernameModal.svelte';
 	import { handleAuthCallback } from '$lib/auth/auth-store';
+	import { walletStore, setUsername } from '$lib/wallet/stores';
 
 	let { children } = $props();
 
+	let showUsernameModal = $state(false);
+	let walletAddress = $state('');
+
+	const unsubWallet = walletStore.subscribe(state => {
+		if (state.connected && state.needsUsername && state.publicKey) {
+			walletAddress = state.publicKey.toString();
+			showUsernameModal = true;
+		} else {
+			showUsernameModal = false;
+		}
+	});
+
+	function handleUsernameComplete(username: string) {
+		setUsername(username);
+		showUsernameModal = false;
+	}
+
 	onMount(() => {
-		// Handle OAuth callback
 		handleAuthCallback();
+		return () => unsubWallet();
 	});
 </script>
 
@@ -17,6 +36,10 @@
 </svelte:head>
 
 <Navbar />
+
+{#if showUsernameModal}
+	<UsernameModal {walletAddress} onComplete={handleUsernameComplete} />
+{/if}
 
 {@render children?.()}
 

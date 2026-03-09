@@ -10,7 +10,7 @@ export default function Footer() {
             </p>
             <div className="flex gap-4">
               <a
-                href="https://x.com/polymockxyz"
+                href="https://x.com/hashfoxlabs"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-gray-400 hover:text-orange-500 transition-colors text-sm"
@@ -59,7 +59,7 @@ export default function Footer() {
               Telegram
             </a>
             <a
-              href="https://x.com/polymockxyz"
+              href="https://x.com/hashfoxlabs"
               target="_blank"
               rel="noopener noreferrer"
               className="block text-gray-400 hover:text-orange-500 transition-colors mb-2 text-sm"

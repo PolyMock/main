@@ -1,6 +1,6 @@
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
-import CommunityPage from "@/components/community/CommunityPage";
+import CommunityWithWallet from "@/components/community/CommunityWithWallet";
 
 export const metadata = {
   title: "Community Hub - HashFox Labs",
@@ -16,7 +16,7 @@ export default function Community() {
       </video>
 
       <Header />
-      <CommunityPage />
+      <CommunityWithWallet />
       <Footer />
     </main>
   );

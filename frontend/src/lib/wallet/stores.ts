@@ -3,6 +3,7 @@ import type { Adapter } from '@solana/wallet-adapter-base';
 import { polymarketService } from '$lib/solana/polymarket-service';
 import { PublicKey } from '@solana/web3.js';
 import { authStore } from '$lib/auth/auth-store';
+import { supabase } from '$lib/supabase';
 
 export interface WalletState {
 	connected: boolean;
@@ -13,6 +14,9 @@ export interface WalletState {
 	usdcBalance: number;  // Mock USDC balance
 	userAccountInitialized: boolean;
 	loading: boolean;
+	username: string | null;
+	avatarUrl: string | null;
+	needsUsername: boolean;
 }
 
 const initialState: WalletState = {
@@ -23,10 +27,42 @@ const initialState: WalletState = {
 	adapter: null,
 	usdcBalance: 0,
 	userAccountInitialized: false,
-	loading: false
+	loading: false,
+	username: null,
+	avatarUrl: null,
+	needsUsername: false
 };
 
 export const walletStore = writable<WalletState>(initialState);
+
+/**
+ * Check if wallet has a username in Supabase, flag needsUsername if not
+ */
+export async function checkUsername(walletAddress: string) {
+	console.log('[checkUsername] Checking username for wallet:', walletAddress);
+	const { data, error } = await supabase
+		.from('users')
+		.select('username, avatar_url')
+		.eq('wallet_address', walletAddress)
+		.maybeSingle();
+
+	console.log('[checkUsername] Supabase response:', { data, error });
+
+	if (data?.username) {
+		console.log('[checkUsername] Username found:', data.username, 'avatarUrl:', data.avatar_url);
+		walletStore.update(s => ({ ...s, username: data.username, avatarUrl: data.avatar_url || null, needsUsername: false }));
+	} else {
+		console.log('[checkUsername] No username found, showing modal');
+		walletStore.update(s => ({ ...s, username: null, avatarUrl: null, needsUsername: true }));
+	}
+}
+
+/**
+ * Set the username after the modal completes
+ */
+export function setUsername(username: string) {
+	walletStore.update(s => ({ ...s, username, needsUsername: false }));
+}
 
 export function setWalletAdapter(adapter: Adapter | null) {
 	walletStore.update(state => ({
@@ -75,7 +111,10 @@ export async function updateWalletConnection() {
 			const userData = await userResponse.json();
 
 			// Only authenticate if not already authenticated with this wallet
-			if (!userData.user || userData.user.solanaAddress !== walletAddress) {
+			if (userData.user && (userData.user.solanaAddress === walletAddress || userData.user.walletAddress === walletAddress)) {
+				// Already authenticated — still check username
+				await checkUsername(walletAddress);
+			} else {
 				// Create authentication message
 				const message = `Sign this message to authenticate with Polymock.\n\nWallet: ${walletAddress}\nTimestamp: ${Date.now()}`;
 				const messageBytes = new TextEncoder().encode(message);
@@ -103,6 +142,9 @@ export async function updateWalletConnection() {
 					if (auth.isAuthenticated && !auth.user?.walletAddress) {
 						authStore.linkWallet(walletAddress);
 					}
+
+					// Check if user has a username in Supabase
+					await checkUsername(walletAddress);
 				} else {
 					const errorData = await response.json();
 					throw new Error(errorData.error || 'Authentication failed');
