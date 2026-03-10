@@ -9,12 +9,16 @@
 
 	let walletState = $walletStore;
 	let loading = true;
+	let copiedAddress = false;
 
 	// Profile data from Supabase
 	let profileUsername = '';
 	let profileAvatarUrl = '';
+	let profileBannerUrl = '';
 	let uploadingAvatar = false;
+	let uploadingBanner = false;
 	let fileInput: HTMLInputElement;
+	let bannerFileInput: HTMLInputElement;
 	let positionsValue = 0;
 	let biggestWin = 0;
 	let biggestLoss = 0;
@@ -291,12 +295,13 @@
 		const walletAddress = walletState.publicKey.toString();
 		const { data } = await supabase
 			.from('users')
-			.select('username, avatar_url')
+			.select('username, avatar_url, banner_url')
 			.eq('wallet_address', walletAddress)
 			.maybeSingle();
 		if (data) {
 			profileUsername = data.username || '';
 			profileAvatarUrl = data.avatar_url || '';
+			profileBannerUrl = data.banner_url || '';
 		}
 	}
 
@@ -360,6 +365,63 @@
 		}
 	}
 
+	async function handleBannerUpload(event: Event) {
+		const input = event.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file || !walletState.publicKey) return;
+
+		if (!file.type.startsWith('image/')) {
+			alert('Please select an image file');
+			return;
+		}
+		if (file.size > 5 * 1024 * 1024) {
+			alert('Image must be under 5MB');
+			return;
+		}
+
+		uploadingBanner = true;
+		try {
+			const walletAddress = walletState.publicKey.toString();
+			const ext = file.name.split('.').pop() || 'png';
+			const filePath = `${walletAddress}.${ext}`;
+
+			const { data: existingFiles } = await supabase.storage
+				.from('banner')
+				.list('', { search: walletAddress });
+			if (existingFiles && existingFiles.length > 0) {
+				await supabase.storage
+					.from('banner')
+					.remove(existingFiles.map(f => f.name));
+			}
+
+			const { error: uploadErr } = await supabase.storage
+				.from('banner')
+				.upload(filePath, file, { upsert: true });
+
+			if (uploadErr) throw new Error(uploadErr.message);
+
+			const { data: urlData } = supabase.storage
+				.from('banner')
+				.getPublicUrl(filePath);
+
+			const bannerUrl = urlData.publicUrl + '?t=' + Date.now();
+
+			const { error: updateErr } = await supabase
+				.from('users')
+				.update({ banner_url: bannerUrl })
+				.eq('wallet_address', walletAddress);
+
+			if (updateErr) throw new Error(updateErr.message);
+
+			profileBannerUrl = bannerUrl;
+		} catch (err: any) {
+			console.error('Banner upload error:', err);
+			alert('Failed to upload banner: ' + err.message);
+		} finally {
+			uploadingBanner = false;
+		}
+	}
+
 	function formatCurrency(amount: number): string {
 		return new Intl.NumberFormat('en-US', {
 			style: 'currency',
@@ -398,8 +460,39 @@
 		<div class="profile-content">
 			<!-- User Info Card -->
 			<div class="user-card">
+				<!-- Banner -->
+				<div class="banner-container" on:click={() => bannerFileInput.click()}>
+					{#if profileBannerUrl}
+						<img src={profileBannerUrl} alt="Banner" class="banner-image" />
+					{:else}
+						<div class="banner-placeholder"></div>
+					{/if}
+					<div class="banner-gradient"></div>
+					<div class="banner-edit-overlay">
+						{#if uploadingBanner}
+							<div class="avatar-spinner"></div>
+						{:else}
+							<div class="banner-edit-badge">
+								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+									<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+									<circle cx="12" cy="13" r="4"/>
+								</svg>
+								<span>{profileBannerUrl ? 'Change Banner' : 'Add Banner'}</span>
+							</div>
+						{/if}
+					</div>
+					<input
+						type="file"
+						accept="image/*"
+						bind:this={bannerFileInput}
+						on:change={handleBannerUpload}
+						style="display:none"
+					/>
+				</div>
+
+				<!-- Avatar + User Info (overlapping banner) -->
 				<div class="user-header">
-					<div class="avatar-container" on:click={() => fileInput.click()}>
+					<div class="avatar-container" on:click|stopPropagation={() => fileInput.click()}>
 						{#if profileAvatarUrl}
 							<img src={profileAvatarUrl} alt="Profile" class="user-avatar" />
 						{:else}
@@ -442,8 +535,16 @@
 							{/if}
 						</h1>
 						{#if walletState.publicKey}
-							<div class="wallet-address-display">
-								{walletState.publicKey.toString()}
+							<div
+								class="wallet-address-display"
+								title="Click to copy address"
+								on:click={() => {
+									navigator.clipboard.writeText(walletState.publicKey.toString());
+									copiedAddress = true;
+									setTimeout(() => copiedAddress = false, 1500);
+								}}
+							>
+								{copiedAddress ? 'Copied!' : walletState.publicKey.toString()}
 							</div>
 						{/if}
 						<div class="user-meta">
@@ -486,7 +587,7 @@
 				<!-- Quick Actions -->
 				<div class="quick-actions">
 					<a href="/strategies" class="action-btn">
-						View My Strategies
+						View My Posts
 					</a>
 					<a href="/backtesting" class="action-btn">
 						Backtest Strategy
@@ -680,28 +781,89 @@
 		background: #000000;
 		border: 1px solid #404040;
 		border-radius: 12px;
-		padding: 24px;
+		overflow: hidden;
 		display: flex;
 		flex-direction: column;
-		gap: 24px;
+	}
+
+	.banner-container {
+		position: relative;
+		height: 180px;
+		width: 100%;
+		cursor: pointer;
+		overflow: hidden;
+	}
+
+	.banner-image {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
+
+	.banner-placeholder {
+		width: 100%;
+		height: 100%;
+		background: linear-gradient(135deg, rgba(249, 115, 22, 0.25) 0%, rgba(147, 51, 234, 0.2) 50%, rgba(17, 24, 39, 0.8) 100%);
+	}
+
+	.banner-gradient {
+		position: absolute;
+		inset: 0;
+		background: linear-gradient(to top, #000000 0%, transparent 60%);
+		pointer-events: none;
+	}
+
+	.banner-edit-overlay {
+		position: absolute;
+		inset: 0;
+		background: rgba(0, 0, 0, 0);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		opacity: 0;
+		transition: all 0.2s;
+	}
+
+	.banner-container:hover .banner-edit-overlay {
+		opacity: 1;
+		background: rgba(0, 0, 0, 0.4);
+	}
+
+	.banner-edit-badge {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 8px 16px;
+		border-radius: 12px;
+		background: rgba(0, 0, 0, 0.6);
+		border: 1px solid #555;
+		backdrop-filter: blur(8px);
+		color: white;
+		font-size: 12px;
+		font-weight: 500;
 	}
 
 	.user-header {
 		display: flex;
-		align-items: center;
+		align-items: flex-end;
 		gap: 16px;
+		padding: 0 24px;
+		margin-top: -48px;
+		position: relative;
+		z-index: 1;
 	}
 
 	.avatar-container {
 		position: relative;
-		width: 84px;
-		height: 84px;
+		width: 96px;
+		height: 96px;
 		cursor: pointer;
 		border-radius: 50%;
 		flex-shrink: 0;
-		border: 2px solid #F97316;
+		border: 4px solid #000000;
 		padding: 0;
 		background: #000;
+		box-shadow: 0 0 0 2px #555;
 	}
 
 	.user-avatar {
@@ -753,25 +915,32 @@
 
 	.wallet-address-display {
 		font-size: 12px;
-		color: #8B92AB;
+		color: #6b7280;
 		font-family: 'SF Mono', Consolas, monospace;
 		margin-bottom: 4px;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 		max-width: 300px;
+		cursor: pointer;
+		transition: color 0.2s;
+	}
+
+	.wallet-address-display:hover {
+		color: #F97316;
 	}
 
 	.user-info {
 		flex: 1;
 		min-width: 0;
+		padding-bottom: 4px;
 	}
 
 	.username {
-		font-size: 24px;
+		font-size: 28px;
 		font-weight: 700;
-		margin: 0 0 8px 0;
-		color: #E8E8E8;
+		margin: 0 0 6px 0;
+		color: #ffffff;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -793,7 +962,8 @@
 		display: flex;
 		align-items: center;
 		gap: 20px;
-		padding-top: 24px;
+		padding: 24px 24px 0;
+		margin-top: 16px;
 		border-top: 1px solid #404040;
 	}
 
@@ -843,8 +1013,9 @@
 	.quick-actions {
 		display: flex;
 		gap: 12px;
-		padding-top: 20px;
+		padding: 20px 24px 24px;
 		border-top: 1px solid #404040;
+		margin-top: 24px;
 	}
 
 	.action-btn {
@@ -1150,9 +1321,28 @@
 			padding: 20px 16px;
 		}
 
+		.banner-container {
+			height: 130px;
+		}
+
 		.user-header {
 			flex-direction: column;
 			text-align: center;
+			align-items: center;
+			margin-top: -40px;
+		}
+
+		.username {
+			font-size: 22px;
+		}
+
+		.wallet-address-display {
+			max-width: 200px;
+			margin: 0 auto 4px;
+		}
+
+		.user-meta {
+			justify-content: center;
 		}
 
 		.stats-row {
@@ -1180,6 +1370,19 @@
 	:global(.light-mode) .pnl-card {
 		background: #FFFFFF;
 		border-color: #E0E0E0;
+	}
+
+	:global(.light-mode) .banner-placeholder {
+		background: linear-gradient(135deg, rgba(249, 115, 22, 0.2) 0%, rgba(147, 51, 234, 0.15) 50%, rgba(229, 229, 229, 0.8) 100%);
+	}
+
+	:global(.light-mode) .banner-gradient {
+		background: linear-gradient(to top, #FFFFFF 0%, transparent 60%);
+	}
+
+	:global(.light-mode) .avatar-container {
+		border-color: #FFFFFF;
+		box-shadow: 0 0 0 2px #E0E0E0;
 	}
 
 	:global(.light-mode) .username {

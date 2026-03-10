@@ -1,11 +1,24 @@
 "use client";
 
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/lib/supabase";
 import WalletButton, { type ConnectedUser } from "./WalletButton";
 
 // --- Types ---
+
+type UserProfile = {
+  id: string;
+  username: string;
+  avatarUrl: string | null;
+  bannerUrl: string | null;
+  walletAddress: string;
+  tradeCount: number;
+  strategyCount: number;
+  totalPnl: number;
+  winRate: number;
+};
 
 type MarketType = "crypto" | "prediction" | "forex" | "stocks" | "commodities";
 type TradeType = "paper-trade" | "backtest";
@@ -257,21 +270,113 @@ const mockComments: Record<string, { user: string; text: string }[]> = {
   "10": [{ user: "tsla_fan", text: "Bold short" }, { user: "ev_bull", text: "Lucky timing imo" }],
 };
 
+// --- Profile Card ---
+
+function ProfileCard({ profile }: { profile: UserProfile }) {
+  const router = useRouter();
+  const onClick = () => router.push(`/profile?address=${profile.walletAddress}`);
+  const shortAddr = profile.walletAddress.slice(0, 4) + "..." + profile.walletAddress.slice(-4);
+  const totalPosts = profile.tradeCount + profile.strategyCount;
+  const isPositive = profile.totalPnl >= 0;
+
+  return (
+    <button
+      onClick={onClick}
+      className="relative overflow-hidden rounded-2xl border border-gray-800 hover:border-orange-500/40 transition-all duration-300 text-left w-full group bg-[#0d0d0d]"
+    >
+      {/* Banner */}
+      <div className="h-20 w-full overflow-hidden">
+        {profile.bannerUrl ? (
+          <img src={profile.bannerUrl} alt="" className="w-full h-full object-cover" />
+        ) : (
+          <div className="w-full h-full bg-gradient-to-br from-orange-600/30 via-purple-600/20 to-transparent" />
+        )}
+      </div>
+
+      {/* Avatar overlapping banner */}
+      <div className="px-5 -mt-10">
+        <div className="relative inline-block">
+          {profile.avatarUrl ? (
+            <img
+              src={profile.avatarUrl}
+              alt={profile.username}
+              className="w-[72px] h-[72px] rounded-full object-cover border-[3px] border-[#0d0d0d] ring-2 ring-gray-700 group-hover:ring-orange-500/50 transition-all duration-300"
+            />
+          ) : (
+            <div className="w-[72px] h-[72px] rounded-full bg-gradient-to-br from-orange-500/30 to-orange-600/10 border-[3px] border-[#0d0d0d] ring-2 ring-orange-500/30 flex items-center justify-center">
+              <span className="text-orange-400 text-2xl font-bold">{profile.username[0]?.toUpperCase()}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* User info */}
+      <div className="px-5 pt-3 pb-4">
+        <div className="flex items-center gap-2">
+          <h3 className="text-white font-bold text-lg truncate">@{profile.username}</h3>
+          <svg className="w-4 h-4 text-gray-600 group-hover:text-orange-400 group-hover:translate-x-0.5 transition-all shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+        <p className="text-gray-500 text-xs mt-0.5 font-mono">{shortAddr}</p>
+
+        {/* Tags */}
+        <div className="flex items-center gap-2 mt-3">
+          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+            {profile.tradeCount} Trade{profile.tradeCount !== 1 ? "s" : ""}
+          </span>
+          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-pink-500/10 text-pink-400 border border-pink-500/20">
+            {profile.strategyCount} Strat{profile.strategyCount !== 1 ? "s" : ""}
+          </span>
+        </div>
+
+        {/* Stats grid */}
+        <div className="grid grid-cols-3 gap-3 mt-3 p-3 rounded-xl bg-white/[0.03] border border-gray-800/80">
+          <div className="text-center">
+            <p className="text-white text-base font-bold leading-tight">{totalPosts}</p>
+            <p className="text-gray-500 text-[10px] font-medium uppercase tracking-wider mt-0.5">Posts</p>
+          </div>
+          <div className="text-center border-x border-gray-800/80">
+            <p className={`text-base font-bold leading-tight ${isPositive ? "text-green-400" : "text-red-400"}`}>
+              {isPositive ? "+" : ""}{profile.totalPnl.toFixed(1)}%
+            </p>
+            <p className="text-gray-500 text-[10px] font-medium uppercase tracking-wider mt-0.5">Avg P&L</p>
+          </div>
+          <div className="text-center">
+            <p className="text-white text-base font-bold leading-tight">{profile.winRate.toFixed(0)}%</p>
+            <p className="text-gray-500 text-[10px] font-medium uppercase tracking-wider mt-0.5">Win Rate</p>
+          </div>
+        </div>
+      </div>
+    </button>
+  );
+}
+
 function TradeCard({ trade, connectedUser }: { trade: SharedTrade; connectedUser: ConnectedUser | null }) {
   const isPositive = trade.pnl >= 0;
   const ts = new Date(trade.timestamp);
   const dateStr = ts.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const timeStr = ts.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-  const [showComments, setShowComments] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
   const [commentText, setCommentText] = useState("");
+
+  // Lock body scroll when detail modal is open
+  useEffect(() => {
+    if (showDetail) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => { document.body.style.overflow = ""; };
+  }, [showDetail]);
   const [comments, setComments] = useState<{ user: string; text: string; avatarUrl?: string }[]>(mockComments[trade.id] ?? []);
   const [commentsLoaded, setCommentsLoaded] = useState(!trade.isFromDb);
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(trade.likes);
   const [likeChecked, setLikeChecked] = useState(false);
   const [likeMessage, setLikeMessage] = useState<string | null>(null);
+  const [submittingComment, setSubmittingComment] = useState(false);
 
-  // Check if user already liked this post
   useEffect(() => {
     if (!connectedUser || !trade.isFromDb || !trade.dbId || likeChecked) return;
     const checkLike = async () => {
@@ -292,8 +397,8 @@ function TradeCard({ trade, connectedUser }: { trade: SharedTrade; connectedUser
     price < 10 ? `$${price.toFixed(3)}` : `$${price.toLocaleString()}`;
 
   const isLongish = trade.direction === "long" || trade.direction === "yes";
+  const isPaper = trade.tradeType === "paper-trade";
 
-  // Load comments from Supabase when opening comments on a real post
   const loadDbComments = useCallback(async () => {
     if (!trade.isFromDb || !trade.dbId || commentsLoaded) return;
     const table = trade.dbType === "trade" ? "trade_comments" : "strategy_comments";
@@ -313,7 +418,8 @@ function TradeCard({ trade, connectedUser }: { trade: SharedTrade; connectedUser
     setCommentsLoaded(true);
   }, [trade.isFromDb, trade.dbId, trade.dbType, commentsLoaded]);
 
-  const handleLike = async () => {
+  const handleLike = async (e: React.MouseEvent) => {
+    e.stopPropagation();
     if (!connectedUser) {
       setLikeMessage("Connect to like posts");
       setTimeout(() => setLikeMessage(null), 2000);
@@ -324,423 +430,428 @@ function TradeCard({ trade, connectedUser }: { trade: SharedTrade; connectedUser
       setTimeout(() => setLikeMessage(null), 2000);
       return;
     }
-
-    // Optimistic UI update
     setLiked(true);
     setLikeCount((c) => c + 1);
-
     if (trade.isFromDb && trade.dbId) {
-      // Insert like record
       const { error: likeErr } = await supabase.from("post_likes").insert({
         user_id: connectedUser.userId,
         post_id: trade.dbId,
         post_type: trade.dbType || "trade",
       });
-
       if (likeErr) {
-        // Duplicate or error — revert
-        setLiked(true); // keep liked state since it already exists
+        setLiked(true);
         setLikeCount((c) => c - 1);
-        if (likeErr.code === "23505") {
-          setLikeMessage("Already liked");
-        } else {
-          setLikeMessage("Failed to like");
-        }
+        setLikeMessage(likeErr.code === "23505" ? "Already liked" : "Failed to like");
         setTimeout(() => setLikeMessage(null), 2000);
         return;
       }
-
-      // Update counter on the post
       const countTable = trade.dbType === "trade" ? "trades" : "backtest_strategies";
-      const newCount = likeCount + 1;
-      await supabase.from(countTable).update({ likes_count: Math.max(0, newCount) }).eq("id", trade.dbId);
+      await supabase.from(countTable).update({ likes_count: Math.max(0, likeCount + 1) }).eq("id", trade.dbId);
     }
   };
-
-  const [submittingComment, setSubmittingComment] = useState(false);
 
   const handleAddComment = async () => {
     const trimmed = commentText.trim();
     if (!trimmed || !connectedUser) return;
-
     setSubmittingComment(true);
-
-    // Optimistically add to UI
-    setComments((prev) => [...prev, {
-      user: connectedUser.username,
-      text: trimmed,
-      avatarUrl: connectedUser.avatarUrl || undefined,
-    }]);
+    setComments((prev) => [...prev, { user: connectedUser.username, text: trimmed, avatarUrl: connectedUser.avatarUrl || undefined }]);
     setCommentText("");
-
-    // Save to Supabase if it's a real post
     if (trade.isFromDb && trade.dbId) {
       const table = trade.dbType === "trade" ? "trade_comments" : "strategy_comments";
       const fk = trade.dbType === "trade" ? "trade_id" : "strategy_id";
-      await supabase.from(table).insert({
-        [fk]: trade.dbId,
-        user_id: connectedUser.userId,
-        content: trimmed,
-      });
-      // Update comment count
+      await supabase.from(table).insert({ [fk]: trade.dbId, user_id: connectedUser.userId, content: trimmed });
       const countTable = trade.dbType === "trade" ? "trades" : "backtest_strategies";
-      await supabase
-        .from(countTable)
-        .update({ comments_count: comments.length + 1 })
-        .eq("id", trade.dbId);
+      await supabase.from(countTable).update({ comments_count: comments.length + 1 }).eq("id", trade.dbId);
     }
-
     setSubmittingComment(false);
   };
 
-  const handleToggleComments = () => {
-    const next = !showComments;
-    setShowComments(next);
-    if (next && trade.isFromDb) loadDbComments();
+  const openDetail = () => {
+    setShowDetail(true);
+    if (trade.isFromDb) loadDbComments();
   };
 
-  // Shared like/comment buttons
-  const actionButtons = (
-    <div className="flex items-center gap-3 mt-auto pt-3 border-t border-gray-800 relative">
-      <div className="relative">
-        <button
-          onClick={handleLike}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors text-sm ${
-            liked
-              ? "bg-orange-500/15 text-orange-400 border-orange-500/30 cursor-default"
-              : "bg-white/[0.03] border-gray-800 text-gray-400 hover:text-orange-400 hover:border-orange-500/30"
-          }`}
-        >
-          <svg className="w-4 h-4" fill={liked ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-          </svg>
-          <span>{likeCount}</span>
-        </button>
-        <AnimatePresence>
-          {likeMessage && (
-            <motion.div
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 4 }}
-              className="absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap px-2.5 py-1 rounded-md bg-gray-800 border border-gray-700 text-xs text-gray-300 shadow-lg z-10"
-            >
-              {likeMessage}
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-      <button
-        onClick={handleToggleComments}
-        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors text-sm ${
-          showComments
-            ? "bg-orange-500/15 text-orange-400 border-orange-500/30"
-            : "bg-white/[0.03] border-gray-800 text-gray-400 hover:text-orange-400 hover:border-orange-500/30"
-        }`}
-      >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-        </svg>
-        <span>{commentsLoaded ? comments.length : (trade.commentCount || comments.length)}</span>
-      </button>
-    </div>
-  );
-
-  // Comment view — replaces card body
-  const commentView = (
-    <div className="flex-1 flex flex-col min-h-0">
-      {/* Back button */}
-      <button
-        onClick={() => setShowComments(false)}
-        className="flex items-center gap-1 text-gray-400 hover:text-white text-xs mb-2 transition-colors"
-      >
-        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-        </svg>
-        Back to trade
-      </button>
-
-      {/* Comments list */}
-      <div className="flex-1 overflow-y-auto space-y-2.5 mb-2 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
-        {comments.length === 0 ? (
-          <p className="text-gray-600 text-xs text-center py-4">No comments yet. Be the first!</p>
-        ) : (
-          comments.map((c, i) => (
-            <div key={i} className="flex items-start gap-2">
-              {c.avatarUrl ? (
-                <img src={c.avatarUrl} alt={c.user} className="w-5 h-5 rounded-full object-cover shrink-0 mt-0.5" />
-              ) : (
-                <div className="w-5 h-5 rounded-full bg-orange-500/20 flex items-center justify-center shrink-0 mt-0.5">
-                  <span className="text-orange-400 text-[9px] font-bold">{c.user[0]?.toUpperCase()}</span>
-                </div>
-              )}
-              <div className="min-w-0">
-                <span className="text-orange-400 text-xs font-medium">@{c.user}</span>
-                <span className="text-gray-300 text-xs ml-1.5">{c.text}</span>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* Input */}
-      {connectedUser ? (
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={commentText}
-            onChange={(e) => setCommentText(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleAddComment()}
-            placeholder="Write a comment..."
-            className="flex-1 px-3 py-1.5 rounded-lg text-xs bg-white/5 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-orange-500/50 transition-colors"
-          />
-          <button
-            onClick={handleAddComment}
-            disabled={submittingComment || !commentText.trim()}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-orange-500/15 text-orange-400 border border-orange-500/30 hover:bg-orange-500/25 disabled:opacity-40 transition-colors"
-          >
-            Post
-          </button>
-        </div>
-      ) : (
-        <p className="text-gray-500 text-xs text-center py-1">Connect your wallet to comment</p>
-      )}
-    </div>
-  );
-
-  const CARD = "glass-card rounded-xl p-4 border border-gray-800 transition-colors h-[420px] flex flex-col";
-
   const backtestDate = ts.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const commentCount = commentsLoaded ? comments.length : (trade.commentCount || comments.length);
 
-  // Paper trade body
-  const hasTpSl = trade.takeProfit != null || trade.stopLoss != null;
-
-  const paperBody = (
-    <>
-      {/* Title — fixed 2-line area */}
-      <div className="min-h-[40px] max-h-[40px] mb-2 overflow-hidden">
-        <p className={`text-sm font-bold leading-tight line-clamp-2 ${isLongish ? "text-green-400" : "text-red-400"}`}>
-          {trade.asset}
-        </p>
-      </div>
-      {/* Meta row */}
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-gray-500 text-[10px]">{dateStr}, {timeStr}</span>
-        <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${marketColors[trade.marketType]}`}>
-          {trade.marketType.toUpperCase()}
-        </span>
-        {trade.platform && (
-          <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-gray-400 border border-gray-700 font-medium">
-            {trade.platform.toUpperCase()}
-          </span>
-        )}
-        {trade.status && (
-          <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${
-            trade.status === "closed" ? "bg-gray-500/15 text-gray-400 border border-gray-600" : "bg-green-500/15 text-green-400 border border-green-600"
-          }`}>
-            {trade.status.toUpperCase()}
-          </span>
-        )}
-      </div>
-      {/* Stats grid */}
-      <div className="rounded-lg bg-white/[0.03] border border-gray-800 p-2.5 mb-2">
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-          {trade.amount != null && (
-            <div>
-              <span className="text-gray-500">Invested:</span>
-              <p className="text-white font-semibold text-sm">${trade.amount.toFixed(2)}</p>
-            </div>
-          )}
-          <div>
-            <span className="text-gray-500">Entry:</span>
-            <p className="text-white font-semibold text-sm">{formatPrice(trade.entryPrice)}</p>
-          </div>
-          <div>
-            <span className="text-gray-500">Exit:</span>
-            <p className="text-white font-semibold text-sm">
-              {trade.exitPrice !== null ? formatPrice(trade.exitPrice) : "—"}
-            </p>
-          </div>
-          <div>
-            <span className="text-gray-500">P&L:</span>
-            <p className={`font-bold text-sm ${isPositive ? "text-green-400" : "text-red-400"}`}>
-              {isPositive ? "+" : ""}${Math.abs(trade.pnl).toFixed(2)}
-              <span className={`text-[10px] ml-1 ${isPositive ? "text-green-500/60" : "text-red-500/60"}`}>
-                ({isPositive ? "+" : ""}{trade.pnlPercent.toFixed(2)}%)
-              </span>
-            </p>
-          </div>
-        </div>
-      </div>
-      {/* TP / SL row */}
-      {hasTpSl && (
-        <div className="flex gap-3 mb-2 text-[10px]">
-          {trade.takeProfit != null && (
-            <div className="flex items-center gap-1 px-2 py-1 rounded bg-green-500/10 border border-green-500/20">
-              <span className="text-gray-400">TP:</span>
-              <span className="text-green-400 font-semibold">{formatPrice(trade.takeProfit)}</span>
-            </div>
-          )}
-          {trade.stopLoss != null && (
-            <div className="flex items-center gap-1 px-2 py-1 rounded bg-red-500/10 border border-red-500/20">
-              <span className="text-gray-400">SL:</span>
-              <span className="text-red-400 font-semibold">{formatPrice(trade.stopLoss)}</span>
-            </div>
-          )}
-        </div>
-      )}
-      {/* Comment */}
-      <div className="flex-1 min-h-0 overflow-hidden">
-        {trade.comment && (
-          <p className="text-gray-300 text-xs leading-relaxed line-clamp-2">{trade.comment}</p>
-        )}
-      </div>
-    </>
-  );
-
-  // Backtest body
-  const backtestBody = (
-    <>
-      {/* Title */}
-      <div className="min-h-[32px] max-h-[32px] mb-1 overflow-hidden">
-        <p className="text-xs font-bold text-purple-400 uppercase leading-tight line-clamp-2">{trade.asset}</p>
-      </div>
-      {/* Meta row */}
-      <div className="flex items-center flex-wrap gap-1.5 mb-1.5">
-        <span className="text-gray-500 text-[9px]">{backtestDate}</span>
-        {trade.platform && (
-          <span className="text-[8px] px-1 py-0.5 rounded bg-white/5 text-gray-400 border border-gray-700 font-medium">
-            {trade.platform.toUpperCase()}
-          </span>
-        )}
-        {trade.entryType && (
-          <span className="text-[8px] px-1 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 font-medium">
-            {trade.entryType.toUpperCase()}
-          </span>
-        )}
-      </div>
-      {/* Equity curve — compact */}
-      {trade.equityCurve && (
-        <div className="mb-1.5">
-          <EquityCurve data={trade.equityCurve} positive={isPositive} />
-        </div>
-      )}
-      {/* Capital + Return — single compact row */}
-      <div className="grid grid-cols-4 gap-1 mb-1.5 text-[10px]">
-        <div className="rounded bg-white/[0.03] border border-gray-800 px-1.5 py-1 text-center">
-          <span className="text-gray-500 block text-[8px] uppercase">Start</span>
-          <span className="text-white font-semibold">${(trade.initialCapital ?? trade.startBalance ?? 0).toLocaleString()}</span>
-        </div>
-        <div className="rounded bg-white/[0.03] border border-gray-800 px-1.5 py-1 text-center">
-          <span className="text-gray-500 block text-[8px] uppercase">Final</span>
-          <span className={`font-semibold ${isPositive ? "text-green-400" : "text-red-400"}`}>${(trade.finalCapital ?? trade.endBalance ?? 0).toLocaleString()}</span>
-        </div>
-        <div className="rounded bg-white/[0.03] border border-gray-800 px-1.5 py-1 text-center">
-          <span className="text-gray-500 block text-[8px] uppercase">Return</span>
-          <span className={`font-bold ${isPositive ? "text-green-400" : "text-red-400"}`}>{isPositive ? "+" : ""}{trade.pnlPercent.toFixed(1)}%</span>
-        </div>
-        <div className="rounded bg-white/[0.03] border border-gray-800 px-1.5 py-1 text-center">
-          <span className="text-gray-500 block text-[8px] uppercase">P&L</span>
-          <span className={`font-bold ${isPositive ? "text-green-400" : "text-red-400"}`}>{isPositive ? "+" : ""}${Math.abs(trade.pnl).toFixed(0)}</span>
-        </div>
-      </div>
-      {/* Stats grid — 2 rows of 4 */}
-      <div className="grid grid-cols-4 gap-1 mb-1">
-        <div className="rounded bg-white/[0.03] border border-gray-800 px-1 py-1 text-center">
-          <span className="text-gray-500 text-[8px] uppercase block">Win</span>
-          <span className={`font-bold text-[10px] ${(trade.winRate ?? 0) >= 50 ? "text-green-400" : "text-red-400"}`}>{trade.winRate ?? "—"}%</span>
-        </div>
-        <div className="rounded bg-white/[0.03] border border-gray-800 px-1 py-1 text-center">
-          <span className="text-gray-500 text-[8px] uppercase block">Trades</span>
-          <span className="font-bold text-[10px] text-white">{trade.totalTrades ?? "—"}</span>
-        </div>
-        <div className="rounded bg-white/[0.03] border border-gray-800 px-1 py-1 text-center">
-          <span className="text-gray-500 text-[8px] uppercase block">Max DD</span>
-          <span className="font-bold text-[10px] text-red-400">{trade.maxDrawdown ?? "—"}%</span>
-        </div>
-        <div className="rounded bg-white/[0.03] border border-gray-800 px-1 py-1 text-center">
-          <span className="text-gray-500 text-[8px] uppercase block">Sharpe</span>
-          <span className="font-bold text-[10px] text-white">{trade.sharpeRatio ?? "—"}</span>
-        </div>
-      </div>
-      <div className="grid grid-cols-4 gap-1">
-        <div className="rounded bg-white/[0.03] border border-gray-800 px-1 py-1 text-center">
-          <span className="text-gray-500 text-[8px] uppercase block">PF</span>
-          <span className="font-bold text-[10px] text-white">{trade.profitFactor ?? "—"}</span>
-        </div>
-        <div className="rounded bg-white/[0.03] border border-gray-800 px-1 py-1 text-center">
-          <span className="text-gray-500 text-[8px] uppercase block">W/L</span>
-          <span className="font-bold text-[10px] text-white">{trade.winningTrades ?? "—"}/{trade.losingTrades ?? "—"}</span>
-        </div>
-        {trade.backtestTakeProfit != null ? (
-          <div className="rounded bg-green-500/5 border border-green-500/15 px-1 py-1 text-center">
-            <span className="text-gray-500 text-[8px] uppercase block">TP</span>
-            <span className="font-bold text-[10px] text-green-400">{trade.backtestTakeProfit}%</span>
-          </div>
-        ) : (
-          <div className="rounded bg-white/[0.03] border border-gray-800 px-1 py-1 text-center">
-            <span className="text-gray-500 text-[8px] uppercase block">TP</span>
-            <span className="font-bold text-[10px] text-gray-600">—</span>
-          </div>
-        )}
-        {trade.backtestStopLoss != null ? (
-          <div className="rounded bg-red-500/5 border border-red-500/15 px-1 py-1 text-center">
-            <span className="text-gray-500 text-[8px] uppercase block">SL</span>
-            <span className="font-bold text-[10px] text-red-400">{trade.backtestStopLoss}%</span>
-          </div>
-        ) : (
-          <div className="rounded bg-white/[0.03] border border-gray-800 px-1 py-1 text-center">
-            <span className="text-gray-500 text-[8px] uppercase block">SL</span>
-            <span className="font-bold text-[10px] text-gray-600">—</span>
-          </div>
-        )}
-      </div>
-    </>
-  );
-
-  const isPaper = trade.tradeType === "paper-trade";
-
-  // Header — shared
-  const header = (
-    <div className="flex items-center justify-between mb-2">
-      <div className="flex items-center gap-2">
-        {trade.avatarUrl ? (
-          <img src={trade.avatarUrl} alt={trade.username} className="w-6 h-6 rounded-full object-cover border border-gray-600" />
-        ) : (
-          <div className="w-6 h-6 rounded-full bg-orange-500/20 border border-orange-500/30 flex items-center justify-center">
-            <span className="text-orange-400 text-[10px] font-bold">{trade.username[0]?.toUpperCase()}</span>
-          </div>
-        )}
-        <span className="text-white font-medium text-sm">@{trade.username}</span>
-        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border uppercase ${
-          isPaper
-            ? "bg-cyan-500/15 text-cyan-400 border-cyan-500/30"
-            : "bg-pink-500/15 text-pink-400 border-pink-500/30"
-        }`}>
-          {isPaper ? "Paper" : "Backtest"}
-        </span>
-      </div>
-      <span
-        className={`text-xs font-bold px-3 py-1 rounded-full border ${
-          isPaper
-            ? isLongish
-              ? "bg-green-500/15 text-green-400 border-green-500/40"
-              : "bg-red-500/15 text-red-400 border-red-500/40"
-            : isPositive
-              ? "bg-green-500/10 text-green-400 border-green-500/30"
-              : "bg-red-500/10 text-red-400 border-red-500/30"
-        }`}
-      >
-        {isPaper ? trade.direction.toUpperCase() : `${isPositive ? "+" : ""}${trade.pnlPercent.toFixed(2)}%`}
-      </span>
-    </div>
-  );
-
+  // ── Feed Row ──
   return (
-    <div className={CARD}>
-      {header}
-      {showComments ? commentView : (isPaper ? paperBody : backtestBody)}
-      {actionButtons}
-    </div>
+    <>
+      <div
+        onClick={openDetail}
+        className="glass-card rounded-xl border border-gray-800 hover:border-orange-500/30 transition-all cursor-pointer p-4 flex items-center gap-4"
+      >
+        {/* Left: Avatar */}
+        <div className="shrink-0">
+          {trade.avatarUrl ? (
+            <img src={trade.avatarUrl} alt={trade.username} className="w-10 h-10 rounded-full object-cover border border-gray-600" />
+          ) : (
+            <div className="w-10 h-10 rounded-full bg-orange-500/20 border border-orange-500/30 flex items-center justify-center">
+              <span className="text-orange-400 text-sm font-bold">{trade.username[0]?.toUpperCase()}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Middle: Info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-white font-semibold text-sm">@{trade.username}</span>
+            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border uppercase ${
+              isPaper ? "bg-cyan-500/15 text-cyan-400 border-cyan-500/30" : "bg-pink-500/15 text-pink-400 border-pink-500/30"
+            }`}>
+              {isPaper ? "Trade" : "Strategy"}
+            </span>
+            {isPaper && (
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border uppercase ${
+                isLongish ? "bg-green-500/10 text-green-400 border-green-500/20" : "bg-red-500/10 text-red-400 border-red-500/20"
+              }`}>
+                {trade.direction}
+              </span>
+            )}
+            {trade.platform && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-gray-400 border border-gray-700 font-medium">
+                {trade.platform.toUpperCase()}
+              </span>
+            )}
+            {trade.status && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                trade.status === "closed" ? "bg-gray-500/15 text-gray-400 border border-gray-600" : "bg-green-500/15 text-green-400 border border-green-600"
+              }`}>
+                {trade.status.toUpperCase()}
+              </span>
+            )}
+          </div>
+          <p className={`text-sm font-bold mt-1 truncate ${isPaper ? (isLongish ? "text-green-400" : "text-red-400") : "text-purple-400"}`}>
+            {trade.asset}
+          </p>
+          <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+            <span>{dateStr}, {timeStr}</span>
+            <span className={`text-[10px] font-semibold ${marketColors[trade.marketType]?.replace("border ", "").split(" ").slice(0, 2).join(" ")}`}>
+              {trade.marketType.toUpperCase()}
+            </span>
+            {trade.comment && <span className="truncate max-w-[200px] text-gray-400 italic">&ldquo;{trade.comment}&rdquo;</span>}
+          </div>
+        </div>
+
+        {/* Right: P&L + Actions */}
+        <div className="shrink-0 flex items-center gap-4">
+          <div className="text-right">
+            <p className={`text-lg font-bold ${isPositive ? "text-green-400" : "text-red-400"}`}>
+              {isPositive ? "+" : ""}{trade.pnlPercent.toFixed(2)}%
+            </p>
+            {isPaper && (
+              <p className={`text-xs ${isPositive ? "text-green-500/60" : "text-red-500/60"}`}>
+                {isPositive ? "+" : ""}${Math.abs(trade.pnl).toFixed(2)}
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <button
+                onClick={handleLike}
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border transition-colors text-xs ${
+                  liked ? "bg-orange-500/15 text-orange-400 border-orange-500/30" : "bg-white/[0.03] border-gray-800 text-gray-400 hover:text-orange-400 hover:border-orange-500/30"
+                }`}
+              >
+                <svg className="w-3.5 h-3.5" fill={liked ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                </svg>
+                {likeCount}
+              </button>
+              <AnimatePresence>
+                {likeMessage && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 4 }}
+                    className="absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap px-2 py-1 rounded-md bg-gray-800 border border-gray-700 text-[10px] text-gray-300 shadow-lg z-10"
+                  >
+                    {likeMessage}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); openDetail(); }}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border bg-white/[0.03] border-gray-800 text-gray-400 hover:text-orange-400 hover:border-orange-500/30 transition-colors text-xs"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+              {commentCount}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Detail Modal ── */}
+      <AnimatePresence>
+        {showDetail && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setShowDetail(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ duration: 0.2 }}
+              className="w-full max-w-2xl max-h-[85vh] overflow-y-auto overscroll-contain rounded-2xl border border-gray-700 bg-[#0a0a0a] shadow-2xl scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="sticky top-0 z-10 bg-[#0a0a0a] border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {trade.avatarUrl ? (
+                    <img src={trade.avatarUrl} alt={trade.username} className="w-8 h-8 rounded-full object-cover border border-gray-600" />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-orange-500/20 border border-orange-500/30 flex items-center justify-center">
+                      <span className="text-orange-400 text-xs font-bold">{trade.username[0]?.toUpperCase()}</span>
+                    </div>
+                  )}
+                  <div>
+                    <span className="text-white font-semibold text-sm">@{trade.username}</span>
+                    <span className="text-gray-500 text-xs ml-2">{dateStr}, {timeStr}</span>
+                  </div>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border uppercase ${
+                    isPaper ? "bg-cyan-500/15 text-cyan-400 border-cyan-500/30" : "bg-pink-500/15 text-pink-400 border-pink-500/30"
+                  }`}>
+                    {isPaper ? "Trade" : "Strategy"}
+                  </span>
+                </div>
+                <button onClick={() => setShowDetail(false)} className="text-gray-400 hover:text-white transition-colors p-1">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="px-6 py-5">
+                {/* Title + Direction */}
+                <div className="flex items-center justify-between mb-4">
+                  <p className={`text-lg font-bold ${isPaper ? (isLongish ? "text-green-400" : "text-red-400") : "text-purple-400"}`}>
+                    {trade.asset}
+                  </p>
+                  <span className={`text-sm font-bold px-3 py-1 rounded-full border ${
+                    isPaper
+                      ? isLongish ? "bg-green-500/15 text-green-400 border-green-500/40" : "bg-red-500/15 text-red-400 border-red-500/40"
+                      : isPositive ? "bg-green-500/10 text-green-400 border-green-500/30" : "bg-red-500/10 text-red-400 border-red-500/30"
+                  }`}>
+                    {isPaper ? trade.direction.toUpperCase() : `${isPositive ? "+" : ""}${trade.pnlPercent.toFixed(2)}%`}
+                  </span>
+                </div>
+
+                {/* Tags */}
+                <div className="flex items-center gap-2 mb-4 flex-wrap">
+                  <span className={`text-[10px] px-2 py-0.5 rounded font-semibold ${marketColors[trade.marketType]}`}>
+                    {trade.marketType.toUpperCase()}
+                  </span>
+                  {trade.platform && (
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-white/5 text-gray-400 border border-gray-700 font-medium">
+                      {trade.platform.toUpperCase()}
+                    </span>
+                  )}
+                  {trade.status && (
+                    <span className={`text-[10px] px-2 py-0.5 rounded font-semibold ${
+                      trade.status === "closed" ? "bg-gray-500/15 text-gray-400 border border-gray-600" : "bg-green-500/15 text-green-400 border border-green-600"
+                    }`}>
+                      {trade.status.toUpperCase()}
+                    </span>
+                  )}
+                </div>
+
+                {isPaper ? (
+                  <>
+                    {/* Paper Trade Details */}
+                    <div className="rounded-xl bg-white/[0.03] border border-gray-800 p-4 mb-4">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        {trade.amount != null && (
+                          <div>
+                            <span className="text-gray-500 text-xs">Invested</span>
+                            <p className="text-white font-bold">${trade.amount.toFixed(2)}</p>
+                          </div>
+                        )}
+                        <div>
+                          <span className="text-gray-500 text-xs">Entry</span>
+                          <p className="text-white font-bold">{formatPrice(trade.entryPrice)}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 text-xs">Exit</span>
+                          <p className="text-white font-bold">{trade.exitPrice !== null ? formatPrice(trade.exitPrice) : "—"}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 text-xs">P&L</span>
+                          <p className={`font-bold ${isPositive ? "text-green-400" : "text-red-400"}`}>
+                            {isPositive ? "+" : ""}${Math.abs(trade.pnl).toFixed(2)}
+                            <span className={`text-xs ml-1 opacity-60`}>({isPositive ? "+" : ""}{trade.pnlPercent.toFixed(2)}%)</span>
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    {(trade.takeProfit != null || trade.stopLoss != null) && (
+                      <div className="flex gap-3 mb-4">
+                        {trade.takeProfit != null && (
+                          <div className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20 text-xs">
+                            <span className="text-gray-400">TP:</span>
+                            <span className="text-green-400 font-semibold">{formatPrice(trade.takeProfit)}</span>
+                          </div>
+                        )}
+                        {trade.stopLoss != null && (
+                          <div className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs">
+                            <span className="text-gray-400">SL:</span>
+                            <span className="text-red-400 font-semibold">{formatPrice(trade.stopLoss)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {/* Strategy Details */}
+                    {trade.equityCurve && (
+                      <div className="mb-4">
+                        <EquityCurve data={trade.equityCurve} positive={isPositive} />
+                      </div>
+                    )}
+                    <div className="grid grid-cols-4 gap-2 mb-3">
+                      {[
+                        { label: "Start", value: `$${(trade.initialCapital ?? trade.startBalance ?? 0).toLocaleString()}`, color: "text-white" },
+                        { label: "Final", value: `$${(trade.finalCapital ?? trade.endBalance ?? 0).toLocaleString()}`, color: isPositive ? "text-green-400" : "text-red-400" },
+                        { label: "Return", value: `${isPositive ? "+" : ""}${trade.pnlPercent.toFixed(1)}%`, color: isPositive ? "text-green-400" : "text-red-400" },
+                        { label: "P&L", value: `${isPositive ? "+" : ""}$${Math.abs(trade.pnl).toFixed(0)}`, color: isPositive ? "text-green-400" : "text-red-400" },
+                      ].map((s) => (
+                        <div key={s.label} className="rounded-lg bg-white/[0.03] border border-gray-800 px-2 py-2 text-center">
+                          <span className="text-gray-500 block text-[10px] uppercase">{s.label}</span>
+                          <span className={`font-bold text-sm ${s.color}`}>{s.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-4 gap-2 mb-3">
+                      {[
+                        { label: "Win Rate", value: `${trade.winRate ?? "—"}%`, color: (trade.winRate ?? 0) >= 50 ? "text-green-400" : "text-red-400" },
+                        { label: "Trades", value: String(trade.totalTrades ?? "—"), color: "text-white" },
+                        { label: "Max DD", value: `${trade.maxDrawdown ?? "—"}%`, color: "text-red-400" },
+                        { label: "Sharpe", value: String(trade.sharpeRatio ?? "—"), color: "text-white" },
+                      ].map((s) => (
+                        <div key={s.label} className="rounded-lg bg-white/[0.03] border border-gray-800 px-2 py-2 text-center">
+                          <span className="text-gray-500 block text-[10px] uppercase">{s.label}</span>
+                          <span className={`font-bold text-xs ${s.color}`}>{s.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-4 gap-2 mb-4">
+                      {[
+                        { label: "PF", value: String(trade.profitFactor ?? "—"), color: "text-white" },
+                        { label: "W/L", value: `${trade.winningTrades ?? "—"}/${trade.losingTrades ?? "—"}`, color: "text-white" },
+                        { label: "TP", value: trade.backtestTakeProfit != null ? `${trade.backtestTakeProfit}%` : "—", color: trade.backtestTakeProfit != null ? "text-green-400" : "text-gray-600" },
+                        { label: "SL", value: trade.backtestStopLoss != null ? `${trade.backtestStopLoss}%` : "—", color: trade.backtestStopLoss != null ? "text-red-400" : "text-gray-600" },
+                      ].map((s) => (
+                        <div key={s.label} className="rounded-lg bg-white/[0.03] border border-gray-800 px-2 py-2 text-center">
+                          <span className="text-gray-500 block text-[10px] uppercase">{s.label}</span>
+                          <span className={`font-bold text-xs ${s.color}`}>{s.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {/* Analysis / Comment */}
+                {trade.comment && (
+                  <div className="rounded-xl bg-white/[0.02] border border-gray-800 p-4 mb-4">
+                    <p className="text-gray-300 text-sm leading-relaxed">{trade.comment}</p>
+                  </div>
+                )}
+
+                {/* Like + Comment Actions */}
+                <div className="flex items-center gap-3 mb-5 pt-3 border-t border-gray-800">
+                  <div className="relative">
+                    <button
+                      onClick={handleLike}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors text-sm ${
+                        liked ? "bg-orange-500/15 text-orange-400 border-orange-500/30 cursor-default" : "bg-white/[0.03] border-gray-800 text-gray-400 hover:text-orange-400 hover:border-orange-500/30"
+                      }`}
+                    >
+                      <svg className="w-4 h-4" fill={liked ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                      </svg>
+                      <span>{likeCount}</span>
+                    </button>
+                    <AnimatePresence>
+                      {likeMessage && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: 4 }}
+                          className="absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap px-2 py-1 rounded-md bg-gray-800 border border-gray-700 text-xs text-gray-300 shadow-lg z-10"
+                        >
+                          {likeMessage}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                  <span className="flex items-center gap-1.5 text-sm text-gray-400">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                    </svg>
+                    {comments.length} comments
+                  </span>
+                </div>
+
+                {/* Comments Section */}
+                <div className="space-y-3 mb-4 max-h-[250px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
+                  {comments.length === 0 ? (
+                    <p className="text-gray-600 text-sm text-center py-4">No comments yet. Be the first!</p>
+                  ) : (
+                    comments.map((c, i) => (
+                      <div key={i} className="flex items-start gap-2.5">
+                        {c.avatarUrl ? (
+                          <img src={c.avatarUrl} alt={c.user} className="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5" />
+                        ) : (
+                          <div className="w-6 h-6 rounded-full bg-orange-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                            <span className="text-orange-400 text-[10px] font-bold">{c.user[0]?.toUpperCase()}</span>
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <span className="text-orange-400 text-xs font-medium">@{c.user}</span>
+                          <p className="text-gray-300 text-sm mt-0.5">{c.text}</p>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Comment Input */}
+                {connectedUser ? (
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={commentText}
+                      onChange={(e) => setCommentText(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleAddComment()}
+                      placeholder="Write a comment..."
+                      className="flex-1 px-4 py-2 rounded-xl text-sm bg-white/5 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-orange-500/50 transition-colors"
+                    />
+                    <button
+                      onClick={handleAddComment}
+                      disabled={submittingComment || !commentText.trim()}
+                      className="px-4 py-2 rounded-xl text-sm font-medium bg-orange-500/15 text-orange-400 border border-orange-500/30 hover:bg-orange-500/25 disabled:opacity-40 transition-colors"
+                    >
+                      Post
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-gray-500 text-sm text-center py-2">Connect your wallet to comment</p>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }
 
@@ -758,6 +869,8 @@ export default function CommunityPage() {
   const [dbTrades, setDbTrades] = useState<SharedTrade[]>([]);
   const [dbLoading, setDbLoading] = useState(true);
   const [connectedUser, setConnectedUser] = useState<ConnectedUser | null>(null);
+  const [showProfiles, setShowProfiles] = useState(false);
+  const [profiles, setProfiles] = useState<UserProfile[]>([]);
 
   const PAIR_SYMBOLS: Record<number, string> = {
     0: "SOL/USDT", 1: "BTC/USDT", 2: "ETH/USDT", 3: "AVAX/USDT", 4: "LINK/USDT",
@@ -888,6 +1001,58 @@ export default function CommunityPage() {
     loadFromSupabase();
   }, []);
 
+  // Build user profiles from ALL users + their trades
+  useEffect(() => {
+    async function buildProfiles() {
+      // Fetch all users
+      const { data: users } = await supabase
+        .from("users")
+        .select("id, username, wallet_address, avatar_url, banner_url")
+        .order("username");
+
+      if (!users || users.length === 0) return;
+
+      // Map trades by username
+      const tradeMap = new Map<string, SharedTrade[]>();
+      for (const t of dbTrades) {
+        if (!t.isFromDb) continue;
+        const existing = tradeMap.get(t.username);
+        if (existing) {
+          existing.push(t);
+        } else {
+          tradeMap.set(t.username, [t]);
+        }
+      }
+
+      const profileList: UserProfile[] = [];
+      for (const u of users) {
+        if (!u.username) continue;
+        const trades = tradeMap.get(u.username) || [];
+        const tradeCount = trades.filter((t) => t.tradeType === "paper-trade").length;
+        const strategyCount = trades.filter((t) => t.tradeType === "backtest").length;
+        const pnls = trades.map((t) => t.pnlPercent).filter((p) => p !== 0);
+        const totalPnl = pnls.length > 0 ? pnls.reduce((a, b) => a + b, 0) / pnls.length : 0;
+        const wins = trades.filter((t) => t.pnl > 0).length;
+        const winRate = trades.length > 0 ? (wins / trades.length) * 100 : 0;
+
+        profileList.push({
+          id: u.id,
+          username: u.username,
+          avatarUrl: u.avatar_url || null,
+          bannerUrl: u.banner_url || null,
+          walletAddress: u.wallet_address,
+          tradeCount,
+          strategyCount,
+          totalPnl,
+          winRate,
+        });
+      }
+      profileList.sort((a, b) => b.totalPnl - a.totalPnl);
+      setProfiles(profileList);
+    }
+    buildProfiles();
+  }, [dbTrades]);
+
   // Merge real + mock data (real first)
   const allTrades = useMemo(() => [...dbTrades, ...mockTrades], [dbTrades]);
 
@@ -919,6 +1084,16 @@ export default function CommunityPage() {
       return true;
     });
   }, [filters, search, allTrades]);
+
+  // Filter profiles by search
+  const filteredProfiles = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    if (!q && !showProfiles) return [];
+    return profiles.filter((p) => {
+      if (!q) return true;
+      return p.username.toLowerCase().includes(q) || p.walletAddress.toLowerCase().includes(q);
+    });
+  }, [search, profiles, showProfiles]);
 
   const currentAssetOptions =
     filters.marketType !== "all" ? assetOptions[filters.marketType] : null;
@@ -1062,53 +1237,100 @@ export default function CommunityPage() {
                 }
                 disabled={!assetDropdownOptions}
               />
+              <button
+                onClick={() => setShowProfiles((s) => !s)}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all border backdrop-blur-md ${
+                  showProfiles
+                    ? "bg-orange-500/15 text-orange-400 border-orange-500/40"
+                    : "bg-white/5 text-gray-300 border-gray-700 hover:border-gray-500"
+                }`}
+              >
+                <span>Profiles</span>
+              </button>
             </div>
           </div>
         </motion.div>
 
-        {/* Separator + Results count */}
-        <div className="flex items-center gap-4 my-8">
-          <div className="h-px flex-1 bg-gradient-to-r from-transparent via-gray-700 to-transparent" />
-          <span className="text-gray-500 text-sm whitespace-nowrap">
-            {filteredTrades.length} {filteredTrades.length === 1 ? "trade" : "trades"} found
-          </span>
-          <div className="h-px flex-1 bg-gradient-to-r from-transparent via-gray-700 to-transparent" />
-        </div>
-
-        {/* Results Grid */}
-        {filteredTrades.length > 0 ? (
-          <motion.div
-            initial={!hasAnimated.current ? { opacity: 0, y: 20 } : false}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-            onAnimationComplete={() => { hasAnimated.current = true; }}
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
-          >
-            {filteredTrades.map((trade) => (
-              <div key={trade.id}>
-                <TradeCard trade={trade} connectedUser={connectedUser} />
+        {/* Profiles Section */}
+        {filteredProfiles.length > 0 && (
+          <>
+            <div className="flex items-center gap-4 mt-10 mb-6">
+              <div className="h-px flex-1 bg-gradient-to-r from-transparent via-orange-500/60 to-transparent" />
+              <div className="px-4 py-1.5 rounded-full border border-orange-500/30 bg-orange-500/10">
+                <span className="text-orange-400 text-xs font-semibold uppercase tracking-widest">
+                  Profiles ({filteredProfiles.length})
+                </span>
               </div>
-            ))}
-          </motion.div>
-        ) : (
-          <div className="text-center py-20">
-            <p className="text-gray-500 text-lg">No trades match your filters.</p>
-            <button
-              onClick={() => {
-                setFilters({
-                  marketType: "all",
-                  tradeType: "all",
-                  pnl: "all",
-                  asset: null,
-                });
-                setSearch("");
-              }}
-              className="mt-4 text-orange-500 hover:text-orange-400 transition-colors text-sm"
+              <div className="h-px flex-1 bg-gradient-to-r from-transparent via-orange-500/60 to-transparent" />
+            </div>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4 }}
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
             >
-              Clear all filters
-            </button>
+              {filteredProfiles.map((p) => (
+                <ProfileCard key={p.id} profile={p} />
+              ))}
+            </motion.div>
+          </>
+        )}
+
+        {/* Posts Section */}
+        {!showProfiles && (
+          <>
+            <div className="flex items-center gap-4 mt-10 mb-6">
+              <div className="h-px flex-1 bg-gradient-to-r from-transparent via-purple-500/60 to-transparent" />
+              <div className="px-4 py-1.5 rounded-full border border-purple-500/30 bg-purple-500/10">
+                <span className="text-purple-400 text-xs font-semibold uppercase tracking-widest">
+                  Posts ({filteredTrades.length})
+                </span>
+              </div>
+              <div className="h-px flex-1 bg-gradient-to-r from-transparent via-purple-500/60 to-transparent" />
+            </div>
+
+            {filteredTrades.length > 0 ? (
+              <motion.div
+                initial={!hasAnimated.current ? { opacity: 0, y: 20 } : false}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6 }}
+                onAnimationComplete={() => { hasAnimated.current = true; }}
+                className="flex flex-col gap-3 max-w-4xl mx-auto"
+              >
+                {filteredTrades.map((trade) => (
+                  <div key={trade.id}>
+                    <TradeCard trade={trade} connectedUser={connectedUser} />
+                  </div>
+                ))}
+              </motion.div>
+            ) : (
+              <div className="text-center py-20">
+                <p className="text-gray-500 text-lg">No posts match your filters.</p>
+                <button
+                  onClick={() => {
+                    setFilters({
+                      marketType: "all",
+                      tradeType: "all",
+                      pnl: "all",
+                      asset: null,
+                    });
+                    setSearch("");
+                  }}
+                  className="mt-4 text-orange-500 hover:text-orange-400 transition-colors text-sm"
+                >
+                  Clear all filters
+                </button>
+              </div>
+            )}
+          </>
+        )}
+
+        {showProfiles && filteredProfiles.length === 0 && (
+          <div className="text-center py-20">
+            <p className="text-gray-500 text-lg">No profiles found.</p>
           </div>
         )}
+
       </div>
     </div>
   );

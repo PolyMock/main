@@ -122,6 +122,28 @@ export function isWeb3AuthConnected(): boolean {
   return web3auth?.connected ?? false;
 }
 
+export async function restoreWeb3AuthSession(): Promise<{
+  publicKey: PublicKey;
+  wallet: SolanaWallet;
+} | null> {
+  try {
+    const instance = await initWeb3Auth();
+    if (!instance || !instance.connected || !instance.provider) return null;
+
+    const solWallet = new SolanaWallet(instance.provider);
+    const accounts = await solWallet.requestAccounts();
+    if (!accounts || accounts.length === 0) return null;
+
+    solanaWallet = solWallet;
+    return {
+      publicKey: new PublicKey(accounts[0]),
+      wallet: solWallet,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function disconnectWeb3Auth(): Promise<void> {
   try {
     if (web3auth?.connected) {

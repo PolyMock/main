@@ -59,8 +59,12 @@
 	let profileUsername = '';
 	let profileWalletAddress = '';
 	let profileAvatarUrl = '';
+	let profileBannerUrl = '';
 	let uploadingAvatar = false;
+	let uploadingBanner = false;
+	let copiedAddress = false;
 	let fileInput: HTMLInputElement;
+	let bannerFileInput: HTMLInputElement;
 
 	// Delete modal state
 	let showDeleteModal = false;
@@ -156,7 +160,7 @@
 			// Look up user from Supabase
 			const { data: dbUser } = await supabase
 				.from('users')
-				.select('id, username, avatar_url')
+				.select('id, username, avatar_url, banner_url')
 				.eq('wallet_address', walletAddress)
 				.maybeSingle();
 
@@ -170,6 +174,7 @@
 			profileUsername = dbUser.username || '';
 			profileWalletAddress = walletAddress;
 			profileAvatarUrl = dbUser.avatar_url || '';
+			profileBannerUrl = dbUser.banner_url || '';
 
 			// Fetch backtest strategies
 			const { data: strats, error: stratErr } = await supabase
@@ -203,6 +208,7 @@
 				.select('*')
 				.eq('user_id', dbUser.id)
 				.eq('is_published', true)
+				.eq('source', 'polymock')
 				.order('created_at', { ascending: false });
 
 			if (tradeErr) throw new Error(tradeErr.message);
@@ -420,6 +426,62 @@
 		}
 	}
 
+	async function handleBannerUpload(event: Event) {
+		const input = event.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file || !profileWalletAddress) return;
+
+		if (!file.type.startsWith('image/')) {
+			alert('Please select an image file');
+			return;
+		}
+		if (file.size > 5 * 1024 * 1024) {
+			alert('Image must be under 5MB');
+			return;
+		}
+
+		uploadingBanner = true;
+		try {
+			const ext = file.name.split('.').pop() || 'png';
+			const filePath = `${profileWalletAddress}.${ext}`;
+
+			const { data: existingFiles } = await supabase.storage
+				.from('banner')
+				.list('', { search: profileWalletAddress });
+			if (existingFiles && existingFiles.length > 0) {
+				await supabase.storage
+					.from('banner')
+					.remove(existingFiles.map(f => f.name));
+			}
+
+			const { error: uploadErr } = await supabase.storage
+				.from('banner')
+				.upload(filePath, file, { upsert: true });
+
+			if (uploadErr) throw new Error(uploadErr.message);
+
+			const { data: urlData } = supabase.storage
+				.from('banner')
+				.getPublicUrl(filePath);
+
+			const bannerUrl = urlData.publicUrl + '?t=' + Date.now();
+
+			const { error: updateErr } = await supabase
+				.from('users')
+				.update({ banner_url: bannerUrl })
+				.eq('wallet_address', profileWalletAddress);
+
+			if (updateErr) throw new Error(updateErr.message);
+
+			profileBannerUrl = bannerUrl;
+		} catch (err: any) {
+			console.error('Banner upload error:', err);
+			alert('Failed to upload banner: ' + err.message);
+		} finally {
+			uploadingBanner = false;
+		}
+	}
+
 	function formatDate(dateString: string) {
 		return new Date(dateString).toLocaleDateString('en-US', {
 			year: 'numeric',
@@ -445,41 +507,82 @@
 		<!-- Profile Section -->
 		{#if !loading && profileUsername}
 			<div class="profile-section">
-				<div class="profile-avatar-wrapper" on:click={() => fileInput.click()}>
-					{#if profileAvatarUrl}
-						<img src={profileAvatarUrl} alt="avatar" class="profile-avatar" />
+				<!-- Banner -->
+				<div class="profile-banner" on:click={() => bannerFileInput.click()}>
+					{#if profileBannerUrl}
+						<img src={profileBannerUrl} alt="Banner" class="profile-banner-image" />
 					{:else}
-						<div class="profile-avatar-placeholder">
-							{profileUsername.charAt(0).toUpperCase()}
-						</div>
+						<div class="profile-banner-placeholder"></div>
 					{/if}
-					<div class="avatar-overlay">
-						{#if uploadingAvatar}
+					<div class="profile-banner-gradient"></div>
+					<div class="profile-banner-overlay">
+						{#if uploadingBanner}
 							<span class="upload-spinner"></span>
 						{:else}
-							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-								<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-								<circle cx="12" cy="13" r="4"/>
-							</svg>
+							<div class="profile-banner-badge">
+								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+									<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+									<circle cx="12" cy="13" r="4"/>
+								</svg>
+								<span>{profileBannerUrl ? 'Change Banner' : 'Add Banner'}</span>
+							</div>
 						{/if}
 					</div>
 					<input
 						type="file"
 						accept="image/*"
-						bind:this={fileInput}
-						on:change={handleAvatarUpload}
+						bind:this={bannerFileInput}
+						on:change={handleBannerUpload}
 						style="display:none"
 					/>
 				</div>
-				<div class="profile-info">
-					<span class="profile-username">@{profileUsername}</span>
-					<span class="profile-address" title={profileWalletAddress}>
-						{profileWalletAddress.slice(0, 6)}...{profileWalletAddress.slice(-4)}
-					</span>
-					<div class="profile-stats">
-						<span class="profile-stat">{strategies.length} strategies</span>
-						<span class="profile-stat-sep">|</span>
-						<span class="profile-stat">{postedTrades.length} trades</span>
+
+				<!-- Avatar + Info -->
+				<div class="profile-header-row">
+					<div class="profile-avatar-wrapper" on:click|stopPropagation={() => fileInput.click()}>
+						{#if profileAvatarUrl}
+							<img src={profileAvatarUrl} alt="avatar" class="profile-avatar" />
+						{:else}
+							<div class="profile-avatar-placeholder">
+								{profileUsername.charAt(0).toUpperCase()}
+							</div>
+						{/if}
+						<div class="avatar-overlay">
+							{#if uploadingAvatar}
+								<span class="upload-spinner"></span>
+							{:else}
+								<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+									<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+									<circle cx="12" cy="13" r="4"/>
+								</svg>
+							{/if}
+						</div>
+						<input
+							type="file"
+							accept="image/*"
+							bind:this={fileInput}
+							on:change={handleAvatarUpload}
+							style="display:none"
+						/>
+					</div>
+					<div class="profile-info">
+						<span class="profile-username">@{profileUsername}</span>
+						<span
+							class="profile-address"
+							title="Click to copy address"
+							on:click={() => {
+								navigator.clipboard.writeText(profileWalletAddress);
+								copiedAddress = true;
+								setTimeout(() => copiedAddress = false, 1500);
+							}}
+						>
+							{copiedAddress ? 'Copied!' : profileWalletAddress.slice(0, 6) + '...' + profileWalletAddress.slice(-4)}
+						</span>
+						<div class="profile-stats">
+							<span class="profile-stat">{strategies.length} strategies</span>
+							<span class="profile-stat-sep">|</span>
+							<span class="profile-stat">{postedTrades.length} trades</span>
+						</div>
 					</div>
 				</div>
 			</div>
@@ -1420,24 +1523,90 @@
 
 	/* Profile Section */
 	.profile-section {
-		display: flex;
-		align-items: center;
-		gap: 24px;
-		padding: 28px;
 		background: #000;
-		border: 1px solid #FFFFFF;
+		border: 1px solid #404040;
 		border-radius: 16px;
 		margin-bottom: 32px;
+		overflow: hidden;
+	}
+
+	.profile-banner {
+		position: relative;
+		height: 160px;
+		width: 100%;
+		cursor: pointer;
+		overflow: hidden;
+	}
+
+	.profile-banner-image {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
+
+	.profile-banner-placeholder {
+		width: 100%;
+		height: 100%;
+		background: linear-gradient(135deg, rgba(249, 115, 22, 0.25) 0%, rgba(147, 51, 234, 0.2) 50%, rgba(17, 24, 39, 0.8) 100%);
+	}
+
+	.profile-banner-gradient {
+		position: absolute;
+		inset: 0;
+		background: linear-gradient(to top, #000000 0%, transparent 60%);
+		pointer-events: none;
+	}
+
+	.profile-banner-overlay {
+		position: absolute;
+		inset: 0;
+		background: rgba(0, 0, 0, 0);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		opacity: 0;
+		transition: all 0.2s;
+	}
+
+	.profile-banner:hover .profile-banner-overlay {
+		opacity: 1;
+		background: rgba(0, 0, 0, 0.4);
+	}
+
+	.profile-banner-badge {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 8px 16px;
+		border-radius: 12px;
+		background: rgba(0, 0, 0, 0.6);
+		border: 1px solid #555;
+		backdrop-filter: blur(8px);
+		color: white;
+		font-size: 12px;
+		font-weight: 500;
+	}
+
+	.profile-header-row {
+		display: flex;
+		align-items: flex-end;
+		gap: 20px;
+		padding: 0 28px;
+		margin-top: -44px;
+		position: relative;
+		z-index: 1;
+		padding-bottom: 24px;
 	}
 
 	.profile-avatar-wrapper {
 		position: relative;
-		width: 84px;
-		height: 84px;
+		width: 96px;
+		height: 96px;
 		border-radius: 50%;
 		cursor: pointer;
 		flex-shrink: 0;
-		border: 2px solid #F97316;
+		border: 4px solid #000;
+		box-shadow: 0 0 0 2px #555;
 		background: #000;
 	}
 
@@ -1453,13 +1622,14 @@
 		width: 100%;
 		height: 100%;
 		border-radius: 50%;
-		background: linear-gradient(135deg, #F97316, #ea580c);
+		background: linear-gradient(135deg, rgba(249, 115, 22, 0.3), rgba(249, 115, 22, 0.1));
+		border: none;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 32px;
-		font-weight: 800;
-		color: white;
+		font-size: 36px;
+		font-weight: 700;
+		color: #fb923c;
 	}
 
 	.avatar-overlay {
@@ -1491,21 +1661,22 @@
 	.profile-info {
 		display: flex;
 		flex-direction: column;
-		gap: 6px;
+		gap: 4px;
+		padding-bottom: 4px;
 	}
 
 	.profile-username {
-		font-size: 24px;
-		font-weight: 800;
-		color: white;
-		letter-spacing: -0.02em;
+		font-size: 28px;
+		font-weight: 700;
+		color: #ffffff;
 	}
 
 	.profile-address {
 		font-size: 13px;
-		color: #8b92ab;
+		color: #6b7280;
 		font-family: 'SF Mono', Consolas, monospace;
 		cursor: pointer;
+		transition: color 0.2s;
 	}
 
 	.profile-address:hover {
@@ -1516,7 +1687,7 @@
 		display: flex;
 		align-items: center;
 		gap: 10px;
-		margin-top: 4px;
+		margin-top: 2px;
 	}
 
 	.profile-stat {

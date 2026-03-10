@@ -2,9 +2,10 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/lib/supabase";
-import { connectWeb3Auth, disconnectWeb3Auth, isWeb3AuthConnected, initWeb3Auth } from "@/lib/web3auth";
+import { connectWeb3Auth, disconnectWeb3Auth, isWeb3AuthConnected, initWeb3Auth, restoreWeb3AuthSession } from "@/lib/web3auth";
 import UsernameModal from "./UsernameModal";
 
 export interface ConnectedUser {
@@ -20,29 +21,65 @@ interface WalletButtonProps {
 
 export default function WalletButton({ onUserChange }: WalletButtonProps) {
   const { publicKey, connected, select, disconnect, wallets, connecting } = useWallet();
+  const router = useRouter();
   const [showConnectOptions, setShowConnectOptions] = useState(false);
   const [showWalletList, setShowWalletList] = useState(false);
   const [showUsernameModal, setShowUsernameModal] = useState(false);
   const [user, setUser] = useState<ConnectedUser | null>(null);
   const [lookingUp, setLookingUp] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
-  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [web3authConnecting, setWeb3authConnecting] = useState(false);
   const [isEmbeddedWallet, setIsEmbeddedWallet] = useState(false);
-  // Store embedded wallet address separately (not from useWallet)
   const [embeddedPublicKey, setEmbeddedPublicKey] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const connectRef = useRef<HTMLDivElement>(null);
-  const avatarInputRef = useRef<HTMLInputElement>(null);
   const lastLookedUp = useRef<string | null>(null);
 
   // The active wallet address (from classic wallet or embedded)
   const activeWalletAddress = isEmbeddedWallet ? embeddedPublicKey : publicKey?.toBase58() || null;
   const isConnected = isEmbeddedWallet ? !!embeddedPublicKey : connected;
 
-  // Pre-init Web3Auth on mount
+  // Restore embedded wallet session on mount
   useEffect(() => {
-    initWeb3Auth();
+    async function restore() {
+      // Check if there's a saved embedded wallet in localStorage
+      const savedWallet = localStorage.getItem("hf_connected_wallet");
+      const savedIsEmbedded = localStorage.getItem("hf_embedded_wallet");
+      if (!savedWallet || savedIsEmbedded !== "true") {
+        initWeb3Auth();
+        return;
+      }
+
+      const result = await restoreWeb3AuthSession();
+      if (result) {
+        const walletAddress = result.publicKey.toBase58();
+        setIsEmbeddedWallet(true);
+        setEmbeddedPublicKey(walletAddress);
+
+        // Lookup user in Supabase
+        const { data } = await supabase
+          .from("users")
+          .select("id, username, avatar_url")
+          .eq("wallet_address", walletAddress)
+          .maybeSingle();
+
+        if (data?.username) {
+          const connectedUser: ConnectedUser = {
+            userId: data.id,
+            username: data.username,
+            avatarUrl: data.avatar_url || null,
+            walletAddress,
+          };
+          setUser(connectedUser);
+          onUserChange(connectedUser);
+        }
+      } else {
+        // Session expired, clean up
+        localStorage.removeItem("hf_connected_wallet");
+        localStorage.removeItem("hf_embedded_wallet");
+      }
+    }
+    restore();
   }, []);
 
   // Close dropdowns on outside click
@@ -81,6 +118,7 @@ export default function WalletButton({ onUserChange }: WalletButtonProps) {
       };
       setUser(connectedUser);
       onUserChange(connectedUser);
+      try { localStorage.setItem("hf_connected_wallet", walletAddress); } catch {}
     } else {
       setShowUsernameModal(true);
     }
@@ -117,6 +155,7 @@ export default function WalletButton({ onUserChange }: WalletButtonProps) {
       };
       setUser(connectedUser);
       onUserChange(connectedUser);
+      try { localStorage.setItem("hf_connected_wallet", activeWalletAddress); } catch {}
     }
   };
 
@@ -129,47 +168,6 @@ export default function WalletButton({ onUserChange }: WalletButtonProps) {
     }
   };
 
-  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !user) return;
-
-    if (!file.type.startsWith("image/")) return;
-    if (file.size > 2 * 1024 * 1024) {
-      alert("Image must be under 2MB");
-      return;
-    }
-
-    setUploadingAvatar(true);
-    try {
-      const walletAddress = user.walletAddress;
-      const ext = file.name.split(".").pop() || "png";
-      const filePath = `${walletAddress}.${ext}`;
-
-      const { data: existing } = await supabase.storage.from("avatar").list("", { search: walletAddress });
-      if (existing && existing.length > 0) {
-        await supabase.storage.from("avatar").remove(existing.map((f: any) => f.name));
-      }
-
-      const { error: uploadErr } = await supabase.storage.from("avatar").upload(filePath, file, { upsert: true });
-      if (uploadErr) throw uploadErr;
-
-      const { data: urlData } = supabase.storage.from("avatar").getPublicUrl(filePath);
-      const avatarUrl = urlData.publicUrl + "?t=" + Date.now();
-
-      await supabase.from("users").update({ avatar_url: avatarUrl }).eq("wallet_address", walletAddress);
-
-      const updated = { ...user, avatarUrl };
-      setUser(updated);
-      onUserChange(updated);
-    } catch (err: any) {
-      console.error("Avatar upload error:", err);
-      alert("Failed to upload avatar");
-    } finally {
-      setUploadingAvatar(false);
-      if (avatarInputRef.current) avatarInputRef.current.value = "";
-    }
-  };
-
   const handleEmbeddedDisconnect = async () => {
     await disconnectWeb3Auth();
     setIsEmbeddedWallet(false);
@@ -178,6 +176,10 @@ export default function WalletButton({ onUserChange }: WalletButtonProps) {
     onUserChange(null);
     lastLookedUp.current = null;
     setShowDropdown(false);
+    try {
+      localStorage.removeItem("hf_connected_wallet");
+      localStorage.removeItem("hf_embedded_wallet");
+    } catch {}
   };
 
   const handleDisconnect = async () => {
@@ -188,6 +190,7 @@ export default function WalletButton({ onUserChange }: WalletButtonProps) {
       setUser(null);
       onUserChange(null);
       lastLookedUp.current = null;
+      try { localStorage.removeItem("hf_connected_wallet"); } catch {}
       setShowDropdown(false);
     }
   };
@@ -224,6 +227,7 @@ export default function WalletButton({ onUserChange }: WalletButtonProps) {
       const walletAddress = result.publicKey.toBase58();
       setIsEmbeddedWallet(true);
       setEmbeddedPublicKey(walletAddress);
+      try { localStorage.setItem("hf_embedded_wallet", "true"); } catch {}
 
       // Lookup user in Supabase
       const { data } = await supabase
@@ -241,6 +245,7 @@ export default function WalletButton({ onUserChange }: WalletButtonProps) {
         };
         setUser(connectedUser);
         onUserChange(connectedUser);
+        try { localStorage.setItem("hf_connected_wallet", walletAddress); } catch {}
       } else {
         // Wait a moment for Web3Auth modal to close before showing username modal
         await new Promise(r => setTimeout(r, 800));
@@ -287,7 +292,7 @@ export default function WalletButton({ onUserChange }: WalletButtonProps) {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -8, scale: 0.95 }}
               transition={{ duration: 0.15 }}
-              className="absolute right-0 mt-2 min-w-[200px] rounded-xl border border-gray-700 bg-[#141414]/95 backdrop-blur-xl shadow-2xl shadow-black/50 z-50 overflow-hidden"
+              className="absolute right-0 mt-2 w-full rounded-xl border border-gray-700 bg-[#141414]/95 backdrop-blur-xl shadow-2xl shadow-black/50 z-50 overflow-hidden"
             >
               <div className="px-4 py-3 border-b border-gray-800">
                 <p className="text-white text-sm font-medium">@{user.username}</p>
@@ -297,14 +302,13 @@ export default function WalletButton({ onUserChange }: WalletButtonProps) {
                 )}
               </div>
               <button
-                onClick={() => { avatarInputRef.current?.click(); setShowDropdown(false); }}
+                onClick={() => { router.push(`/profile?address=${user.walletAddress}`); setShowDropdown(false); }}
                 className="w-full px-4 py-3 text-left text-sm text-gray-300 hover:bg-white/5 transition-colors flex items-center gap-2"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
-                  <circle cx="12" cy="13" r="4" stroke="currentColor" strokeWidth={1.5} fill="none" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                 </svg>
-                {uploadingAvatar ? "Uploading..." : user.avatarUrl ? "Change Avatar" : "Set Avatar"}
+                Profile
               </button>
               <button
                 onClick={handleDisconnect}
@@ -315,13 +319,6 @@ export default function WalletButton({ onUserChange }: WalletButtonProps) {
                 </svg>
                 Disconnect
               </button>
-              <input
-                ref={avatarInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleAvatarUpload}
-                className="hidden"
-              />
             </motion.div>
           )}
         </AnimatePresence>
