@@ -19,8 +19,8 @@ pub struct UserAccount {
 #[derive(Default, InitSpace)]
 pub struct PredictionPosition {
     pub owner: Pubkey,
-    #[max_len(32)]
-    pub market_id: String,       // Polymarket market ID (max 32 chars)
+    #[max_len(128)]
+    pub market_id: String,       // Polymarket condition ID (max 128 chars)
     pub position_id: u64,
     pub prediction_type: PredictionType, // Yes or No
     pub amount_usdc: u64,        // Amount of USDC invested (6 decimals)
@@ -654,7 +654,7 @@ pub struct Trade<'info> {
     #[account(
         init,
         payer = user,
-        space = 8 + std::mem::size_of::<PredictionPosition>(),
+        space = 8 + PredictionPosition::INIT_SPACE,
         seeds = [
             b"position",
             user_account.owner.as_ref(),

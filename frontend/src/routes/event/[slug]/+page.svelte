@@ -619,14 +619,23 @@
 								<span class="amount-currency">$</span>
 							{/if}
 							<input
-								type="number"
-								bind:value={amount}
-								placeholder="0"
+								type="text"
+								inputmode="decimal"
+								value={amount || ''}
+								on:input={(e) => {
+									const val = e.target.value;
+									if (val === '' || val === '.') {
+										amount = 0;
+										return;
+									}
+									const parsed = parseFloat(val);
+									if (!isNaN(parsed)) {
+										amount = parsed;
+									}
+								}}
+								placeholder="0.00"
 								class="amount-input"
 								class:sell-mode={tradeTab === 'Sell'}
-								min="0"
-								step={tradeTab === 'Buy' ? '0.01' : '0.01'}
-								max={tradeTab === 'Buy' ? walletState.usdcBalance : (selectedPosition ? selectedPosition.remainingShares : 0)}
 							/>
 							{#if tradeTab === 'Sell'}
 								<span class="amount-suffix">shares</span>

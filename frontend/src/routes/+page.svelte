@@ -430,14 +430,14 @@
 							<div class="event-card-wrapper">
 								<!-- Event Header -->
 								<button class="event-header-compact" on:click={() => selectEvent(event)}>
-									<div class="event-header-left">
+									<div class="event-header-top">
 										{#if event.image}
 											<img src={event.image} alt={event.title} class="event-icon" />
 										{/if}
 										<h3 class="event-title-compact">{event.title}</h3>
 									</div>
 									{#if event.categories && event.categories[0]}
-										<span class="event-category-badge-small">{event.categories[0]}</span>
+										<span class="event-category-badge-small">{event.categories[0].replace(/_/g, ' ')}</span>
 									{/if}
 								</button>
 
@@ -833,13 +833,13 @@
 	}
 
 	.event-header-compact {
-		padding: 12px 16px;
+		padding: 14px 16px;
 		background: rgba(42, 47, 69, 0.3);
 		border: none;
 		border-bottom: 1px solid #404040;
 		display: flex;
-		align-items: center;
-		justify-content: space-between;
+		flex-direction: column;
+		gap: 8px;
 		cursor: pointer;
 		transition: background 200ms ease-out;
 		width: 100%;
@@ -851,17 +851,16 @@
 		background: rgba(42, 47, 69, 0.5);
 	}
 
-	.event-header-left {
+	.event-header-top {
 		display: flex;
 		align-items: center;
 		gap: 10px;
-		flex: 1;
 		min-width: 0;
 	}
 
 	.event-icon {
-		width: 32px;
-		height: 32px;
+		width: 36px;
+		height: 36px;
 		border-radius: 6px;
 		object-fit: cover;
 		flex-shrink: 0;
@@ -869,18 +868,18 @@
 
 	.event-title-compact {
 		margin: 0;
-		font-size: 15px;
+		font-size: 14px;
 		font-weight: 600;
 		color: #E8E8E8;
 		line-height: 1.3;
-		white-space: normal;
-		word-wrap: break-word;
-		overflow-wrap: break-word;
-		min-height: 2.6em;
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
 	}
 
 	.event-category-badge-small {
-		padding: 4px 8px;
+		padding: 3px 8px;
 		background: rgba(0, 208, 132, 0.1);
 		border: 1px solid rgba(0, 208, 132, 0.3);
 		border-radius: 4px;
@@ -888,7 +887,8 @@
 		font-size: 10px;
 		font-weight: 600;
 		white-space: nowrap;
-		flex-shrink: 0;
+		align-self: flex-start;
+		text-transform: capitalize;
 	}
 
 	.markets-preview {

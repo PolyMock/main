@@ -16,8 +16,8 @@ dotenv.config();
 
 const PROGRAM_ID = new PublicKey('6a5sw2ZVXkAqPF5F8jSvBFVWZSBenaMGnRjnhPoVD31Z');
 const RPC_URL = process.env.RPC_URL || 'https://api.devnet.solana.com';
-const POLYMARKET_CLOB_API = 'https://clob.polymarket.com';
-const POLYMARKET_GAMMA_API = 'https://gamma-api.polymarket.com';
+const SYNTHESIS_API_BASE = 'https://synthesis.trade/api/v1';
+const SYNTHESIS_API_KEY = process.env.SYNTHESIS_API_KEY || '';
 const CHECK_INTERVAL_MS = parseInt(process.env.CHECK_INTERVAL_MS || '30000'); // 30 seconds default
 
 interface Position {
@@ -157,52 +157,56 @@ class SLTPBot {
   ): Promise<Map<string, number>> {
     const priceMap = new Map<string, number>();
 
-    for (const marketId of marketIds) {
-      try {
-        // Fetch market details from Polymarket Gamma API
-        const marketResponse = await axios.get(
-          `${POLYMARKET_GAMMA_API}/markets/${marketId}`,
-          { timeout: 5000 }
-        );
-
-        if (!marketResponse.data || !marketResponse.data.clobTokenIds) {
-          console.warn(`⚠️  Market ${marketId} has no clobTokenIds`);
-          continue;
+    try {
+      // Fetch all markets from Synthesis API
+      const marketsResponse = await axios.get(
+        `${SYNTHESIS_API_BASE}/polymarket/markets?limit=200&sort=volume1wk&order=DESC`,
+        {
+          headers: { 'X-PROJECT-API-KEY': SYNTHESIS_API_KEY },
+          timeout: 10000,
         }
+      );
 
-        const tokenIds = typeof marketResponse.data.clobTokenIds === 'string'
-          ? JSON.parse(marketResponse.data.clobTokenIds)
-          : marketResponse.data.clobTokenIds;
-
-        if (!Array.isArray(tokenIds) || tokenIds.length < 2) {
-          console.warn(`⚠️  Invalid clobTokenIds for market ${marketId}`);
-          continue;
-        }
-
-        // Fetch price for YES token (index 0) using CLOB price endpoint
-        const yesTokenId = tokenIds[0];
-        const priceResponse = await axios.get(
-          `${POLYMARKET_CLOB_API}/price`,
-          {
-            params: {
-              token_id: yesTokenId,
-              side: 'buy',
-            },
-            timeout: 5000,
-          }
-        );
-
-        if (priceResponse.data && priceResponse.data.price) {
-          const price = parseFloat(priceResponse.data.price);
-          priceMap.set(marketId, price);
-          console.log(`  💰 ${marketId}: ${(price * 100).toFixed(1)}¢ (Yes)`);
-        }
-      } catch (error: any) {
-        console.error(
-          `❌ Error fetching price for market ${marketId}:`,
-          error.message
-        );
+      if (!marketsResponse.data?.success || !marketsResponse.data?.response) {
+        console.warn('⚠️  Failed to fetch markets list from Synthesis');
+        return priceMap;
       }
+
+      // Build lookup maps: condition_id and numeric id -> market data
+      const marketLookup = new Map<string, any>();
+      for (const item of marketsResponse.data.response) {
+        if (item.markets && Array.isArray(item.markets)) {
+          for (const market of item.markets) {
+            if (market.condition_id) {
+              marketLookup.set(market.condition_id, market);
+            }
+            if (market.polymarket_id) {
+              marketLookup.set(String(market.polymarket_id), market);
+            }
+            if (market.id) {
+              marketLookup.set(String(market.id), market);
+            }
+          }
+        }
+      }
+
+      // Match requested market IDs to Synthesis data
+      for (const marketId of marketIds) {
+        const market = marketLookup.get(marketId);
+        if (!market) {
+          console.warn(`⚠️  Market ${marketId} not found in Synthesis data`);
+          continue;
+        }
+
+        // Use left_price directly (Yes price) — already a decimal 0-1
+        const price = parseFloat(market.left_price);
+        if (!isNaN(price)) {
+          priceMap.set(marketId, price);
+          console.log(`  💰 ${marketId.slice(0, 10)}...: ${(price * 100).toFixed(1)}¢ (Yes)`);
+        }
+      }
+    } catch (error: any) {
+      console.error('❌ Error fetching prices from Synthesis:', error.message);
     }
 
     return priceMap;

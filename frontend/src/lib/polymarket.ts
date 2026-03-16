@@ -114,23 +114,18 @@ export class PolymarketClient {
   private baseURL: string;
 
   constructor() {
-    
     this.baseURL = '/api';
   }
 
   /**
-   * Fetches events from Polymarket (replaces fetchMarkets for better organization)
+   * Fetches events from Polymarket via Synthesis API
    * Each event contains one or more markets
-   * @param limit - Maximum number of events to fetch
-   * @param fetchPrices - Whether to fetch real-time prices (default: false for performance)
-   * @param offset - Offset for pagination (default: 0)
-   * @returns Array of PolyEvent objects with nested markets
    */
   async fetchEvents(limit: number = 10, fetchPrices: boolean = false, offset: number = 0): Promise<PolyEvent[]> {
     try {
       const response = await axios.get(`${this.baseURL}/events`, {
         params: {
-          limit: limit * 2, // Fetch more to filter
+          limit: limit * 2,
           offset,
           active: true,
           closed: false
@@ -140,22 +135,18 @@ export class PolymarketClient {
       if (response.data && Array.isArray(response.data)) {
         // Filter events that have markets with enableOrderBook = true
         const tradableEvents = response.data.filter((event: PolyEvent) => {
-          // Keep events that have at least one tradable market
           return event.markets && event.markets.some(market => market.enableOrderBook || market.enable_order_book);
         }).slice(0, limit);
 
-        // Only enrich with prices if requested (for performance)
+        // Only enrich with prices if requested
         if (fetchPrices) {
           for (const event of tradableEvents) {
             for (const market of event.markets) {
-              // Process market tokens
               this.processMarketTokens(market);
-              // Fetch real-time prices
-              await this.enrichMarketWithCLOBPrices(market);
+              await this.enrichMarketWithPrices(market);
             }
           }
         } else {
-          // Just process the basic market tokens from outcomePrices
           for (const event of tradableEvents) {
             for (const market of event.markets) {
               this.processMarketTokens(market);
@@ -173,21 +164,19 @@ export class PolymarketClient {
   }
 
   /**
-   * Legacy method - now fetches markets via events for better organization
-   * @deprecated Use fetchEvents() instead for better event grouping
+   * Legacy method - fetches markets via internal API route
    */
   async fetchMarkets(limit: number = 10): Promise<PolyMarket[]> {
     try {
       const response = await axios.get(`${this.baseURL}/markets`, {
         params: {
-          limit: limit * 3, 
+          limit: limit * 3,
           active: true,
           closed: false
         }
       });
 
       if (response.data && Array.isArray(response.data)) {
-       
         const binaryMarkets = response.data.filter(market => {
           try {
             const outcomes = market.outcomes
@@ -199,34 +188,24 @@ export class PolymarketClient {
           }
         }).slice(0, limit);
 
-        // Process each market to extract Yes/No prices
         const processedMarkets = binaryMarkets.map(market => this.processMarketTokens(market));
 
-        // Fetch real-time prices from CLOB API for each market
-        await Promise.all(processedMarkets.map(market => this.enrichMarketWithCLOBPrices(market)));
+        // Enrich with real-time prices
+        await Promise.all(processedMarkets.map(market => this.enrichMarketWithPrices(market)));
 
-        
         const balancedMarkets = processedMarkets
           .map(market => {
-         
             const yesPrice = market.yesPrice || 0;
             const noPrice = market.noPrice || 0;
-
-            // If prices are invalid, give worst balance score
             if (yesPrice === 0 || noPrice === 0) {
               return { market, balance: 1 };
             }
-
-            
             const yesDistance = Math.abs(yesPrice - 0.5);
             const noDistance = Math.abs(noPrice - 0.5);
             const balance = (yesDistance + noDistance) / 2;
-
             return { market, balance };
           })
-          
           .sort((a, b) => a.balance - b.balance)
-          
           .slice(0, limit)
           .map(item => item.market);
 
@@ -241,7 +220,6 @@ export class PolymarketClient {
 
   private processMarketTokens(market: PolyMarket): PolyMarket {
     try {
-      // Binary market only - set yes/no prices
       if (market.outcomePrices) {
         const prices = typeof market.outcomePrices === 'string'
           ? JSON.parse(market.outcomePrices)
@@ -249,7 +227,6 @@ export class PolymarketClient {
         market.yesPrice = parseFloat(prices[0]) || 0;
         market.noPrice = parseFloat(prices[1]) || 0;
       } else {
-        // Fallback
         market.yesPrice = 0;
         market.noPrice = 0;
       }
@@ -303,109 +280,35 @@ export class PolymarketClient {
   }
 
   /**
-   * Fetches real-time prices from CLOB API using token IDs
-   * Updates the market object with yesPrice and noPrice
+   * Enriches market with prices - prices already come from the API response
+   * via outcomePrices, so this just ensures they're set via processMarketTokens
    */
-  private async enrichMarketWithCLOBPrices(market: PolyMarket): Promise<void> {
-    // Check if market has clobTokenIds
-    if (!market.clobTokenIds || market.clobTokenIds.length < 2) {
-      return;
-    }
-
-    try {
-      // Parse clobTokenIds if it's a string (JSON array)
-      const tokenIds = typeof market.clobTokenIds === 'string'
-        ? JSON.parse(market.clobTokenIds)
-        : market.clobTokenIds;
-
-      if (!Array.isArray(tokenIds) || tokenIds.length < 2) {
-        return;
-      }
-
-      // Binary market - fetch YES/NO prices
-      const yesTokenId = tokenIds[0];
-      const noTokenId = tokenIds[1];
-
-      const [yesPriceResult, noPriceResult] = await Promise.allSettled([
-        this.fetchCLOBPrice(yesTokenId),
-        this.fetchCLOBPrice(noTokenId)
-      ]);
-
-      let yes = yesPriceResult.status === 'fulfilled' && yesPriceResult.value !== null ? yesPriceResult.value : 0;
-      let no = noPriceResult.status === 'fulfilled' && noPriceResult.value !== null ? noPriceResult.value : 0;
-
-      // Calculate inverse when one price is 0
-      if (yes > 0 && no === 0) {
-        no = 1 - yes;
-      } else if (no > 0 && yes === 0) {
-        yes = 1 - no;
-      } else if (yes === 0 && no === 0) {
-        // Both are 0, keep as is (will use fallback values)
-        return;
-      }
-
-      market.yesPrice = yes;
-      market.noPrice = no;
-
-    } catch (error) {
-      console.error(`Error enriching market ${market.id} with CLOB prices:`, error);
-    }
+  private async enrichMarketWithPrices(market: PolyMarket): Promise<void> {
+    // Prices are already included in the Synthesis API response (left_price/right_price)
+    // mapped to outcomePrices by our server-side routes. Just process them.
+    this.processMarketTokens(market);
   }
 
   /**
-   * Fetches price from CLOB API for a specific token
-   * @param tokenId - The token ID to fetch price for
-   * @returns The price as a number, or null if unavailable
-   */
-  private async fetchCLOBPrice(tokenId: string): Promise<number | null> {
-    try {
-      const response = await axios.get('https://clob.polymarket.com/price', {
-        params: {
-          token_id: tokenId,
-          side: 'buy'
-        },
-        timeout: 5000 // 5 second timeout
-      });
-
-      if (response.data && response.data.price) {
-        return parseFloat(response.data.price);
-      }
-
-      return null;
-    } catch (error: any) {
-      // Don't log errors for markets without orderbooks (common for inactive markets)
-      if (error.response?.data?.error?.includes('No orderbook')) {
-        return null;
-      }
-      console.error(`Error fetching CLOB price for token ${tokenId}:`, error.message);
-      return null;
-    }
-  }
-
-  /**
-   * Enriches a single event's markets with real-time CLOB prices
-   * @param event - The event to enrich with prices
+   * Enriches a single event's markets with real-time prices
    */
   async enrichEventWithPrices(event: PolyEvent): Promise<void> {
     if (!event.markets || event.markets.length === 0) return;
 
     for (const market of event.markets) {
-      await this.enrichMarketWithCLOBPrices(market);
+      await this.enrichMarketWithPrices(market);
     }
   }
 
   /**
    * Finds the event slug for a given market ID
-   * @param marketId - The market ID to search for
-   * @returns The event slug, or null if not found
    */
   async getEventSlugForMarket(marketId: string): Promise<string | null> {
     try {
-      // Search through both active and closed events
       const searchConfigs = [
-        { active: true, closed: false },   // Active events
-        { active: false, closed: true },   // Closed events
-        { active: true, closed: true }     // All events
+        { active: true, closed: false },
+        { active: false, closed: true },
+        { active: true, closed: true }
       ];
 
       for (const config of searchConfigs) {
@@ -420,7 +323,6 @@ export class PolymarketClient {
 
         if (response.data && Array.isArray(response.data)) {
           for (const event of response.data) {
-            // Check if any of the event's markets match the marketId
             if (event.markets && Array.isArray(event.markets)) {
               const hasMarket = event.markets.some((market: PolyMarket) => market.id === marketId);
               if (hasMarket) {
@@ -440,18 +342,14 @@ export class PolymarketClient {
   }
 
   /**
-   * Searches for events across all categories (active, closed, archived)
-   * Used for comprehensive search functionality
-   * @param limit - Maximum number of events per category
-   * @returns Array of all matching events
+   * Searches for events across all categories
    */
   async searchAllEvents(limit: number = 200): Promise<PolyEvent[]> {
     try {
-      // Fetch from multiple configurations in parallel
       const fetchConfigs = [
-        { active: true, closed: false },   // Active/Open markets
-        { active: false, closed: true },   // Closed markets
-        { active: true, closed: true },    // All markets
+        { active: true, closed: false },
+        { active: false, closed: true },
+        { active: true, closed: true },
       ];
 
       const fetchPromises = fetchConfigs.map(config =>
@@ -470,14 +368,12 @@ export class PolymarketClient {
 
       const results = await Promise.all(fetchPromises);
 
-      // Combine all results and remove duplicates by ID
       const allEventsMap = new Map<string, PolyEvent>();
 
       results.forEach(response => {
         if (response.data && Array.isArray(response.data)) {
           response.data.forEach((event: PolyEvent) => {
             if (!allEventsMap.has(event.id)) {
-              // Process market tokens for each event
               if (event.markets) {
                 event.markets.forEach(market => this.processMarketTokens(market));
               }
@@ -495,16 +391,10 @@ export class PolymarketClient {
   }
 
   /**
-   * Fetches the current price for a position based on market ID and prediction type
-   * For closed markets, returns the settlement price (0 or 1)
-   * For open markets, fetches real-time price from CLOB API
-   * @param marketId - The market ID
-   * @param predictionType - 'Yes' or 'No'
-   * @returns The current price, or null if unavailable
+   * Fetches the current price for a position
    */
   async getPositionCurrentPrice(marketId: string, predictionType: 'Yes' | 'No'): Promise<number | null> {
     try {
-      // First, get market details to check if closed and get token IDs
       const market = await this.getMarketById(marketId);
 
       if (!market) {
@@ -512,7 +402,7 @@ export class PolymarketClient {
         return null;
       }
 
-      // If market is closed, check settlement prices from outcomePrices
+      // If market is closed, check settlement prices
       if (market.closed && market.outcomePrices) {
         try {
           const prices = typeof market.outcomePrices === 'string'
@@ -520,11 +410,8 @@ export class PolymarketClient {
             : market.outcomePrices;
 
           if (Array.isArray(prices) && prices.length >= 2) {
-            // For binary markets, indices map to: [Yes/First Outcome, No/Second Outcome]
-            // predictionType 'Yes' = index 0, 'No' = index 1
             const priceIndex = predictionType === 'Yes' ? 0 : 1;
             const settledPrice = parseFloat(prices[priceIndex]);
-
             return settledPrice;
           }
         } catch (error) {
@@ -532,7 +419,7 @@ export class PolymarketClient {
         }
       }
 
-      // Fallback: Check tokens array for winner info (legacy format)
+      // Fallback: Check tokens array for winner info
       if (market.closed && market.tokens) {
         const relevantToken = market.tokens.find(token =>
           token.outcome?.toLowerCase() === predictionType.toLowerCase()
@@ -543,24 +430,13 @@ export class PolymarketClient {
         }
       }
 
-      // For open markets or closed markets without settlement, fetch real-time price
-      if (!market.clobTokenIds || market.clobTokenIds.length < 2) {
-        console.warn(`Market ${marketId} has no clobTokenIds`);
-        return null;
+      // For open markets, use prices from market data (already fetched from Synthesis)
+      this.processMarketTokens(market);
+      if (predictionType === 'Yes') {
+        return market.yesPrice ?? null;
+      } else {
+        return market.noPrice ?? null;
       }
-
-      const tokenIds = typeof market.clobTokenIds === 'string'
-        ? JSON.parse(market.clobTokenIds)
-        : market.clobTokenIds;
-
-      if (!Array.isArray(tokenIds) || tokenIds.length < 2) {
-        return null;
-      }
-
-      // Token IDs are ordered: [Yes/First Outcome, No/Second Outcome]
-      const tokenId = predictionType === 'Yes' ? tokenIds[0] : tokenIds[1];
-
-      return await this.fetchCLOBPrice(tokenId);
     } catch (error) {
       console.error(`Error fetching position price for market ${marketId}:`, error);
       return null;

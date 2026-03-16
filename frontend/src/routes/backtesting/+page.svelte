@@ -1,3 +1,9 @@
+<svelte:head>
+	<link rel="preconnect" href="https://fonts.googleapis.com" />
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+	<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+</svelte:head>
+
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
@@ -334,91 +340,723 @@
 		return insights;
 	}
 
-	// ============= STRATEGY BACKTESTING TAB (New Code) =============
-	let strategyTab: 'configure' | 'results' = 'configure';
+	// ============= STRATEGY BACKTESTING TAB =============
+	let strategyTab: 'configure' | 'strategy' | 'results' = 'configure';
 	let isRunning = false;
 	let progress = 0;
 	let error = '';
 
-	// Helper to format date for input type="date"
 	function formatDateForInput(date: Date): string {
 		return date.toISOString().split('T')[0];
 	}
-
-	// Helper to parse date from input
 	function parseDateFromInput(dateStr: string): Date {
 		return new Date(dateStr + 'T00:00:00');
 	}
 
-	// Date strings for input binding
-	let startDateStr = formatDateForInput(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
-	let endDateStr = formatDateForInput(new Date());
-	let earliestEntryStr: string | undefined = undefined;
-	let latestEntryStr: string | undefined = undefined;
+	// Terminal-driven config
+	let useTimePeriod = false;
+	let timestampStartStr = '';
+	let timestampEndStr = '';
+	let filterPlatform: Set<string> = new Set(['polymarket']);
+	let filterTitleSearch = '';
+	let filterVolumeInf: number | null = null;
+	let filterVolumeSup: number | null = null;
+	let filterCategories: Set<string> = new Set();
+	let filterOutcomesSearch = '';
+	let filterPriceInf: number | null = null;
+	let filterPriceSup: number | null = null;
+	let filterAmountInf: number | null = null;
+	let filterAmountSup: number | null = null;
+	let filterPosition: Set<string> = new Set();
 
-	let config: any = {
-		specificMarkets: [],
-		categories: [],
-		minTimeToResolution: undefined,
-		maxTimeToResolution: undefined,
-		entryType: 'BOTH',
-		entryPriceThreshold: {
-			yes: { min: 0.3, max: 0.7 },
-			no: { min: 0.3, max: 0.7 }
-		},
-		entryTimeConstraints: {
-			earliestEntry: undefined,
-			latestEntry: undefined
-		},
-		tradeFrequency: {
-			maxTradesPerDay: undefined,
-			cooldownHours: undefined
-		},
-		exitRules: {
-			resolveOnExpiry: true,
-			stopLoss: undefined,
-			takeProfit: undefined,
-			maxHoldTime: undefined,
-			trailingStop: {
-				enabled: false,
-				activationPercent: undefined,
-				trailPercent: undefined
-			},
-			partialExits: {
-				enabled: false,
-				takeProfit1: { percent: undefined, sellPercent: undefined },
-				takeProfit2: { percent: undefined, sellPercent: undefined }
-			}
-		},
-		positionSizing: {
-			type: 'PERCENTAGE',
-			fixedAmount: 100,
-			percentageOfBankroll: 5,
-			maxExposurePercent: undefined
-		},
-		startDate: parseDateFromInput(startDateStr),
-		endDate: parseDateFromInput(endDateStr),
-		initialBankroll: 10000
+	const availableCategories = [
+		'crypto', 'culture', 'economy', 'elections', 'finance',
+		'geopolitics', 'politic', 'sport', 'tech', 'world'
+	];
+
+	$: engineConfig = {
+		platform: Array.from(filterPlatform),
+		timestamp_start: useTimePeriod && timestampStartStr ? timestampStartStr : null,
+		timestamp_end: useTimePeriod && timestampEndStr ? timestampEndStr : null,
+		market_title: filterTitleSearch.trim() ? filterTitleSearch.trim().split(',').map(s => s.trim()).filter(Boolean) : null,
+		volume_inf: filterVolumeInf,
+		volume_sup: filterVolumeSup,
+		market_category: filterCategories.size > 0 ? Array.from(filterCategories) : null,
+		position: filterPosition.size > 0 ? Array.from(filterPosition) : null,
+		possible_outcomes: filterOutcomesSearch.trim() ? filterOutcomesSearch.trim().split(',').map(s => s.trim()).filter(Boolean) : null,
+		price_inf: filterPriceInf,
+		price_sup: filterPriceSup,
+		amount_inf: filterAmountInf,
+		amount_sup: filterAmountSup,
 	};
 
-	// Update config dates when date strings change
-	$: if (startDateStr) {
-		config.startDate = parseDateFromInput(startDateStr);
+	$: activeFilterCount = [
+		engineConfig.market_title,
+		engineConfig.volume_inf !== null || engineConfig.volume_sup !== null,
+		engineConfig.market_category,
+		engineConfig.position,
+		engineConfig.possible_outcomes,
+		engineConfig.price_inf !== null || engineConfig.price_sup !== null,
+		engineConfig.amount_inf !== null || engineConfig.amount_sup !== null,
+	].filter(Boolean).length;
+
+	// Strategy editor state
+	let strategyCode = `def strategy(trade, trade_log, portfolio, params):
+    """
+    Args:
+        trade: Current trade dict (price, amount, position, market_id, etc.)
+        trade_log: List of past executed trades
+        portfolio: { cash: float, positions: { (market_id, position): amount } }
+        params: Custom dict to persist data across trades
+
+    Returns:
+        { market_id, position ("hold" or outcome), amount, user_perso_parameters }
+    """
+    # Your strategy logic here
+    return {
+        "market_id": trade["market_id"],
+        "position": "hold",
+        "amount": 0,
+        "user_perso_parameters": params
+    }`;
+
+	let selectedExample: number | null = null;
+	let dataCollapsed = false;
+
+	const mockTrades = [
+		{ timestamp: '2025-03-15 14:32', title: 'Will BTC hit $100k by June?', position: 'Yes', price: 0.62, amount: 50, volume: 1240000, category: 'Crypto' },
+		{ timestamp: '2025-03-15 14:28', title: 'Fed rate cut in May?', position: 'No', price: 0.35, amount: 30, volume: 890000, category: 'Economics' },
+		{ timestamp: '2025-03-15 14:15', title: 'ETH above $5k by April?', position: 'Yes', price: 0.41, amount: 75, volume: 2100000, category: 'Crypto' },
+		{ timestamp: '2025-03-15 13:58', title: 'Trump wins 2028 GOP primary?', position: 'Yes', price: 0.78, amount: 20, volume: 5600000, category: 'Politics' },
+		{ timestamp: '2025-03-15 13:42', title: 'SOL above $200 by June?', position: 'No', price: 0.55, amount: 40, volume: 980000, category: 'Crypto' },
+		{ timestamp: '2025-03-15 13:30', title: 'US GDP growth > 3% Q2?', position: 'Yes', price: 0.29, amount: 60, volume: 450000, category: 'Economics' },
+		{ timestamp: '2025-03-15 13:12', title: 'SpaceX Starship launch success?', position: 'Yes', price: 0.83, amount: 25, volume: 1800000, category: 'Science' },
+		{ timestamp: '2025-03-15 12:55', title: 'DOGE above $0.50 by May?', position: 'No', price: 0.18, amount: 100, volume: 3200000, category: 'Crypto' },
+	];
+
+	const exampleStrategies = [
+		{
+			name: 'Mean Reversion',
+			description: 'Buys when price drops very low (≤ $0.01), betting on reversion to the mean.',
+			code: `def strategy(trade, trade_log, portfolio, params):
+    if trade["price"] <= 0.01:
+        return {
+            "market_id": trade["market_id"],
+            "position": trade["position"],
+            "amount": 10,
+            "user_perso_parameters": params
+        }
+    return {"market_id": trade["market_id"], "position": "hold", "amount": 0}`
+		},
+		{
+			name: 'Cash-Weighted Mean Reversion',
+			description: 'Buys low-priced positions with 1% of available cash for dynamic sizing.',
+			code: `def strategy(trade, trade_log, portfolio, params):
+    if trade["price"] <= 0.01:
+        amount = int(portfolio["cash"] * 0.01)
+        if amount > 0:
+            return {
+                "market_id": trade["market_id"],
+                "position": trade["position"],
+                "amount": amount,
+                "user_perso_parameters": params
+            }
+    return {"market_id": trade["market_id"], "position": "hold", "amount": 0}`
+		},
+		{
+			name: 'No Duplicate Positions',
+			description: 'Buys low-priced positions only if not already holding that market/position.',
+			code: `def strategy(trade, trade_log, portfolio, params):
+    key = (trade["market_id"], trade["position"])
+    if trade["price"] <= 0.01 and key not in portfolio["positions"]:
+        return {
+            "market_id": trade["market_id"],
+            "position": trade["position"],
+            "amount": 10,
+            "user_perso_parameters": params
+        }
+    return {"market_id": trade["market_id"], "position": "hold", "amount": 0}`
+		},
+		{
+			name: 'Better Price Only',
+			description: 'Only buys if the current price is lower than the minimum previously paid.',
+			code: `def strategy(trade, trade_log, portfolio, params):
+    key = (trade["market_id"], trade["position"])
+    past = [t["cost"]/t["amount"] for t in trade_log if (t["market_id"], t["position"]) == key and t["amount"] > 0]
+    min_price = min(past) if past else float("inf")
+    if trade["price"] <= 0.01 and trade["price"] < min_price:
+        return {
+            "market_id": trade["market_id"],
+            "position": trade["position"],
+            "amount": 10,
+            "user_perso_parameters": params
+        }
+    return {"market_id": trade["market_id"], "position": "hold", "amount": 0}`
+		},
+		{
+			name: 'Cooldown Strategy',
+			description: 'Waits at least 1 day between trades on the same market/position.',
+			code: `def strategy(trade, trade_log, portfolio, params):
+    key = (trade["market_id"], trade["position"])
+    past = [t for t in trade_log if (t["market_id"], t["position"]) == key]
+    if past:
+        last_time = max(t["time"] for t in past)
+        if trade["timestamp"] - last_time < 86400:
+            return {"market_id": trade["market_id"], "position": "hold", "amount": 0}
+    if trade["price"] <= 0.01:
+        return {
+            "market_id": trade["market_id"],
+            "position": trade["position"],
+            "amount": 10,
+            "user_perso_parameters": params
+        }
+    return {"market_id": trade["market_id"], "position": "hold", "amount": 0}`
+		},
+	];
+
+	function loadExample(idx: number) {
+		selectedExample = idx;
+		strategyCode = exampleStrategies[idx].code;
+		codeLines = exampleStrategies[idx].code.split('\n');
 	}
-	$: if (endDateStr) {
-		config.endDate = parseDateFromInput(endDateStr);
+
+	// Strategy code editor terminal (xterm)
+	let codeTermContainer: HTMLDivElement;
+	let codeTermInitialized = false;
+	let codeTermInstance: any = null;
+	let codeInputLine = '';
+	let codeLines: string[] = [];
+
+	async function initCodeTerm() {
+		if (codeTermInitialized || !codeTermContainer) return;
+		codeTermInitialized = true;
+
+		const { Terminal } = await import('@xterm/xterm');
+		const { FitAddon } = await import('@xterm/addon-fit');
+		await import('@xterm/xterm/css/xterm.css');
+
+		const term = new Terminal({
+			theme: {
+				background: '#000000',
+				foreground: '#ffffff',
+				cursor: '#f97316',
+				cursorAccent: '#000000',
+				selectionBackground: 'rgba(249, 115, 22, 0.3)',
+			},
+			fontSize: 13,
+			cursorBlink: true,
+			cursorStyle: 'block',
+			scrollback: 5000,
+		});
+
+		const fitAddon = new FitAddon();
+		term.loadAddon(fitAddon);
+		term.open(codeTermContainer);
+		fitAddon.fit();
+		codeTermInstance = term;
+
+		const resizeObserver = new ResizeObserver(() => fitAddon.fit());
+		resizeObserver.observe(codeTermContainer);
+
+		await new Promise(r => setTimeout(r, 150));
+		fitAddon.fit();
+
+		// Strategy editor intro
+		term.writeln(`${O}━━━ STRATEGY EDITOR ━━━${R}`);
+		term.writeln('');
+		term.writeln('Write your Python strategy function below.');
+		term.writeln('Your function receives 4 arguments for each trade:');
+		term.writeln('');
+		term.writeln(`  ${O}trade${R}      - Current trade data (price, amount, position, market_id, title...)`);
+		term.writeln(`  ${O}trade_log${R}  - List of your past executed trades`);
+		term.writeln(`  ${O}portfolio${R}  - Your portfolio: { cash, positions }`);
+		term.writeln(`  ${O}params${R}     - Custom dict to persist data across trades`);
+		term.writeln('');
+		term.writeln('Return: { market_id, position ("hold" or outcome), amount, user_perso_parameters }');
+		term.writeln('');
+		term.writeln(`${DIM}Commands: ${O}load <n>${R}${DIM} (load example 1-${exampleStrategies.length}), ${O}clear${R}${DIM}, ${O}show${R}${DIM} (show code), ${O}examples${R}${DIM}${R}`);
+		term.writeln(`${DIM}Type your code line by line. Use ${O}done${R}${DIM} to finish, ${O}undo${R}${DIM} to remove last line.${R}`);
+		term.writeln('');
+		term.writeln(`${G}def strategy(trade, trade_log, portfolio, params):${R}`);
+		codeLines = ['def strategy(trade, trade_log, portfolio, params):'];
+		codePrompt(term);
+
+		// Input handler
+		term.onData((data: string) => {
+			const code = data.charCodeAt(0);
+			if (data === '\r') {
+				term.write('\r\n');
+				handleCodeInput(term, codeInputLine);
+				codeInputLine = '';
+			} else if (data === '\x7f') {
+				if (codeInputLine.length > 0) {
+					codeInputLine = codeInputLine.slice(0, -1);
+					term.write('\b \b');
+				}
+			} else if (code >= 32) {
+				codeInputLine += data;
+				term.write(data);
+			}
+		});
 	}
-	$: if (earliestEntryStr && config.entryTimeConstraints) {
-		config.entryTimeConstraints.earliestEntry = parseDateFromInput(earliestEntryStr);
+
+	function codePrompt(term: any) {
+		const lineNum = codeLines.length + 1;
+		const pad = String(lineNum).padStart(3, ' ');
+		term.write(`${DIM}${pad} |${R}     `);
+		term.scrollToBottom();
 	}
-	$: if (latestEntryStr && config.entryTimeConstraints) {
-		config.entryTimeConstraints.latestEntry = parseDateFromInput(latestEntryStr);
+
+	function handleCodeInput(term: any, input: string) {
+		const trimmed = input.trim().toLowerCase();
+
+		if (trimmed === 'done') {
+			strategyCode = codeLines.join('\n');
+			term.writeln('');
+			term.writeln(`${G}━━━ Strategy saved! (${codeLines.length} lines) ━━━${R}`);
+			term.writeln(`${DIM}Strategy code is ready. Run backtest when available.${R}`);
+			term.write(`\r\n${O}❯${R} `);
+			return;
+		}
+		if (trimmed === 'undo') {
+			if (codeLines.length > 1) {
+				codeLines.pop();
+				term.writeln(`${DIM}Removed last line. (${codeLines.length} lines remaining)${R}`);
+			} else {
+				term.writeln(`${DIM}Cannot remove function definition.${R}`);
+			}
+			codePrompt(term);
+			return;
+		}
+		if (trimmed === 'show') {
+			term.writeln('');
+			term.writeln(`${O}━━━ Current Code ━━━${R}`);
+			codeLines.forEach((line, i) => {
+				const pad = String(i + 1).padStart(3, ' ');
+				term.writeln(`${DIM}${pad} |${R} ${G}${line}${R}`);
+			});
+			term.writeln(`${O}━━━━━━━━━━━━━━━━━━━━${R}`);
+			term.writeln('');
+			codePrompt(term);
+			return;
+		}
+		if (trimmed === 'clear') {
+			term.clear();
+			codePrompt(term);
+			return;
+		}
+		if (trimmed === 'examples') {
+			term.writeln('');
+			exampleStrategies.forEach((ex, i) => {
+				term.writeln(`  ${O}${i + 1}${R} - ${ex.name}: ${DIM}${ex.description}${R}`);
+			});
+			term.writeln(`\n${DIM}Type ${O}load <number>${R}${DIM} to load an example.${R}`);
+			term.writeln('');
+			codePrompt(term);
+			return;
+		}
+		if (trimmed.startsWith('load ')) {
+			const num = parseInt(trimmed.replace('load ', ''));
+			if (num >= 1 && num <= exampleStrategies.length) {
+				const ex = exampleStrategies[num - 1];
+				codeLines = ex.code.split('\n');
+				strategyCode = ex.code;
+				selectedExample = num - 1;
+				term.writeln('');
+				term.writeln(`${G}Loaded: ${ex.name}${R}`);
+				term.writeln('');
+				codeLines.forEach((line, i) => {
+					const pad = String(i + 1).padStart(3, ' ');
+					term.writeln(`${DIM}${pad} |${R} ${G}${line}${R}`);
+				});
+				term.writeln('');
+				term.writeln(`${DIM}Type ${O}done${R}${DIM} to save, or continue editing.${R}`);
+				term.writeln('');
+				codePrompt(term);
+			} else {
+				term.writeln(`${O}Invalid. Use load 1-${exampleStrategies.length}${R}`);
+				codePrompt(term);
+			}
+			return;
+		}
+
+		// Regular code line
+		codeLines.push('    ' + input);
+		codePrompt(term);
+	}
+
+	$: if (browser && strategyTab === 'strategy' && codeTermContainer) {
+		// Reset if container changed (e.g. after edit config round-trip)
+		if (codeTermInstance && !codeTermContainer.querySelector('.xterm')) {
+			codeTermInstance = null;
+			codeTermInitialized = false;
+		}
+		setTimeout(() => initCodeTerm(), 100);
+	}
+
+	// Terminal wizard state
+	type WizardStep = 'intro' | 'time_period' | 'start_date' | 'end_date' | 'title' | 'volume_min' | 'volume_max' | 'category' | 'outcomes' | 'review' | 'done';
+	let wizardStep: WizardStep = 'intro';
+
+	// Xterm.js terminal
+	let xtermContainer: HTMLDivElement;
+	let xtermInitialized = false;
+	let xtermInstance: any = null;
+	let currentInputLine = '';
+
+	const introLines = [
+		'',
+		'\x1b[38;5;208m ___  ___  ________  ________  ___  ___  ________ ________     ___    ___    ___       ________  ________  ________\x1b[0m',
+		'\x1b[38;5;208m|\\  \\|\\  \\|\\   __  \\|\\   ____\\|\\  \\|\\  \\|\\  _____\\\\   __  \\   |\\  \\  /  /|  |\\  \\     |\\   __  \\|\\   __  \\|\\   ____\\\x1b[0m',
+		'\x1b[38;5;208m\\ \\  \\\\\\  \\ \\  \\|\\  \\ \\  \\___|\\ \\  \\\\\\  \\ \\  \\__/\\ \\  \\|\\  \\  \\ \\  \\/  / /  \\ \\  \\    \\ \\  \\|\\  \\ \\  \\|\\ /\\ \\  \\___|_\x1b[0m',
+		'\x1b[38;5;208m \\ \\   __  \\ \\   __  \\ \\_____  \\ \\   __  \\ \\   __\\\\ \\  \\\\\\  \\  \\ \\    / /    \\ \\  \\    \\ \\   __  \\ \\   __  \\ \\_____  \\\x1b[0m',
+		'\x1b[38;5;208m  \\ \\  \\ \\  \\ \\  \\ \\  \\|____|\\  \\ \\  \\ \\  \\ \\  \\_| \\ \\  \\\\\\  \\  /     \\/      \\ \\  \\____\\ \\  \\ \\  \\ \\  \\|\\  \\|____|\\  \\\x1b[0m',
+		'\x1b[38;5;208m   \\ \\__\\ \\__\\ \\__\\ \\__\\____\\_\\  \\ \\__\\ \\__\\ \\__\\   \\ \\_______\\/  /\\   \\      \\ \\_______\\ \\__\\ \\__\\ \\_______\\____\\_\\  \\\x1b[0m',
+		'\x1b[38;5;208m    \\|__|\\|__|\\|__|\\|__|\\_________\\|__|\\|__|\\|__|    \\|_______/__/ /\\ __\\      \\|_______|\\|__|\\|__|\\|_______|\\_________\\\x1b[0m',
+		'\x1b[38;5;208m                       \\|_________|                           |__|/ \\|__|                                  \\|_________|\x1b[0m',
+		'',
+		'',
+		'BACKTEST ENGINE v2.0',
+		'',
+		'──────────────────────────────────────────────',
+		'',
+		'Initializing engine...',
+		'Loading Polymarket dataset ...... 404M+ trades',
+		'\x1b[32mAll systems operational.\x1b[0m',
+		'',
+		'──────────────────────────────────────────────',
+		'',
+		'The backtest engine replays historical prediction market trades through your custom strategy.',
+		'Each trade is evaluated chronologically — your strategy decides whether to buy, hold, or skip based on real market conditions and price data.',
+		'',
+		'Platform: Polymarket',
+		'',
+		'\x1b[32mReady.\x1b[0m Type \x1b[38;5;208mgo\x1b[0m to start.',
+	];
+
+	async function initXterm() {
+		if (xtermInitialized || !xtermContainer) return;
+		xtermInitialized = true;
+
+		const { Terminal } = await import('@xterm/xterm');
+		const { FitAddon } = await import('@xterm/addon-fit');
+		await import('@xterm/xterm/css/xterm.css');
+
+		const term = new Terminal({
+			theme: {
+				background: '#000000',
+				foreground: '#ffffff',
+				cursor: '#f97316',
+				cursorAccent: '#000000',
+				selectionBackground: 'rgba(249, 115, 22, 0.3)',
+			},
+			fontSize: 13,
+			cursorBlink: true,
+			cursorStyle: 'block',
+			scrollback: 1000,
+		});
+
+		const fitAddon = new FitAddon();
+		term.loadAddon(fitAddon);
+		term.open(xtermContainer);
+		fitAddon.fit();
+		xtermInstance = term;
+
+		// Responsive resize
+		const resizeObserver = new ResizeObserver(() => fitAddon.fit());
+		resizeObserver.observe(xtermContainer);
+
+		// Wait for layout to stabilize before printing intro
+		await new Promise(r => setTimeout(r, 150));
+		fitAddon.fit();
+
+		// Setup input handler first
+		setupInput(term);
+
+		// If returning from edit, skip intro and show review
+		if (wizardStep !== 'intro') {
+			showWizardStep(term);
+			return;
+		}
+
+		// Typewriter intro
+		let lineIdx = 0;
+		const typeInterval = setInterval(() => {
+			if (lineIdx < introLines.length) {
+				term.writeln(introLines[lineIdx]);
+				lineIdx++;
+			} else {
+				clearInterval(typeInterval);
+				term.write('\r\n\x1b[38;5;208m❯\x1b[0m ');
+			}
+		}, 60);
+	}
+
+	const O = '\x1b[38;5;208m'; // orange
+	const G = '\x1b[32m'; // green
+	const R = '\x1b[0m'; // reset
+	const DIM = '\x1b[90m'; // dim/gray
+
+	function prompt(term: any) {
+		term.write(`\r\n${O}❯${R} `);
+		term.scrollToBottom();
+	}
+
+	function showWizardStep(term: any) {
+		const step = wizardStep;
+		term.writeln('');
+		if (step === 'time_period') {
+			term.writeln(`${O}━━━ STEP 1/4: TIME PERIOD ━━━${R}`);
+			term.writeln('');
+			term.writeln(`Enable time period filter? (${O}yes${R}/${O}no${R})`);
+			term.writeln(`${DIM}Press ENTER for no (use all data)${R}`);
+		} else if (step === 'start_date') {
+			term.writeln(`Start date (${O}YYYY-MM-DD${R}):`);
+			term.writeln(`${DIM}e.g. 2024-01-01${R}`);
+		} else if (step === 'end_date') {
+			term.writeln(`End date (${O}YYYY-MM-DD${R}):`);
+			term.writeln(`${DIM}e.g. 2025-01-01${R}`);
+		} else if (step === 'title') {
+			term.writeln(`${O}━━━ STEP 2/4: MARKET TITLE ━━━${R}`);
+			term.writeln('');
+			term.writeln(`Filter by market title keywords (comma-separated)`);
+			term.writeln(`${DIM}e.g. "Bitcoin, Election, Trump" — ENTER to skip${R}`);
+		} else if (step === 'volume_min') {
+			term.writeln(`${O}━━━ STEP 3/4: VOLUME RANGE ━━━${R}`);
+			term.writeln('');
+			term.writeln(`Min volume:`);
+			term.writeln(`${DIM}ENTER to skip (no minimum)${R}`);
+		} else if (step === 'volume_max') {
+			term.writeln(`Max volume:`);
+			term.writeln(`${DIM}ENTER to skip (no maximum)${R}`);
+		} else if (step === 'category') {
+			term.writeln(`${O}━━━ STEP 4/4: CATEGORIES ━━━${R}`);
+			term.writeln('');
+			term.writeln(`Available: ${availableCategories.map(c => `${O}${c}${R}`).join(', ')}`);
+			term.writeln('');
+			term.writeln(`Select categories (comma-separated)`);
+			term.writeln(`${DIM}e.g. "crypto, sport" — ENTER to skip (all categories)${R}`);
+		} else if (step === 'outcomes') {
+			term.writeln(`Filter by possible outcomes (comma-separated)`);
+			term.writeln(`${DIM}e.g. "Yes, No, Trump" — ENTER to skip${R}`);
+		} else if (step === 'review') {
+			term.writeln(`${O}━━━ ENGINE CONFIG ━━━${R}`);
+			term.writeln('');
+			term.writeln(`${G}Platform:${R}    Polymarket`);
+			term.writeln(`${G}Time:${R}        ${useTimePeriod ? `${timestampStartStr} → ${timestampEndStr}` : 'ALL TIME'}`);
+			term.writeln(`${G}Title:${R}       ${filterTitleSearch || '—'}`);
+			term.writeln(`${G}Volume:${R}      ${filterVolumeInf ?? '—'} → ${filterVolumeSup ?? '—'}`);
+			term.writeln(`${G}Categories:${R}  ${filterCategories.size > 0 ? Array.from(filterCategories).join(', ') : '—'}`);
+			term.writeln(`${G}Outcomes:${R}    ${filterOutcomesSearch || '—'}`);
+			term.writeln('');
+			term.writeln(`Type ${O}confirm${R} to finalize, ${O}reset${R} to start over, or ${O}edit <step>${R} to change a setting.`);
+			term.writeln(`${DIM}Steps: time, title, volume, category${R}`);
+		}
+		prompt(term);
+	}
+
+	function handleWizardInput(term: any, input: string) {
+		const val = input.trim();
+		const valLower = val.toLowerCase();
+
+		// Global commands available from any step
+		if (valLower === 'reset') {
+			filterPlatform = new Set(['polymarket']);
+			useTimePeriod = false;
+			timestampStartStr = '';
+			timestampEndStr = '';
+			filterTitleSearch = '';
+			filterVolumeInf = null;
+			filterVolumeSup = null;
+			filterCategories = new Set();
+			filterOutcomesSearch = '';
+			term.clear();
+			term.writeln(`${O}Terminal reset.${R}`);
+			wizardStep = 'intro';
+			term.writeln(`\n${G}Ready.${R} Type ${O}go${R} to start.`);
+			prompt(term);
+			return;
+		}
+		if (valLower === 'clear' && wizardStep !== 'intro') {
+			term.clear();
+			prompt(term);
+			return;
+		}
+
+		switch (wizardStep) {
+			case 'intro':
+				if (valLower === 'go') {
+					term.writeln(`${G}Starting configuration...${R}`);
+					wizardStep = 'time_period';
+					showWizardStep(term);
+				} else if (valLower === 'help') {
+					term.writeln('Available commands:');
+					term.writeln(`  ${O}go${R}      - Start configuring your backtest`);
+					term.writeln(`  ${O}help${R}    - Show this help message`);
+					term.writeln(`  ${O}clear${R}   - Clear the terminal`);
+					prompt(term);
+				} else if (valLower === 'clear') {
+					term.clear();
+					prompt(term);
+				} else {
+					prompt(term);
+				}
+				break;
+
+			case 'time_period':
+				if (valLower === 'yes' || valLower === 'y') {
+					useTimePeriod = true;
+					wizardStep = 'start_date';
+					showWizardStep(term);
+				} else {
+					useTimePeriod = false;
+					term.writeln(`${G}✓ Time period: ALL TIME${R}`);
+					wizardStep = 'title';
+					showWizardStep(term);
+				}
+				break;
+
+			case 'start_date':
+				if (/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+					timestampStartStr = val;
+					term.writeln(`${G}✓ Start: ${val}${R}`);
+					wizardStep = 'end_date';
+					showWizardStep(term);
+				} else {
+					term.writeln(`${O}Invalid format. Use YYYY-MM-DD${R}`);
+					prompt(term);
+				}
+				break;
+
+			case 'end_date':
+				if (/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+					timestampEndStr = val;
+					term.writeln(`${G}✓ Period: ${timestampStartStr} → ${val}${R}`);
+					wizardStep = 'title';
+					showWizardStep(term);
+				} else {
+					term.writeln(`${O}Invalid format. Use YYYY-MM-DD${R}`);
+					prompt(term);
+				}
+				break;
+
+			case 'title':
+				filterTitleSearch = val;
+				term.writeln(`${G}✓ Title: ${val || 'no filter'}${R}`);
+				wizardStep = 'volume_min';
+				showWizardStep(term);
+				break;
+
+			case 'volume_min':
+				filterVolumeInf = val ? parseFloat(val) : null;
+				term.writeln(`${G}✓ Volume min: ${filterVolumeInf ?? 'none'}${R}`);
+				wizardStep = 'volume_max';
+				showWizardStep(term);
+				break;
+
+			case 'volume_max':
+				filterVolumeSup = val ? parseFloat(val) : null;
+				term.writeln(`${G}✓ Volume max: ${filterVolumeSup ?? 'none'}${R}`);
+				wizardStep = 'category';
+				showWizardStep(term);
+				break;
+
+			case 'category':
+				if (val) {
+					const cats = val.split(',').map(s => s.trim().toLowerCase()).filter(c => availableCategories.includes(c));
+					filterCategories = new Set(cats);
+					term.writeln(`${G}✓ Categories: ${cats.length > 0 ? cats.join(', ') : 'none matched'}${R}`);
+				} else {
+					filterCategories = new Set();
+					term.writeln(`${G}✓ Categories: all${R}`);
+				}
+				wizardStep = 'outcomes';
+				showWizardStep(term);
+				break;
+
+			case 'outcomes':
+				filterOutcomesSearch = val;
+				term.writeln(`${G}✓ Outcomes: ${val || 'no filter'}${R}`);
+				wizardStep = 'review';
+				showWizardStep(term);
+				break;
+
+			case 'review':
+				if (valLower === 'confirm') {
+					term.writeln('');
+					term.writeln(`${G}━━━ Configuration saved! Loading strategy editor... ━━━${R}`);
+					setTimeout(() => { strategyTab = 'strategy'; }, 500);
+				} else if (valLower === 'reset') {
+					filterPlatform = new Set(['polymarket']);
+					useTimePeriod = false;
+					timestampStartStr = '';
+					timestampEndStr = '';
+					filterTitleSearch = '';
+					filterVolumeInf = null;
+					filterVolumeSup = null;
+					filterCategories = new Set();
+					filterOutcomesSearch = '';
+					term.writeln(`${O}Config reset.${R}`);
+					wizardStep = 'platform';
+					showWizardStep(term);
+				} else if (valLower.startsWith('edit ')) {
+					const target = valLower.replace('edit ', '').trim();
+					const stepMap: Record<string, WizardStep> = {
+						time: 'time_period', title: 'title',
+						volume: 'volume_min', category: 'category', outcomes: 'outcomes',
+					};
+					if (stepMap[target]) {
+						wizardStep = stepMap[target];
+						showWizardStep(term);
+					} else {
+						term.writeln(`${O}Unknown step. Options: time, title, volume, category, outcomes${R}`);
+						prompt(term);
+					}
+				} else {
+					prompt(term);
+				}
+				break;
+
+			case 'done':
+				if (valLower === 'clear') {
+					term.clear();
+				} else if (valLower === 'config') {
+					wizardStep = 'review';
+					showWizardStep(term);
+				}
+				prompt(term);
+				break;
+		}
+	}
+
+	function setupInput(term: any) {
+		term.onData((data: string) => {
+			const code = data.charCodeAt(0);
+
+			if (data === '\r') {
+				term.write('\r\n');
+				handleWizardInput(term, currentInputLine);
+				currentInputLine = '';
+			} else if (data === '\x7f') {
+				if (currentInputLine.length > 0) {
+					currentInputLine = currentInputLine.slice(0, -1);
+					term.write('\b \b');
+				}
+			} else if (code >= 32) {
+				currentInputLine += data;
+				term.write(data);
+			}
+		});
+	}
+
+	// Initialize xterm when step 0 is visible
+	$: if (browser && activeMainTab === 'strategies' && strategyTab === 'configure') {
+		// Wait for DOM to be ready
+		setTimeout(() => initXterm(), 100);
 	}
 
 	let backtestResult: BacktestResult | null = null;
-	// Removed showProMetrics - all metrics are now always visible
 
-	// Save strategy state
 	let showSaveModal = false;
 	let showAuthModal = false;
 	let strategyName = '';
@@ -428,423 +1066,39 @@
 	let isAuthenticating = false;
 	let showSuccessNotification = false;
 
-	// Two-phase flow state
-	let marketSelectionPhase: 1 | 2 = 1; // 1 = select markets, 2 = configure all parameters
-	let showSelectedMarkets = true; // Show/hide selected markets in phase 2
+	// Legacy compatibility (kept for results tab / run logic)
+	let startDateStr = formatDateForInput(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+	let endDateStr = formatDateForInput(new Date());
+	let config: any = { specificMarkets: [], categories: [], initialBankroll: 10000,
+		entryType: 'BOTH', startDate: parseDateFromInput(startDateStr), endDate: parseDateFromInput(endDateStr),
+		positionSizing: { type: 'PERCENTAGE', fixedAmount: 100, percentageOfBankroll: 5, maxExposurePercent: undefined },
+		entryPriceThreshold: { yes: { min: 0.3, max: 0.7 }, no: { min: 0.3, max: 0.7 } },
+		exitRules: { resolveOnExpiry: true, stopLoss: undefined, takeProfit: undefined, maxHoldTime: undefined,
+			trailingStop: { enabled: false, activationPercent: undefined, trailPercent: undefined },
+			partialExits: { enabled: false, takeProfit1: { percent: undefined, sellPercent: undefined }, takeProfit2: { percent: undefined, sellPercent: undefined } } },
+		tradeFrequency: { maxTradesPerDay: undefined, cooldownHours: undefined },
+		entryTimeConstraints: { earliestEntry: undefined, latestEntry: undefined },
+	};
+	let selectedMarkets: any[] = [];
+	let selectedMarketIds: Set<string> = new Set();
 
-	// For backward compatibility during refactor (will be removed)
-	let currentStep = 0;
-	const totalSteps = 5;
-
-	// Market browser state
-	let marketStatus: 'closed' | 'open' = 'closed'; // closed = past, open = active
-	let availableMarkets: any[] = [];
-	let loadingMarkets = false;
-	let marketSearchQuery = '';
-	let selectedMarkets: any[] = []; // Store the full selected market objects (multi-select)
-	let selectedMarketIds: Set<string> = new Set(); // Track selected market IDs for quick lookup
-
-	// Advanced filters
-	let minVolume: number | null = null;
-	let maxVolume: number | null = null;
-	let marketStartDate: string = '';
-	let marketEndDate: string = '';
-
-	// Pagination
-	let currentPage = 0;
-	let rowsPerPage = 20;
-	let selectedMarketId: string | null = null;
-	let selectedTag = 'All';
-	let showAdvancedFilters = false;
-	let selectedAdvancedFilter = 'None';
-
-	// Event grouping
-	let expandedEvents: Set<string> = new Set();
-	let eventSortColumn: 'volume' | 'ends' | null = null;
-	let eventSortDirection: 'asc' | 'desc' = 'desc';
-	let eventsCurrentPage = 0;
-	let eventsPerPage = 20;
-
-	interface GroupedEvent {
-		eventTitle: string;
-		eventSlug: string;
-		icon?: string;
-		totalVolume: number;
-		startDate: number;
-		endDate: number;
-		tags: string[];
-		markets: any[];
-	}
-
-	// Sort events
-	function sortEvents(column: 'volume' | 'ends') {
-		if (eventSortColumn === column) {
-			eventSortDirection = eventSortDirection === 'asc' ? 'desc' : 'asc';
-		} else {
-			eventSortColumn = column;
-			eventSortDirection = 'desc';
-		}
-	}
-
-	const availableTags = [
-		'All',
-		'crypto',
-		'culture',
-		'economy',
-		'elections',
-		'finance',
-		'geopolitics',
-		'politic',
-		'sport',
-		'tech',
-		'world'
-	];
-
-	// Fetch available markets for selection
-	async function fetchMarkets() {
-		loadingMarkets = true;
-		availableMarkets = []; // Clear previous results
-		selectedMarketId = null; // Clear selection
-
-		try {
-			// Use external backtest API for markets if configured
-			const marketsEndpoint = BACKTEST_API_URL ? `${BACKTEST_API_URL}/api/backtest/markets` : '/api/backtest/markets';
-
-			const response = await fetch(marketsEndpoint, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					fetchMode: 'list', // Just get closed markets list
-					status: 'closed',
-					tag: selectedTag !== 'All' ? selectedTag : undefined,
-					minVolume,
-					maxVolume
-				})
-			});
-
-			if (!response.ok) {
-				throw new Error('Failed to fetch markets');
-			}
-
-			const data = await response.json();
-			availableMarkets = data.markets || [];
-		} catch (err: any) {
-			availableMarkets = [];
-		} finally {
-			loadingMarkets = false;
-		}
-	}
-
-	// Track previous values to detect actual changes
-	let prevTag: string = '';
-	let hasLoadedMarkets = false;
-
-	// Auto-fetch markets when entering phase 1 or tag changes (client-side only)
-	$: if (browser && marketSelectionPhase === 1) {
-		const tagChanged = prevTag !== selectedTag;
-
-		// Only fetch if tag changed or this is the first load
-		if (!hasLoadedMarkets || tagChanged) {
-			prevTag = selectedTag;
-			hasLoadedMarkets = true;
-			fetchMarkets();
-		}
-	}
-
-	// Phase navigation functions
-	function goToParametersPhase() {
-		marketSelectionPhase = 2;
-	}
-
-	function backToMarketSelection() {
-		marketSelectionPhase = 1;
-	}
-
-	// Temporary wizard navigation for backward compatibility (will be removed)
-	function nextStep() {
-		if (currentStep < totalSteps - 1) {
-			currentStep++;
-		}
-	}
-
-	function prevStep() {
-		if (currentStep > 0) {
-			currentStep--;
-		}
-	}
-
-	function goToStep(step: number) {
-		if (step >= 0 && step < totalSteps) {
-			currentStep = step;
-		}
-	}
-
-	// Filter markets based on search
-	$: filteredMarkets = availableMarkets.filter(market => {
-		if (!marketSearchQuery) return true;
-		const query = marketSearchQuery.toLowerCase();
-		return (
-			market.title?.toLowerCase().includes(query) ||
-			market.question?.toLowerCase().includes(query) ||
-			market.market_slug?.toLowerCase().includes(query) ||
-			market.category?.toLowerCase().includes(query) ||
-			market.tags?.some((tag: any) => tag.toLowerCase().includes(query))
-		);
-	});
-
-	// Sort markets
-	$: sortedFilteredMarkets = (() => {
-		let markets = [...filteredMarkets];
-		if (sortColumn) {
-			markets.sort((a, b) => {
-				let aVal: number, bVal: number;
-				if (sortColumn === 'volume') {
-					aVal = a.volume_total || a.volume || a.volume_24h || a.total_volume || 0;
-					bVal = b.volume_total || b.volume || b.volume_24h || b.total_volume || 0;
-				} else if (sortColumn === 'starts') {
-					aVal = a.start_time || 0;
-					bVal = b.start_time || 0;
-				} else {
-					aVal = a.end_time || a.close_time || 0;
-					bVal = b.end_time || b.close_time || 0;
-				}
-				return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
-			});
-		}
-		return markets;
-	})();
-
-	// Paginated markets
-	$: totalPages = Math.ceil(sortedFilteredMarkets.length / rowsPerPage);
-	$: paginatedMarkets = sortedFilteredMarkets.slice(currentPage * rowsPerPage, (currentPage + 1) * rowsPerPage);
-
-	// Reset to first page when filters change
-	$: if (marketSearchQuery || selectedTag) {
-		currentPage = 0;
-	}
-
-	// Select/deselect a market (multi-select)
-	function toggleMarketSelection(market: any) {
-		console.log('toggleMarketSelection called', market);
-		const marketId = market.condition_id;
-
-		if (selectedMarketIds.has(marketId)) {
-			// Deselect
-			console.log('Deselecting market', marketId);
-			selectedMarketIds.delete(marketId);
-			selectedMarkets = selectedMarkets.filter(m => m.condition_id !== marketId);
-		} else {
-			// Select
-			console.log('Selecting market', marketId);
-			selectedMarketIds.add(marketId);
-			selectedMarkets = [...selectedMarkets, market];
-		}
-
-		console.log('Selected markets count:', selectedMarkets.length);
-
-		// Update config with all selected markets, including their individual date ranges
-		config.specificMarkets = selectedMarkets.map(m => ({
-			conditionId: m.condition_id,
-			marketSlug: m.market_slug,
-			startTime: m.start_time,
-			endTime: m.end_time || m.close_time
-		}));
-
-		// Trigger reactivity
-		selectedMarketIds = new Set(selectedMarketIds);
-	}
-
-	// Calculate date range from selected markets (reactive)
-	$: marketStartTime = selectedMarkets.length > 0 ? (() => {
-		let earliest: Date | null = null;
-		selectedMarkets.forEach(market => {
-			const start = market.start_time ? new Date(market.start_time * 1000) : null;
-			if (start && (!earliest || start < earliest)) {
-				earliest = start;
-			}
-		});
-		return earliest;
-	})() : null;
-
-	$: marketEndTime = selectedMarkets.length > 0 ? (() => {
-		let latest: Date | null = null;
-		selectedMarkets.forEach(market => {
-			const end = market.end_time
-				? new Date(market.end_time * 1000)
-				: (market.close_time ? new Date(market.close_time * 1000) : null);
-			if (end && (!latest || end > latest)) {
-				latest = end;
-			}
-		});
-		return latest;
-	})() : null;
-
-	// Proceed to phase 2 with selected markets
-	function proceedToDateSelection() {
-		console.log('proceedToDateSelection called', selectedMarkets.length);
-		if (selectedMarkets.length === 0) {
-			console.log('No markets selected');
-			return;
-		}
-
-		// Set initial date range based on calculated market times
-		if (marketStartTime && marketEndTime) {
-			console.log('Setting dates from markets:', marketStartTime, marketEndTime);
-			startDateStr = formatDateForInput(marketStartTime);
-			endDateStr = formatDateForInput(marketEndTime);
-			config.startDate = marketStartTime;
-			config.endDate = marketEndTime;
-
-			// Auto-set entry time constraints to match market date range
-			earliestEntryStr = formatDateForInput(marketStartTime);
-			latestEntryStr = formatDateForInput(marketEndTime);
-			config.entryTimeConstraints.earliestEntry = marketStartTime;
-			config.entryTimeConstraints.latestEntry = marketEndTime;
-		} else {
-			console.log('No market dates available, using defaults');
-			// Set default dates if market dates aren't available
-			const today = new Date();
-			const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
-			startDateStr = formatDateForInput(thirtyDaysAgo);
-			endDateStr = formatDateForInput(today);
-			config.startDate = thirtyDaysAgo;
-			config.endDate = today;
-		}
-
-		console.log('Moving to phase 2, marketSelectionPhase will be set to 2');
-		// Move to phase 2
-		marketSelectionPhase = 2;
-		console.log('marketSelectionPhase is now:', marketSelectionPhase);
-	}
-
-	// Toggle event expansion
-	function toggleEvent(eventSlug: string) {
-		expandedEvents = new Set(expandedEvents);
-		if (expandedEvents.has(eventSlug)) {
-			expandedEvents.delete(eventSlug);
-		} else {
-			expandedEvents.add(eventSlug);
-		}
-	}
-
-	// Group markets by event
-	$: groupedEvents = (() => {
-		const eventMap = new Map<string, GroupedEvent>();
-
-		filteredMarkets.forEach(market => {
-			// Determine event identifier (prefer group_item_title, then event_slug, then title)
-			const eventTitle = market.group_item_title || market.event_slug || market.title || 'Untitled Event';
-			const eventSlug = market.event_slug || market.group_item_title?.toLowerCase().replace(/\s+/g, '-') || market.condition_id;
-
-			if (!eventMap.has(eventSlug)) {
-				eventMap.set(eventSlug, {
-					eventTitle,
-					eventSlug,
-					icon: market.icon || market.image,
-					totalVolume: 0,
-					startDate: market.start_time || 0,
-					endDate: market.end_time || market.close_time || 0,
-					tags: market.tags || [],
-					markets: []
-				});
-			}
-
-			const event = eventMap.get(eventSlug)!;
-			event.markets.push(market);
-
-			// Aggregate volume
-			const marketVolume = market.volume_total || market.volume || market.volume_24h || market.total_volume || 0;
-			event.totalVolume += marketVolume;
-
-			// Update start date (earliest)
-			if (market.start_time && (event.startDate === 0 || market.start_time < event.startDate)) {
-				event.startDate = market.start_time;
-			}
-
-			// Update end date (latest)
-			const endTime = market.end_time || market.close_time || 0;
-			if (endTime && endTime > event.endDate) {
-				event.endDate = endTime;
-			}
-
-			// Merge tags (unique)
-			if (market.tags) {
-				market.tags.forEach((tag: string) => {
-					if (!event.tags.includes(tag)) {
-						event.tags.push(tag);
-					}
-				});
-			}
-		});
-
-		// Get events array
-		let events = Array.from(eventMap.values());
-
-		// Apply sorting
-		if (eventSortColumn === 'volume') {
-			events.sort((a, b) => {
-				return eventSortDirection === 'asc'
-					? a.totalVolume - b.totalVolume
-					: b.totalVolume - a.totalVolume;
-			});
-		} else if (eventSortColumn === 'ends') {
-			events.sort((a, b) => {
-				return eventSortDirection === 'asc'
-					? a.endDate - b.endDate
-					: b.endDate - a.endDate;
-			});
-		} else {
-			// Default: sort by total volume (descending)
-			events.sort((a, b) => b.totalVolume - a.totalVolume);
-		}
-
-		return events;
-	})();
-
-	// Paginated events
-	$: eventsTotalPages = Math.ceil(groupedEvents.length / eventsPerPage);
-	$: paginatedEvents = groupedEvents.slice(
-		eventsCurrentPage * eventsPerPage,
-		(eventsCurrentPage + 1) * eventsPerPage
-	);
-
-	// Reset to first page when filters change
-	$: if (marketSearchQuery || selectedTag || eventSortColumn) {
-		eventsCurrentPage = 0;
-	}
-
-	// Clear market selection
-	function clearMarketSelection() {
-		selectedMarkets = [];
-		selectedMarketIds = new Set();
-		marketSelectionPhase = 1;
+	// Clear filters
+	function resetAllFilters() {
+		filterTitleSearch = '';
+		filterVolumeInf = null;
+		filterVolumeSup = null;
+		filterCategories = new Set();
+		filterOutcomesSearch = '';
+		filterPriceInf = null;
+		filterPriceSup = null;
+		filterAmountInf = null;
+		filterAmountSup = null;
+		filterPosition = new Set();
+		useTimePeriod = false;
+		timestampStartStr = '';
+		timestampEndStr = '';
 		config.specificMarkets = [];
 	}
-
-
-	// Format date to MM/DD/YYYY
-	function formatMarketDate(timestamp: number): string {
-		const date = new Date(timestamp * 1000);
-		const month = String(date.getMonth() + 1).padStart(2, '0');
-		const day = String(date.getDate()).padStart(2, '0');
-		const year = date.getFullYear();
-		return `${month}/${day}/${year}`;
-	}
-
-	// Table sorting
-	let sortColumn: 'volume' | 'starts' | 'ends' | null = null;
-	let sortDirection: 'asc' | 'desc' = 'desc';
-
-	function sortMarkets(column: 'volume' | 'starts' | 'ends') {
-		if (sortColumn === column) {
-			sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
-		} else {
-			sortColumn = column;
-			sortDirection = 'desc';
-		}
-		currentPage = 0; // Reset to first page when sorting
-	}
-
 
 
 	async function runBacktest() {
@@ -1639,739 +1893,84 @@
 	{/if}
 
 	<!-- STRATEGY BACKTESTING TAB -->
-	<!-- STRATEGY BACKTESTING TAB -->
 	{#if activeMainTab === 'strategies'}
 		<div class="strategy-backtesting">
-			<!-- Sub-tabs -->
-			<div class="tabs">
-				<button
-					class="tab"
-					class:active={strategyTab === 'configure'}
-					on:click={() => (strategyTab = 'configure')}
-				>
-					Configure Strategy
-				</button>
-				<button
-					class="tab"
-					class:active={strategyTab === 'results'}
-					on:click={() => (strategyTab = 'results')}
-					disabled={!backtestResult}
-				>
-					Results
-				</button>
-			</div>
-
-			<!-- CONFIGURATION TAB -->
 			{#if strategyTab === 'configure'}
-				<div class="config-container">
-					<!-- PHASE 1: MARKET SELECTION -->
-					{#if marketSelectionPhase === 1}
-						<div class="market-selection-phase">
-							<div class="phase-header">
-								<div class="header-content">
-									<div>
-										<h2>Select Markets</h2>
-										<p>Choose closed markets to backtest your strategy</p>
-									</div>
-									{#if selectedMarkets.length > 0}
-										<button class="btn-continue" on:click={proceedToDateSelection}>
-											Continue with {selectedMarkets.length} {selectedMarkets.length === 1 ? 'Market' : 'Markets'} →
-										</button>
-									{/if}
-								</div>
-							</div>
+				<div class="engine-container">
+					<div class="engine-intro">
+						<div class="xterm-wrapper" bind:this={xtermContainer}></div>
+					</div>
+				</div>
 
-							<!-- Search and Filters Bar -->
-							<div class="search-filters-container">
-								<div class="search-filters-bar">
-									<input
-										type="text"
-										bind:value={marketSearchQuery}
-										placeholder="Search markets..."
-										class="search-input"
-									/>
-
-									<button class="filters-toggle" on:click={() => showAdvancedFilters = !showAdvancedFilters}>
-										<span>FILTERS</span>
-										<span class="toggle-icon">{showAdvancedFilters ? '▼' : '▶'}</span>
-									</button>
-
-									{#if selectedMarkets.length > 0}
-										<div class="selected-badge">
-											{selectedMarkets.length} SELECTED
-										</div>
-									{/if}
-								</div>
-
-								<!-- Filters Panel -->
-								{#if showAdvancedFilters}
-									<div class="filters-panel">
-										<div class="filter-group">
-											<label>CATEGORY</label>
-											<select bind:value={selectedTag} class="filter-select">
-												{#each availableTags as tag}
-													<option value={tag}>{tag === 'All' ? 'All Categories' : tag.toUpperCase()}</option>
-												{/each}
-											</select>
-										</div>
-										<div class="filter-group">
-											<label>VOLUME RANGE</label>
-											<div class="volume-inputs">
-												<input type="number" bind:value={minVolume} placeholder="MIN" on:change={fetchMarkets} class="volume-input" />
-												<span class="separator">→</span>
-												<input type="number" bind:value={maxVolume} placeholder="MAX" on:change={fetchMarkets} class="volume-input" />
-											</div>
-										</div>
-									</div>
-								{/if}
-							</div>
-
-							<!-- Markets Table -->
-							{#if loadingMarkets}
-								<div class="loading-state">
-									<span class="spinner"></span>
-									<p>Loading markets...</p>
-								</div>
-							{:else if filteredMarkets.length === 0}
-								<div class="empty-state">
-									<p>No closed markets found</p>
-								</div>
-							{:else}
-								<div class="events-table-container">
-									<div class="results-info">
-										<span>{groupedEvents.length} events found ({filteredMarkets.length} markets total)</span>
-										<span>Page {eventsCurrentPage + 1} of {eventsTotalPages || 1}</span>
-									</div>
-
-									<table class="events-table">
-										<thead>
+		{:else if strategyTab === 'strategy'}
+				<div class="strategy-editor-page">
+					<!-- TOP: Dataset panel with edit button -->
+					<div class="data-panel" class:collapsed={dataCollapsed}>
+						<button class="data-header" on:click={() => dataCollapsed = !dataCollapsed}>
+							<span class="data-title">
+								<span class="cbl">DATASET</span>
+								<span class="data-tag"><span class="data-tag-label">TRADES</span> {mockTrades.length.toLocaleString()}</span>
+								<span class="data-tag"><span class="data-tag-label">PLATFORM</span> Polymarket</span>
+								<span class="data-tag"><span class="data-tag-label">TIMELINE</span> {useTimePeriod ? `${timestampStartStr} → ${timestampEndStr}` : 'All time'}</span>
+								{#if filterTitleSearch}<span class="data-tag"><span class="data-tag-label">TITLE</span> {filterTitleSearch}</span>{/if}
+								{#if filterCategories.size > 0}<span class="data-tag"><span class="data-tag-label">CATEGORY</span> {Array.from(filterCategories).join(', ')}</span>{/if}
+								{#if filterVolumeInf || filterVolumeSup}<span class="data-tag"><span class="data-tag-label">VOLUME</span> {filterVolumeInf ?? '0'} → {filterVolumeSup ?? '∞'}</span>{/if}
+							</span>
+							<span class="data-right">
+								<span class="config-bar-edit" role="button" tabindex="0" on:click|stopPropagation={() => { if (xtermInstance) { xtermInstance.dispose(); xtermInstance = null; } xtermInitialized = false; wizardStep = 'review'; strategyTab = 'configure'; }} on:keydown|stopPropagation={(e) => { if (e.key === 'Enter') { if (xtermInstance) { xtermInstance.dispose(); xtermInstance = null; } xtermInitialized = false; wizardStep = 'review'; strategyTab = 'configure'; } }}>
+									EDIT CONFIG
+								</span>
+								<span class="data-toggle">{dataCollapsed ? '▸' : '▾'}</span>
+							</span>
+						</button>
+						{#if !dataCollapsed}
+							<div class="data-table-wrap">
+								<table class="data-table">
+									<thead>
+										<tr>
+											<th>TIMESTAMP</th>
+											<th>MARKET</th>
+											<th>POSITION</th>
+											<th>PRICE</th>
+											<th>AMOUNT</th>
+											<th>VOLUME</th>
+											<th>CATEGORY</th>
+										</tr>
+									</thead>
+									<tbody>
+										{#each mockTrades as t}
 											<tr>
-												<th class="event-header">Event</th>
-												<th class="volume-header sortable-header" on:click={() => sortEvents('volume')}>
-													<div class="sort-header-content">
-														<span>Volume</span>
-														<span class="sort-indicator" class:active={eventSortColumn === 'volume'}>
-															{#if eventSortColumn === 'volume'}
-																{eventSortDirection === 'asc' ? '↑' : '↓'}
-															{:else}
-																⇅
-															{/if}
-														</span>
-													</div>
-												</th>
-												<th class="starts-header">Starts</th>
-												<th class="ends-header sortable-header" on:click={() => sortEvents('ends')}>
-													<div class="sort-header-content">
-														<span>Ends</span>
-														<span class="sort-indicator" class:active={eventSortColumn === 'ends'}>
-															{#if eventSortColumn === 'ends'}
-																{eventSortDirection === 'asc' ? '↑' : '↓'}
-															{:else}
-																⇅
-															{/if}
-														</span>
-													</div>
-												</th>
-												<th class="tags-header">Tags</th>
+												<td class="td-dim">{t.timestamp}</td>
+												<td class="td-title">{t.title}</td>
+												<td class:td-yes={t.position === 'Yes'} class:td-no={t.position === 'No'}>{t.position}</td>
+												<td>${t.price.toFixed(2)}</td>
+												<td>{t.amount}</td>
+												<td class="td-dim">{t.volume.toLocaleString()}</td>
+												<td class="td-dim">{t.category}</td>
 											</tr>
-										</thead>
-										<tbody>
-											{#each paginatedEvents as event}
-												<!-- Event Row -->
-												<tr class="event-row"
-													class:selected={event.markets.length === 1 && selectedMarketIds.has(event.markets[0].condition_id)}
-													on:click={() => event.markets.length > 1 ? toggleEvent(event.eventSlug) : toggleMarketSelection(event.markets[0])}>
-													<td class="event-cell">
-														<div class="event-content">
-															{#if event.markets.length > 1}
-																<button class="expand-icon" class:expanded={expandedEvents.has(event.eventSlug)}>
-																	{expandedEvents.has(event.eventSlug) ? '▼' : '▶'}
-																</button>
-															{/if}
-															{#if event.icon}
-																<img src={event.icon} alt={event.eventTitle} class="event-icon" />
-															{/if}
-															<div class="event-info">
-																<div class="event-title">{event.eventTitle}</div>
-																{#if event.markets.length > 1}
-																	<div class="event-markets-count">({event.markets.length} markets)</div>
-																{/if}
-															</div>
-														</div>
-													</td>
-													<td class="volume-cell">
-														${(event.totalVolume / 1000000).toFixed(1)}M
-													</td>
-													<td class="starts-cell">
-														{#if event.startDate}
-															{formatMarketDate(event.startDate)}
-														{:else}
-															N/A
-														{/if}
-													</td>
-													<td class="ends-cell">
-														{#if event.endDate}
-															{formatMarketDate(event.endDate)}
-														{:else}
-															N/A
-														{/if}
-													</td>
-													<td class="tags-cell">
-														<div class="tags-container">
-															{#if event.tags && event.tags.length > 0}
-																{#each event.tags.slice(0, 2) as tag}
-																	<span class="tag-badge">{tag}</span>
-																{/each}
-																{#if event.tags.length > 2}
-																	<span class="tag-more">+{event.tags.length - 2}</span>
-																{/if}
-															{:else}
-																<span class="tag-badge">Other</span>
-															{/if}
-														</div>
-													</td>
-												</tr>
-
-												<!-- Expanded Markets (Nested Table) -->
-												{#if expandedEvents.has(event.eventSlug) && event.markets.length > 1}
-													<tr class="markets-expanded-row">
-														<td colspan="5" class="markets-expanded-cell">
-															<div class="nested-markets-container">
-																<table class="nested-markets-table">
-																	<thead>
-																		<tr>
-																			<th>Select</th>
-																			<th>Question</th>
-																			<th>Volume</th>
-																			<th>Ends</th>
-																		</tr>
-																	</thead>
-																	<tbody>
-																		{#each event.markets as market}
-																			{@const marketVolume = market.volume_total || market.volume || market.volume_24h || market.total_volume || 0}
-																			{@const isSelected = selectedMarketIds.has(market.condition_id)}
-																			<tr class:selected={isSelected} on:click|stopPropagation={() => toggleMarketSelection(market)}>
-																				<td class="market-select-cell">
-																					<input
-																						type="checkbox"
-																						checked={isSelected}
-																						on:click|stopPropagation={() => toggleMarketSelection(market)}
-																					/>
-																				</td>
-																				<td class="market-question-cell">
-																					{market.title || market.question || 'Untitled'}
-																				</td>
-																				<td class="market-volume-cell">
-																					{#if marketVolume > 0}
-																						${(marketVolume / 1000000).toFixed(1)}M
-																					{:else}
-																						$0.0M
-																					{/if}
-																				</td>
-																				<td class="market-ends-cell">
-																					{#if market.end_time || market.close_time}
-																						{formatMarketDate(market.end_time || market.close_time)}
-																					{:else}
-																						N/A
-																					{/if}
-																				</td>
-																			</tr>
-																		{/each}
-																	</tbody>
-																</table>
-															</div>
-														</td>
-													</tr>
-												{/if}
-											{/each}
-										</tbody>
-									</table>
-
-									<!-- Pagination Controls -->
-									<div class="pagination-controls">
-										<div class="pagination-buttons">
-											<button
-												class="pagination-btn"
-												on:click={() => eventsCurrentPage = 0}
-												disabled={eventsCurrentPage === 0}
-											>
-												First
-											</button>
-											<button
-												class="pagination-btn"
-												on:click={() => eventsCurrentPage--}
-												disabled={eventsCurrentPage === 0}
-											>
-												Previous
-											</button>
-											<span class="page-info">
-												Page {eventsCurrentPage + 1} of {eventsTotalPages || 1}
-											</span>
-											<button
-												class="pagination-btn"
-												on:click={() => eventsCurrentPage++}
-												disabled={eventsCurrentPage >= eventsTotalPages - 1}
-											>
-												Next
-											</button>
-											<button
-												class="pagination-btn"
-												on:click={() => eventsCurrentPage = eventsTotalPages - 1}
-												disabled={eventsCurrentPage >= eventsTotalPages - 1}
-											>
-												Last
-											</button>
-										</div>
-									</div>
-								</div>
-							{/if}
-						</div>
-
-					{:else if marketSelectionPhase === 2}
-						<!-- PHASE 2: TRADING TERMINAL -->
-						<div class="trading-terminal">
-							<!-- Terminal Header -->
-							<div class="terminal-header">
-								<button class="terminal-back-btn" on:click={backToMarketSelection}>
-									← MARKETS
-								</button>
-								<div class="terminal-title">
-									<span class="terminal-label">STRATEGY CONFIGURATION</span>
-									<span class="terminal-status">READY</span>
-								</div>
-								<div class="terminal-actions">
-									<button class="terminal-action-btn" on:click={runBacktest} disabled={isRunning}>
-										{#if isRunning}
-											⟳ RUNNING... {progress}%
-										{:else}
-											▶ RUN BACKTEST
-										{/if}
-									</button>
-								</div>
-							</div>
-
-							<!-- Selected Markets Panel -->
-							<div class="terminal-markets-panel">
-								<div class="panel-header">
-									<span class="panel-title">SELECTED MARKETS [{selectedMarkets.length}]</span>
-									<button class="panel-collapse-btn" on:click={() => showSelectedMarkets = !showSelectedMarkets}>
-										{showSelectedMarkets ? '−' : '+'}
-									</button>
-								</div>
-								{#if showSelectedMarkets}
-									<div class="markets-list">
-										{#each selectedMarkets as market, idx}
-											{@const volume = market.volume_total || market.volume || 0}
-											{@const startTime = market.start_time}
-											{@const endTime = market.end_time || market.close_time}
-											<div class="market-item">
-												<span class="market-index">{String(idx + 1).padStart(2, '0')}</span>
-												<div class="market-details">
-													<div class="market-name">{market.title || market.question || 'Untitled'}</div>
-													<div class="market-meta">
-														<span>VOL: ${(volume / 1000000).toFixed(1)}M</span>
-														{#if startTime}
-															<span>STARTED: {new Date(startTime * 1000).toLocaleDateString()}</span>
-														{/if}
-														{#if endTime}
-															<span>ENDED: {new Date(endTime * 1000).toLocaleDateString()}</span>
-														{/if}
-													</div>
-												</div>
-												<button class="market-remove-btn" on:click={() => toggleMarketSelection(market)}>×</button>
-											</div>
 										{/each}
-									</div>
-								{/if}
+									</tbody>
+								</table>
 							</div>
+						{/if}
+					</div>
 
-							<!-- Terminal Grid -->
-							<div class="terminal-grid">
-								<!-- CAPITAL & TIME SECTION -->
-								<div class="terminal-section full-width">
-									<div class="section-header">
-										<span class="section-label">CAPITAL & TIME CONFIGURATION</span>
-									</div>
-									<div class="section-body-grid">
-										<div class="config-group">
-											<div class="terminal-field">
-												<label>INITIAL CAPITAL (USDC)</label>
-												<div class="capital-input-container">
-													<input
-														type="number"
-														bind:value={config.initialBankroll}
-														min="100"
-														step="100"
-														placeholder="10000"
-														class="terminal-input"
-													/>
-													<div class="terminal-quick-btns">
-														<button class="terminal-quick-btn" on:click={() => config.initialBankroll = 1000}>$1K</button>
-														<button class="terminal-quick-btn" on:click={() => config.initialBankroll = 5000}>$5K</button>
-														<button class="terminal-quick-btn" on:click={() => config.initialBankroll = 10000}>$10K</button>
-														<button class="terminal-quick-btn" on:click={() => config.initialBankroll = 50000}>$50K</button>
-													</div>
-												</div>
-											</div>
-										</div>
-										<div class="config-group">
-											<div class="terminal-field-row">
-												<div class="terminal-field">
-													<label>START DATE</label>
-													<input type="date" bind:value={startDateStr} class="terminal-input" />
-												</div>
-												<div class="terminal-field">
-													<label>END DATE</label>
-													<input type="date" bind:value={endDateStr} class="terminal-input" />
-												</div>
-											</div>
-											<div class="terminal-info">
-												DURATION: {#if config.startDate && config.endDate}
-													{Math.floor((config.endDate.getTime() - config.startDate.getTime()) / (1000 * 60 * 60 * 24))} DAYS
-												{:else}
-													-
-												{/if}
-											</div>
-										</div>
-									</div>
-								</div>
+					<!-- MIDDLE: Example strategies -->
+					<div class="examples-bar">
+						{#each exampleStrategies as example, i}
+							<button
+								class="example-chip"
+								class:selected={selectedExample === i}
+								on:click={() => { loadExample(i); if (codeTermInstance) { codeTermInstance.clear(); codeTermInstance.writeln(`${G}Loaded: ${example.name}${R}\n`); codeLines.forEach((line, j) => { const pad = String(j+1).padStart(3,' '); codeTermInstance.writeln(`${DIM}${pad} |${R} ${G}${line}${R}`); }); codeTermInstance.writeln(`\n${DIM}Type done to save, or continue editing.${R}\n`); codePrompt(codeTermInstance); } }}
+							>
+								<span class="example-name">{example.name}</span>
+								<span class="example-desc">{example.description}</span>
+							</button>
+						{/each}
+					</div>
 
-								<!-- POSITION SIZING SECTION -->
-								<div class="terminal-section full-width">
-									<div class="section-header">
-										<span class="section-label">POSITION SIZING</span>
-									</div>
-									<div class="section-body-grid">
-										<div class="config-group">
-											<div class="terminal-field">
-												<label>SIZING TYPE</label>
-												<div class="terminal-button-group">
-													<button
-														class="terminal-btn"
-														class:active={config.positionSizing.type === 'FIXED'}
-														on:click={() => config.positionSizing.type = 'FIXED'}
-													>
-														FIXED
-													</button>
-													<button
-														class="terminal-btn"
-														class:active={config.positionSizing.type === 'PERCENTAGE'}
-														on:click={() => config.positionSizing.type = 'PERCENTAGE'}
-													>
-														PERCENTAGE
-													</button>
-												</div>
-											</div>
-											{#if config.positionSizing.type === 'FIXED'}
-												<div class="terminal-field">
-													<label>AMOUNT PER TRADE (USDC)</label>
-													<input
-														type="number"
-														bind:value={config.positionSizing.fixedAmount}
-														min="10"
-														step="10"
-														placeholder="100"
-														class="terminal-input"
-													/>
-												</div>
-											{:else}
-												<div class="terminal-field">
-													<label>% OF BANKROLL PER TRADE</label>
-													<input
-														type="number"
-														bind:value={config.positionSizing.percentageOfBankroll}
-														min="1"
-														max="100"
-														step="1"
-														placeholder="5"
-														class="terminal-input"
-													/>
-												</div>
-											{/if}
-										</div>
-										<div class="config-group">
-											<div class="terminal-field">
-												<label>MAX TOTAL EXPOSURE (%)</label>
-												<input
-													type="number"
-													bind:value={config.positionSizing.maxExposurePercent}
-													min="1"
-													max="100"
-													step="5"
-													placeholder="50"
-													class="terminal-input"
-												/>
-												<span class="terminal-info">Max % of bankroll in open positions</span>
-											</div>
-										</div>
-									</div>
-								</div>
-
-								<!-- ENTRY CONFIGURATION SECTION -->
-								<div class="terminal-section full-width">
-									<div class="section-header">
-										<span class="section-label">ENTRY CONFIGURATION</span>
-									</div>
-									<div class="section-body-grid">
-										<div class="config-group">
-											<div class="terminal-field">
-												<label>ENTRY TYPE</label>
-												<div class="terminal-button-group">
-													<button
-														class="terminal-btn"
-														class:active={config.entryType === 'YES'}
-														on:click={() => config.entryType = 'YES'}
-													>
-														YES
-													</button>
-													<button
-														class="terminal-btn"
-														class:active={config.entryType === 'NO'}
-														on:click={() => config.entryType = 'NO'}
-													>
-														NO
-													</button>
-													<button
-														class="terminal-btn"
-														class:active={config.entryType === 'BOTH'}
-														on:click={() => config.entryType = 'BOTH'}
-													>
-														BOTH
-													</button>
-												</div>
-											</div>
-											{#if config.entryType === 'YES' || config.entryType === 'BOTH'}
-												<div class="terminal-field">
-													<label>YES PRICE RANGE: {(config.entryPriceThreshold.yes.min ?? 0).toFixed(2)} - {(config.entryPriceThreshold.yes.max ?? 1).toFixed(2)}</label>
-													<div class="price-range-slider">
-														<div class="slider-container">
-															<input
-																type="range"
-																bind:value={config.entryPriceThreshold.yes.min}
-																min="0"
-																max="1"
-																step="0.01"
-																class="range-slider range-slider-min"
-															/>
-															<input
-																type="range"
-																bind:value={config.entryPriceThreshold.yes.max}
-																min="0"
-																max="1"
-																step="0.01"
-																class="range-slider range-slider-max"
-															/>
-														</div>
-														<div class="slider-labels">
-															<span>0.00</span>
-															<span>1.00</span>
-														</div>
-													</div>
-												</div>
-											{/if}
-											{#if config.entryType === 'NO' || config.entryType === 'BOTH'}
-												<div class="terminal-field">
-													<label>NO PRICE RANGE: {(config.entryPriceThreshold.no.min ?? 0).toFixed(2)} - {(config.entryPriceThreshold.no.max ?? 1).toFixed(2)}</label>
-													<div class="price-range-slider">
-														<div class="slider-container">
-															<input
-																type="range"
-																bind:value={config.entryPriceThreshold.no.min}
-																min="0"
-																max="1"
-																step="0.01"
-																class="range-slider range-slider-min"
-															/>
-															<input
-																type="range"
-																bind:value={config.entryPriceThreshold.no.max}
-																min="0"
-																max="1"
-																step="0.01"
-																class="range-slider range-slider-max"
-															/>
-														</div>
-														<div class="slider-labels">
-															<span>0.00</span>
-															<span>1.00</span>
-														</div>
-													</div>
-												</div>
-											{/if}
-										</div>
-										<div class="config-group">
-											<div class="terminal-field-row">
-												<div class="terminal-field">
-													<label>EARLIEST ENTRY</label>
-													<input type="date" bind:value={earliestEntryStr} class="terminal-input" />
-												</div>
-												<div class="terminal-field">
-													<label>LATEST ENTRY</label>
-													<input type="date" bind:value={latestEntryStr} class="terminal-input" />
-												</div>
-											</div>
-											<div class="terminal-field-row">
-												<div class="terminal-field">
-													<label>MAX TRADES PER DAY</label>
-													<input
-														type="number"
-														bind:value={config.tradeFrequency.maxTradesPerDay}
-														min="1"
-														placeholder="UNLIMITED"
-														class="terminal-input"
-													/>
-												</div>
-												<div class="terminal-field">
-													<label>COOLDOWN (HOURS)</label>
-													<input
-														type="number"
-														bind:value={config.tradeFrequency.cooldownHours}
-														min="0"
-														step="0.5"
-														placeholder="0"
-														class="terminal-input"
-													/>
-												</div>
-											</div>
-										</div>
-									</div>
-								</div>
-
-								<!-- EXIT CONFIGURATION SECTION -->
-								<div class="terminal-section full-width">
-									<div class="section-header">
-										<span class="section-label">EXIT CONFIGURATION</span>
-									</div>
-									<div class="section-body-grid">
-										<div class="config-group">
-											<div class="terminal-field">
-												<label class="terminal-checkbox">
-													<input type="checkbox" bind:checked={config.exitRules.resolveOnExpiry} />
-													<span>RESOLVE ON MARKET EXPIRY</span>
-												</label>
-											</div>
-											<div class="terminal-field-row">
-												<div class="terminal-field">
-													<label>STOP LOSS (%)</label>
-													<input
-														type="number"
-														bind:value={config.exitRules.stopLoss}
-														min="0"
-														max="100"
-														step="1"
-														placeholder="20"
-														class="terminal-input"
-													/>
-												</div>
-												<div class="terminal-field">
-													<label>TAKE PROFIT (%)</label>
-													<input
-														type="number"
-														bind:value={config.exitRules.takeProfit}
-														min="0"
-														step="1"
-														placeholder="50"
-														class="terminal-input"
-													/>
-												</div>
-												<div class="terminal-field">
-													<label>MAX HOLD TIME (HOURS)</label>
-													<input
-														type="number"
-														bind:value={config.exitRules.maxHoldTime}
-														min="0"
-														placeholder="UNLIMITED"
-														class="terminal-input"
-													/>
-												</div>
-											</div>
-										</div>
-
-										<!-- Advanced Exit Options -->
-										<div class="config-group">
-											<div class="terminal-field">
-												<label class="section-subtitle">TRAILING STOP (OPTIONAL)</label>
-												<div class="terminal-field-row">
-													<div class="terminal-field">
-														<label>ACTIVATION %</label>
-														<input
-															type="number"
-															bind:value={config.exitRules.trailingStop.activationPercent}
-															min="0"
-															step="1"
-															placeholder="OPTIONAL"
-															class="terminal-input"
-														/>
-													</div>
-													<div class="terminal-field">
-														<label>TRAIL %</label>
-														<input
-															type="number"
-															bind:value={config.exitRules.trailingStop.trailPercent}
-															min="0"
-															step="1"
-															placeholder="OPTIONAL"
-															class="terminal-input"
-														/>
-													</div>
-												</div>
-											</div>
-										</div>
-										<div class="config-group">
-											<div class="terminal-field">
-												<label class="section-subtitle">PARTIAL EXITS (OPTIONAL)</label>
-												<div class="terminal-field-row">
-													<div class="terminal-field">
-														<label>TP1: PROFIT %</label>
-														<input
-															type="number"
-															bind:value={config.exitRules.partialExits.takeProfit1.percent}
-															placeholder="OPTIONAL"
-															class="terminal-input"
-														/>
-													</div>
-													<div class="terminal-field">
-														<label>TP1: SELL %</label>
-														<input
-															type="number"
-															bind:value={config.exitRules.partialExits.takeProfit1.sellPercent}
-															placeholder="OPTIONAL"
-															class="terminal-input"
-														/>
-													</div>
-												</div>
-												<div class="terminal-field-row">
-													<div class="terminal-field">
-														<label>TP2: PROFIT %</label>
-														<input
-															type="number"
-															bind:value={config.exitRules.partialExits.takeProfit2.percent}
-															placeholder="OPTIONAL"
-															class="terminal-input"
-														/>
-													</div>
-													<div class="terminal-field">
-														<label>TP2: SELL %</label>
-														<input
-															type="number"
-															bind:value={config.exitRules.partialExits.takeProfit2.sellPercent}
-															placeholder="OPTIONAL"
-															class="terminal-input"
-														/>
-													</div>
-												</div>
-											</div>
-										</div>
-									</div>
-								</div>
-							</div>
-
-							<!-- Error Display -->
-							{#if error}
-								<div class="error-box">{error}</div>
-							{/if}
-						</div>
-					{/if}
+					<!-- BOTTOM: Code Terminal -->
+					<div class="code-term-wrapper" bind:this={codeTermContainer}></div>
 				</div>
 
 		{:else if strategyTab === 'results' && backtestResult}
@@ -2989,20 +2588,719 @@
 
 <style>
 	.backtesting-container {
-		min-height: 100vh;
+		height: 100vh;
 		background: #000000;
 		color: white;
-		padding: 40px 20px;
-		max-width: 1600px;
-		margin: 0 auto;
+		padding: 0;
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
 	}
 
 	/* Strategy Backtesting - Full Width */
 	.strategy-backtesting {
 		width: 100%;
 		max-width: 100%;
-		margin: 0 -20px;
-		padding: 0 20px;
+		margin: 0;
+		padding: 0;
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+
+	/* ═══════════════ ENGINE TABS ═══════════════ */
+	.engine-tabs {
+		display: flex;
+		gap: 0;
+		border-bottom: 1px solid #1a1a2e;
+		margin-bottom: 0;
+	}
+	.engine-tab {
+		padding: 14px 28px;
+		background: transparent;
+		border: none;
+		color: #555;
+		font-family: 'Share Tech Mono', 'Fira Code', monospace;
+		font-size: 12px;
+		font-weight: 600;
+		letter-spacing: 2px;
+		cursor: pointer;
+		border-bottom: 2px solid transparent;
+		transition: all 0.2s;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.engine-tab:hover { color: #888; }
+	.engine-tab.active {
+		color: #f97316;
+		border-bottom-color: #f97316;
+	}
+	.engine-tab:disabled { opacity: 0.3; cursor: not-allowed; }
+	.tab-icon { font-size: 14px; }
+
+	/* ═══════════════ ENGINE CONTAINER ═══════════════ */
+	.engine-container {
+		background: #000000;
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+
+	/* ═══════════════ INTRO SCREEN ═══════════════ */
+	.engine-intro {
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+		background: #000000;
+	}
+	.xterm-wrapper {
+		flex: 1;
+		width: 100%;
+		border: 1px solid #f97316;
+		box-shadow: 0 0 20px rgba(249, 115, 22, 0.15), 0 0 60px rgba(249, 115, 22, 0.05);
+		box-sizing: border-box;
+		position: relative;
+	}
+	.xterm-wrapper :global(.xterm) {
+		padding: 12px;
+		height: 100%;
+	}
+	.xterm-wrapper :global(.xterm-viewport) {
+		background-color: #000000 !important;
+		overflow-y: auto !important;
+	}
+	.xterm-wrapper :global(.xterm-viewport::-webkit-scrollbar) {
+		width: 6px;
+	}
+	.xterm-wrapper :global(.xterm-viewport::-webkit-scrollbar-track) {
+		background: #000000;
+	}
+	.xterm-wrapper :global(.xterm-viewport::-webkit-scrollbar-thumb) {
+		background: #f97316;
+		border-radius: 3px;
+	}
+	.xterm-wrapper :global(.xterm-char-measure-element),
+	.xterm-wrapper :global(.xterm-helpers),
+	.xterm-wrapper :global(.xterm-helper-textarea),
+	.xterm-wrapper :global(span),
+	.xterm-wrapper :global(canvas) {
+		font-family: courier-new, courier, monospace !important;
+	}
+
+	/* ═══════════════ STRATEGY EDITOR PAGE ═══════════════ */
+	.strategy-editor-page {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+		background: #000;
+	}
+
+	.cbl {
+		color: #f97316;
+		font-weight: 700;
+		font-size: 11px;
+		letter-spacing: 1px;
+		margin-right: 6px;
+	}
+	.config-bar-edit {
+		background: transparent;
+		border: 1px solid #555;
+		color: #ccc;
+		padding: 6px 16px;
+		font-family: monospace;
+		font-size: 12px;
+		cursor: pointer;
+		border-radius: 4px;
+		letter-spacing: 1px;
+		transition: all 0.2s;
+		font-weight: 600;
+	}
+	.config-bar-edit:hover {
+		color: #f97316;
+		border-color: #f97316;
+		background: rgba(249, 115, 22, 0.08);
+	}
+
+	/* ── Data Panel (top section) ── */
+	.data-panel {
+		flex-shrink: 0;
+		border-bottom: 1px solid #fff;
+		overflow: hidden;
+		background: #000;
+	}
+	.data-header {
+		width: 100%;
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 14px 20px;
+		background: #000;
+		border: none;
+		color: #eee;
+		cursor: pointer;
+		font-size: 14px;
+	}
+	.data-header:hover {
+		background: #0a0a0a;
+	}
+	.data-title {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+	}
+	.data-tag {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		font-family: monospace;
+		font-size: 12px;
+		color: #ccc;
+		background: #111;
+		padding: 3px 10px;
+		border-radius: 3px;
+		border: 1px solid #222;
+	}
+	.data-tag-label {
+		color: #f97316;
+		font-weight: 700;
+		font-size: 10px;
+		letter-spacing: 0.5px;
+	}
+	.data-right {
+		display: flex;
+		align-items: center;
+		gap: 16px;
+	}
+	.data-count {
+		color: #999;
+		font-size: 13px;
+	}
+	.data-toggle {
+		color: #f97316;
+		font-size: 16px;
+	}
+	.data-table-wrap {
+		max-height: 220px;
+		overflow-y: auto;
+		background: #000;
+	}
+	.data-table-wrap::-webkit-scrollbar {
+		width: 5px;
+	}
+	.data-table-wrap::-webkit-scrollbar-track {
+		background: #000;
+	}
+	.data-table-wrap::-webkit-scrollbar-thumb {
+		background: #333;
+		border-radius: 3px;
+	}
+	.data-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 13px;
+		font-family: 'Share Tech Mono', monospace;
+	}
+	.data-table th {
+		position: sticky;
+		top: 0;
+		background: #000;
+		color: #f97316;
+		text-align: left;
+		padding: 8px 16px;
+		font-weight: 600;
+		font-size: 11px;
+		letter-spacing: 0.5px;
+		border-bottom: 1px solid #333;
+	}
+	.data-table td {
+		padding: 7px 16px;
+		color: #ddd;
+		border-bottom: 1px solid #111;
+		white-space: nowrap;
+	}
+	.data-table tr:hover td {
+		background: #0a0a0a;
+	}
+	.td-dim {
+		color: #777;
+	}
+	.td-title {
+		color: #ccc;
+		max-width: 300px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.td-yes {
+		color: #22c55e;
+		font-weight: 600;
+	}
+	.td-no {
+		color: #ef4444;
+		font-weight: 600;
+	}
+
+	/* ── Examples Bar (middle section) ── */
+	.examples-bar {
+		display: flex;
+		flex-shrink: 0;
+		overflow-x: auto;
+		background: #000;
+		border-bottom: 1px solid #fff;
+	}
+	.examples-bar::-webkit-scrollbar {
+		height: 0;
+	}
+	.example-chip {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		padding: 14px 18px;
+		background: transparent;
+		border: none;
+		border-right: 1px solid #333;
+		color: #888;
+		cursor: pointer;
+		text-align: left;
+		transition: all 0.2s;
+	}
+	.example-chip:last-child {
+		border-right: none;
+	}
+	.example-chip:hover {
+		background: #0a0a0a;
+	}
+	.example-chip:hover .example-name {
+		color: #fff;
+	}
+	.example-chip.selected {
+		background: #0a0a0a;
+		border-bottom: 2px solid #f97316;
+	}
+	.example-chip.selected .example-name {
+		color: #f97316;
+	}
+	.example-name {
+		font-family: monospace;
+		font-size: 13px;
+		font-weight: 700;
+		letter-spacing: 0.5px;
+		color: #ccc;
+		white-space: nowrap;
+	}
+	.example-desc {
+		font-size: 11px;
+		color: #f97316;
+		line-height: 1.4;
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+		opacity: 0.7;
+	}
+	.example-chip:hover .example-desc {
+		opacity: 1;
+	}
+	.example-chip.selected .example-desc {
+		opacity: 1;
+	}
+
+	/* Code Terminal (takes all remaining space) */
+	.code-term-wrapper {
+		flex: 1;
+		width: 100%;
+		box-sizing: border-box;
+		position: relative;
+	}
+	.code-term-wrapper :global(.xterm) {
+		padding: 12px;
+		height: 100%;
+	}
+	.code-term-wrapper :global(.xterm-viewport) {
+		background-color: #000 !important;
+		overflow-y: auto !important;
+	}
+	.code-term-wrapper :global(.xterm-viewport::-webkit-scrollbar) {
+		width: 6px;
+	}
+	.code-term-wrapper :global(.xterm-viewport::-webkit-scrollbar-track) {
+		background: #000;
+	}
+	.code-term-wrapper :global(.xterm-viewport::-webkit-scrollbar-thumb) {
+		background: #f97316;
+		border-radius: 3px;
+	}
+	.code-term-wrapper :global(.xterm-char-measure-element),
+	.code-term-wrapper :global(.xterm-helpers),
+	.code-term-wrapper :global(.xterm-helper-textarea),
+	.code-term-wrapper :global(span),
+	.code-term-wrapper :global(canvas) {
+		font-family: courier-new, courier, monospace !important;
+	}
+
+	/* ═══════════════ ENGINE BUTTONS ═══════════════ */
+	.engine-btn {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 14px 24px;
+		border: 1px solid #1a1a2e;
+		background: #0a0a1a;
+		color: #ccc;
+		font-family: 'Share Tech Mono', 'Fira Code', monospace;
+		font-size: 12px;
+		font-weight: 600;
+		letter-spacing: 1.5px;
+		cursor: pointer;
+		transition: all 0.2s;
+		border-radius: 6px;
+	}
+	.engine-btn:hover {
+		border-color: #f97316;
+		color: #f97316;
+		box-shadow: 0 0 20px rgba(249, 115, 22, 0.1);
+	}
+	.engine-btn.primary {
+		background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+		border-color: #f97316;
+		color: #000;
+	}
+	.engine-btn.primary:hover {
+		box-shadow: 0 0 30px rgba(249, 115, 22, 0.3);
+		color: #000;
+	}
+	.engine-btn.secondary {
+		background: transparent;
+		border: 1px dashed #333;
+		color: #666;
+	}
+	.engine-btn.secondary:hover {
+		border-color: #f97316;
+		color: #f97316;
+		border-style: solid;
+	}
+	.btn-glyph {
+		font-size: 10px;
+		padding: 4px 8px;
+		background: rgba(0,0,0,0.3);
+		border-radius: 4px;
+		font-weight: 700;
+	}
+	.btn-arrow { margin-left: auto; opacity: 0.6; }
+
+	/* ═══════════════ STEP LAYOUT ═══════════════ */
+	.engine-step {
+		display: flex;
+		flex-direction: column;
+		min-height: 500px;
+	}
+	.step-header {
+		display: flex;
+		align-items: center;
+		gap: 16px;
+		padding: 16px 24px;
+		border-bottom: 1px solid #1a1a2e;
+		background: #070714;
+	}
+	.step-back {
+		background: none;
+		border: 1px solid #222;
+		color: #666;
+		padding: 6px 14px;
+		font-family: 'Share Tech Mono', 'Fira Code', monospace;
+		font-size: 11px;
+		cursor: pointer;
+		border-radius: 4px;
+		transition: all 0.2s;
+	}
+	.step-back:hover { color: #f97316; border-color: #f97316; }
+	.step-indicator {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		font-family: 'Share Tech Mono', 'Fira Code', monospace;
+	}
+	.step-num {
+		font-size: 14px;
+		font-weight: 700;
+		color: #333;
+		padding: 2px 8px;
+		border-radius: 4px;
+	}
+	.step-num.active {
+		color: #f97316;
+		background: rgba(249, 115, 22, 0.1);
+		border: 1px solid rgba(249, 115, 22, 0.3);
+	}
+	.step-divider { color: #222; font-size: 12px; }
+	.step-label {
+		font-family: 'Share Tech Mono', 'Fira Code', monospace;
+		font-size: 12px;
+		color: #888;
+		letter-spacing: 2px;
+		font-weight: 600;
+	}
+	.filter-badge {
+		margin-left: auto;
+		font-family: 'Share Tech Mono', 'Fira Code', monospace;
+		font-size: 10px;
+		color: #f97316;
+		background: rgba(249, 115, 22, 0.1);
+		padding: 4px 10px;
+		border-radius: 4px;
+		border: 1px solid rgba(249, 115, 22, 0.2);
+		letter-spacing: 1px;
+	}
+	.step-content {
+		flex: 1;
+		padding: 24px;
+		overflow-y: auto;
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+	}
+	.step-footer {
+		padding: 20px 24px;
+		border-top: 1px solid #1a1a2e;
+		display: flex;
+		justify-content: flex-end;
+		align-items: center;
+		gap: 16px;
+	}
+	.step-footer-info {
+		flex: 1;
+		font-family: 'Share Tech Mono', 'Fira Code', monospace;
+		font-size: 11px;
+		color: #444;
+		letter-spacing: 0.5px;
+	}
+
+	/* ═══════════════ CONFIG PANELS ═══════════════ */
+	.config-panel {
+		border: 1px solid #1a1a2e;
+		border-radius: 6px;
+		background: #0a0a1a;
+		overflow: hidden;
+	}
+	.panel-header-bar {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 12px 18px;
+		background: #0d0d1f;
+		border-bottom: 1px solid #1a1a2e;
+		font-family: 'Share Tech Mono', 'Fira Code', monospace;
+		font-size: 11px;
+		color: #888;
+		letter-spacing: 1.5px;
+		font-weight: 600;
+	}
+	.panel-icon { font-size: 14px; color: #f97316; }
+	.panel-count {
+		margin-left: auto;
+		color: #f97316;
+		font-size: 10px;
+	}
+	.panel-body {
+		padding: 18px;
+	}
+	.panel-body.dimmed { opacity: 0.4; }
+	.panel-desc {
+		font-size: 12px;
+		color: #555;
+		margin-bottom: 16px;
+		line-height: 1.6;
+	}
+
+	/* ═══════════════ FORM ELEMENTS ═══════════════ */
+	.field-row {
+		display: flex;
+		align-items: flex-end;
+		gap: 12px;
+	}
+	.field-group {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.field-label {
+		font-family: 'Share Tech Mono', 'Fira Code', monospace;
+		font-size: 10px;
+		color: #555;
+		letter-spacing: 1.5px;
+		font-weight: 600;
+	}
+	.field-divider {
+		color: #333;
+		font-size: 14px;
+		padding-bottom: 10px;
+	}
+	.field-info {
+		margin-top: 12px;
+		font-family: 'Share Tech Mono', 'Fira Code', monospace;
+		font-size: 11px;
+		color: #f97316;
+		letter-spacing: 0.5px;
+	}
+	.field-hint {
+		font-size: 11px;
+		color: #444;
+		margin-top: 8px;
+	}
+	.t-input {
+		background: #050510;
+		border: 1px solid #1a1a2e;
+		color: #e2e8f0;
+		padding: 10px 14px;
+		font-family: 'Share Tech Mono', 'Fira Code', monospace;
+		font-size: 13px;
+		border-radius: 4px;
+		transition: border-color 0.2s;
+		width: 100%;
+		box-sizing: border-box;
+	}
+	.t-input:focus {
+		outline: none;
+		border-color: #f97316;
+		box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.2);
+	}
+	.t-input.full { width: 100%; }
+	.t-input::placeholder { color: #333; }
+
+	/* ═══════════════ TOGGLE SWITCH ═══════════════ */
+	.toggle-switch {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-left: auto;
+		cursor: pointer;
+	}
+	.toggle-switch input { display: none; }
+	.toggle-slider {
+		width: 36px;
+		height: 18px;
+		background: #222;
+		border-radius: 9px;
+		position: relative;
+		transition: background 0.2s;
+	}
+	.toggle-slider::after {
+		content: '';
+		position: absolute;
+		top: 2px;
+		left: 2px;
+		width: 14px;
+		height: 14px;
+		border-radius: 50%;
+		background: #555;
+		transition: all 0.2s;
+	}
+	.toggle-switch input:checked + .toggle-slider {
+		background: rgba(249, 115, 22, 0.3);
+	}
+	.toggle-switch input:checked + .toggle-slider::after {
+		left: 20px;
+		background: #f97316;
+	}
+	.toggle-label {
+		font-family: 'Share Tech Mono', 'Fira Code', monospace;
+		font-size: 10px;
+		letter-spacing: 1px;
+		color: #555;
+	}
+
+	/* ═══════════════ CHIPS ═══════════════ */
+	.chip-row, .chip-grid {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+	.chip {
+		padding: 8px 16px;
+		border: 1px solid #1a1a2e;
+		background: #050510;
+		color: #555;
+		font-family: 'Share Tech Mono', 'Fira Code', monospace;
+		font-size: 11px;
+		font-weight: 600;
+		letter-spacing: 1px;
+		cursor: pointer;
+		border-radius: 4px;
+		transition: all 0.2s;
+	}
+	.chip:hover {
+		border-color: #f97316;
+		color: #f97316;
+	}
+	.chip.active {
+		background: rgba(249, 115, 22, 0.1);
+		border-color: #f97316;
+		color: #f97316;
+		box-shadow: 0 0 10px rgba(249, 115, 22, 0.1);
+	}
+
+	/* ═══════════════ SUMMARY BAR ═══════════════ */
+	.config-summary-bar {
+		display: flex;
+		align-items: center;
+		gap: 24px;
+		padding: 12px 18px;
+		background: #0a0a1a;
+		border: 1px solid #1a1a2e;
+		border-radius: 6px;
+		font-family: 'Share Tech Mono', 'Fira Code', monospace;
+		font-size: 11px;
+	}
+	.summary-item { display: flex; gap: 8px; }
+	.summary-key { color: #555; letter-spacing: 1px; }
+	.summary-val { color: #6ee7b7; }
+	.summary-reset {
+		margin-left: auto;
+		background: none;
+		border: 1px solid #333;
+		color: #666;
+		padding: 4px 12px;
+		font-family: 'Share Tech Mono', 'Fira Code', monospace;
+		font-size: 10px;
+		cursor: pointer;
+		border-radius: 3px;
+		letter-spacing: 1px;
+		transition: all 0.2s;
+	}
+	.summary-reset:hover { color: #ef4444; border-color: #ef4444; }
+
+	/* ═══════════════ CONFIG PREVIEW ═══════════════ */
+	.config-preview {
+		border: 1px solid #1a1a2e;
+		border-radius: 6px;
+		background: #0a0a1a;
+		overflow: hidden;
+	}
+	.preview-header {
+		padding: 10px 18px;
+		background: #0d0d1f;
+		border-bottom: 1px solid #1a1a2e;
+		font-family: 'Share Tech Mono', 'Fira Code', monospace;
+		font-size: 10px;
+		color: #555;
+		letter-spacing: 1.5px;
+		font-weight: 600;
+	}
+	.preview-code {
+		padding: 16px 18px;
+		font-family: 'Share Tech Mono', 'Fira Code', monospace;
+		font-size: 11px;
+		color: #6ee7b7;
+		line-height: 1.6;
+		overflow-x: auto;
+		margin: 0;
 	}
 
 	:global(.light-mode) .backtesting-container {

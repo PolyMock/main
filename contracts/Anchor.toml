@@ -1,5 +1,4 @@
 [toolchain]
-# Use system anchor 0.32.1
 
 [features]
 resolution = true
