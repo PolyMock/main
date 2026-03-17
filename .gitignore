@@ -77,3 +77,11 @@ frontend/.wrangler/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Backtest engine data (fetched from API)
+backtest_engine/data/

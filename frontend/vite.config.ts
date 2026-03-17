@@ -4,25 +4,18 @@ import { nodePolyfills } from 'vite-plugin-node-polyfills';
 
 export default defineConfig({
 	plugins: [
-		sveltekit(),
 		nodePolyfills({
-			include: ['process', 'buffer', 'util', 'stream', 'events'],
+			include: ['process', 'buffer', 'util', 'stream', 'events', 'assert', 'string_decoder'],
 			globals: {
 				process: true,
 				Buffer: true,
+				global: true,
 			},
 			protocolImports: true,
 			overrides: {
-				process: 'process/browser'
-			}
+				fs: 'empty',
+			},
 		}),
+		sveltekit(),
 	],
-	define: {
-		'process.env': {},
-	},
-	resolve: {
-		alias: {
-			process: 'process/browser'
-		}
-	}
 });
