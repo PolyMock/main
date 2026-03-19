@@ -7,11 +7,24 @@ const SYNTHESIS_API_BASE = 'https://synthesis.trade/api/v1';
 export const GET: RequestHandler = async ({ url }) => {
 	try {
 		const limit = url.searchParams.get('limit') || '5';
-		const active = url.searchParams.get('active') || 'true';
-		const closed = url.searchParams.get('closed') || 'false';
+		const tags = url.searchParams.get('tags') || '';
+		const ended = url.searchParams.get('ended') || '';
 
-		// Fetch from Synthesis API - returns events with nested markets
-		const response = await fetch(`${SYNTHESIS_API_BASE}/polymarket/markets?limit=${limit}&sort=volume1wk&order=DESC`, {
+		// Use the unified /markets endpoint which supports tags and max_ends_at filtering
+		const params = new URLSearchParams({
+			venue: 'polymarket',
+			sort: 'volume',
+			order: 'DESC',
+			limit,
+			markets: 'true',
+		});
+		if (tags) params.set('tags', tags);
+		// Filter for ended markets: ends_at before now
+		if (ended === 'true') {
+			params.set('max_ends_at', new Date().toISOString());
+		}
+
+		const response = await fetch(`${SYNTHESIS_API_BASE}/markets?${params}`, {
 			headers: {
 				'Accept': 'application/json',
 				'X-PROJECT-API-KEY': SYNTHESIS_API_KEY
@@ -28,25 +41,41 @@ export const GET: RequestHandler = async ({ url }) => {
 			throw new Error('Invalid response from Synthesis API');
 		}
 
-		// Transform Synthesis format to match existing Gamma format
-		// Synthesis returns { event, markets[] } objects, we need flat market array
+		const now = new Date();
+
+		// Transform to flat market array
 		const markets: any[] = [];
 		for (const item of data.response) {
 			if (!item.markets) continue;
 			for (const market of item.markets) {
-				// Filter by active/closed
-				if (active === 'true' && !market.active) continue;
-				if (closed === 'false' && market.resolved) continue;
+				const endsAt = market.ends_at ? new Date(market.ends_at) : null;
+				const hasEnded = endsAt ? endsAt < now : false;
+
+				// If ended filter is set, only include markets whose end date has passed
+				// Skip markets with no end date when filtering for ended
+				if (ended === 'true' && !hasEnded) continue;
+				if (ended === 'true' && !endsAt) continue;
+				if (ended === 'false' && hasEnded) continue;
+
+				// Determine outcome from prices (side closest to 1.0 won)
+				const leftPrice = parseFloat(market.left_price || '0');
+				const rightPrice = parseFloat(market.right_price || '0');
+				let resolvedOutcome: string | null = null;
+				if (hasEnded) {
+					if (leftPrice >= 0.9) resolvedOutcome = market.left_outcome || 'Yes';
+					else if (rightPrice >= 0.9) resolvedOutcome = market.right_outcome || 'No';
+				}
 
 				markets.push({
-					id: market.condition_id,
-					question: market.question,
-					title: market.question,
-					description: market.description,
+					id: market.condition_id || market.market_id,
+					question: market.question || market.outcome,
+					title: market.question || market.outcome,
 					slug: market.slug,
-					image: market.image || item.event?.image,
+					image: market.image || item.image,
 					active: market.active,
-					closed: market.resolved,
+					closed: hasEnded,
+					resolved: hasEnded,
+					resolvedOutcome,
 					volume: parseFloat(market.volume || '0'),
 					volume_24hr: parseFloat(market.volume24hr || '0'),
 					liquidity: parseFloat(market.liquidity || '0'),
@@ -56,14 +85,15 @@ export const GET: RequestHandler = async ({ url }) => {
 					end_date_iso: market.ends_at,
 					endDate: market.ends_at,
 					createdAt: market.created_at,
-					conditionId: market.condition_id,
-					tags: item.event?.tags || [],
+					conditionId: market.condition_id || market.market_id,
+					tags: item.tags || item.labels || [],
+					category: (item.tags || item.labels || [])[0] || '',
 					enableOrderBook: true,
 					enable_order_book: true,
-					yesPrice: parseFloat(market.left_price || '0'),
-					noPrice: parseFloat(market.right_price || '0'),
-					last_trade_price: parseFloat(market.left_price || '0'),
-					neg_risk: item.event?.neg_risk || false,
+					yesPrice: leftPrice,
+					noPrice: rightPrice,
+					last_trade_price: leftPrice,
+					neg_risk: item.neg_risk || false,
 				});
 			}
 		}

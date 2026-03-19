@@ -5,7 +5,7 @@
 </svelte:head>
 
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onDestroy } from 'svelte';
 	import { browser } from '$app/environment';
 
 	// Props
@@ -18,6 +18,7 @@
 		filterCategories,
 		filterVolumeInf,
 		filterVolumeSup,
+		selectedMarkets = [],
 		onEditConfig,
 		onRunBacktest,
 	}: {
@@ -29,9 +30,26 @@
 		filterCategories: Set<string>;
 		filterVolumeInf: number | null;
 		filterVolumeSup: number | null;
+		selectedMarkets?: any[];
 		onEditConfig: () => void;
-		onRunBacktest: (strategyCode: string) => void;
+		onRunBacktest: (strategyCode: string, strategyType: string | null, strategyParams?: {
+			initialCash: number;
+			reimburseOpenPositions: boolean;
+			priceInf: number | null;
+			priceSup: number | null;
+		}) => void | Promise<void>;
 	} = $props();
+
+	// Strategy execution params (configurable via terminal)
+	let initialCash = $state(10000);
+	let reimburseOpenPositions = $state(false);
+	let priceInf: number | null = $state(null);
+	let priceSup: number | null = $state(null);
+
+	/** Parse a number that may use comma as decimal separator */
+	function parseNum(s: string): number {
+		return parseFloat(s.replace(',', '.'));
+	}
 
 	// Terminal color constants
 	const O = '\x1b[38;5;208m'; // orange
@@ -39,136 +57,305 @@
 	const R = '\x1b[0m'; // reset
 	const DIM = '\x1b[90m'; // dim/gray
 
-	// Strategy editor state
-	let strategyCode = $state(`def strategy(trade, trade_log, portfolio, params):
-    """
-    Args:
-        trade: Current trade dict (price, amount, position, market_id, etc.)
-        trade_log: List of past executed trades
-        portfolio: { cash: float, positions: { (market_id, position): amount } }
-        params: Custom dict to persist data across trades
+	let selectedStrategy: number | null = $state(null);
 
-    Returns:
-        { market_id, position ("hold" or outcome), amount, user_perso_parameters }
-    """
-    # Your strategy logic here
-    return {
-        "market_id": trade["market_id"],
-        "position": "hold",
-        "amount": 0,
-        "user_perso_parameters": params
-    }`);
-
-	let selectedExample: number | null = $state(null);
-	let dataCollapsed = $state(false);
-
-	const mockTrades = [
-		{ timestamp: '2025-03-15 14:32', title: 'Will BTC hit $100k by June?', position: 'Yes', price: 0.62, amount: 50, volume: 1240000, category: 'Crypto' },
-		{ timestamp: '2025-03-15 14:28', title: 'Fed rate cut in May?', position: 'No', price: 0.35, amount: 30, volume: 890000, category: 'Economics' },
-		{ timestamp: '2025-03-15 14:15', title: 'ETH above $5k by April?', position: 'Yes', price: 0.41, amount: 75, volume: 2100000, category: 'Crypto' },
-		{ timestamp: '2025-03-15 13:58', title: 'Trump wins 2028 GOP primary?', position: 'Yes', price: 0.78, amount: 20, volume: 5600000, category: 'Politics' },
-		{ timestamp: '2025-03-15 13:42', title: 'SOL above $200 by June?', position: 'No', price: 0.55, amount: 40, volume: 980000, category: 'Crypto' },
-		{ timestamp: '2025-03-15 13:30', title: 'US GDP growth > 3% Q2?', position: 'Yes', price: 0.29, amount: 60, volume: 450000, category: 'Economics' },
-		{ timestamp: '2025-03-15 13:12', title: 'SpaceX Starship launch success?', position: 'Yes', price: 0.83, amount: 25, volume: 1800000, category: 'Science' },
-		{ timestamp: '2025-03-15 12:55', title: 'DOGE above $0.50 by May?', position: 'No', price: 0.18, amount: 100, volume: 3200000, category: 'Crypto' },
-	];
-
-	const exampleStrategies = [
+	// Strategies matching the real backtest_engine Python strategies
+	const strategies = [
 		{
+			id: 'mean_reversion',
 			name: 'Mean Reversion',
-			description: 'Buys when price drops very low (≤ $0.01), betting on reversion to the mean.',
-			code: `def strategy(trade, trade_log, portfolio, params):
-    if trade["price"] <= 0.01:
-        return {
-            "market_id": trade["market_id"],
-            "position": trade["position"],
-            "amount": 10,
-            "user_perso_parameters": params
-        }
-    return {"market_id": trade["market_id"], "position": "hold", "amount": 0}`
+			description: 'Buy when price drops very low, betting on reversion to the mean.',
+			logic: 'If price ≤ threshold → BUY position, else HOLD',
+			uses: ['trade.price', 'trade.position'],
+			tags: ['simple', 'price-based'],
+			code: `def mean_reversion(trade, trade_log, portfolio, user_perso_parameters):
+    threshold_low = 0.01
+    amount = 10
+    if trade.get("price") <= threshold_low:
+        market_id = trade.get("market_id")
+        position = trade.get("position")
+    else:
+        market_id = trade.get("market_id")
+        position = "hold"
+    return {"market_id": market_id, "position": position, "amount": amount}`,
 		},
 		{
-			name: 'Cash-Weighted Mean Reversion',
-			description: 'Buys low-priced positions with 1% of available cash for dynamic sizing.',
-			code: `def strategy(trade, trade_log, portfolio, params):
-    if trade["price"] <= 0.01:
-        amount = int(portfolio["cash"] * 0.01)
-        if amount > 0:
-            return {
-                "market_id": trade["market_id"],
-                "position": trade["position"],
-                "amount": amount,
-                "user_perso_parameters": params
-            }
-    return {"market_id": trade["market_id"], "position": "hold", "amount": 0}`
+			id: 'mean_reversion_with_portfolio_cash',
+			name: 'Cash-Weighted',
+			description: 'Size positions dynamically using 1% of available cash instead of fixed amounts.',
+			logic: 'If price ≤ threshold → BUY with floor(cash/100) shares',
+			uses: ['trade.price', 'portfolio.cash'],
+			tags: ['dynamic sizing', 'portfolio-aware'],
+			code: `def mean_reversion_with_portfolio_cash(trade, trade_log, portfolio, user_perso_parameters):
+    threshold_low = 0.01
+    if trade.get("price") <= threshold_low:
+        market_id = trade.get("market_id")
+        position = trade.get("position")
+        import math
+        amount = math.floor(int(portfolio["cash"])/100)
+    else:
+        market_id = trade.get("market_id")
+        position = "hold"
+        amount = 0
+    return {"market_id": market_id, "position": position, "amount": amount}`,
 		},
 		{
-			name: 'No Duplicate Positions',
-			description: 'Buys low-priced positions only if not already holding that market/position.',
-			code: `def strategy(trade, trade_log, portfolio, params):
-    key = (trade["market_id"], trade["position"])
-    if trade["price"] <= 0.01 and key not in portfolio["positions"]:
-        return {
-            "market_id": trade["market_id"],
-            "position": trade["position"],
-            "amount": 10,
-            "user_perso_parameters": params
-        }
-    return {"market_id": trade["market_id"], "position": "hold", "amount": 0}`
+			id: 'mean_reversion_with_portfolio_positions',
+			name: 'No Duplicates',
+			description: 'Skip markets where you already hold a position. Diversifies across markets.',
+			logic: 'If price ≤ threshold AND not already holding → BUY, else HOLD',
+			uses: ['trade.price', 'portfolio.positions'],
+			tags: ['diversification', 'portfolio-aware'],
+			code: `def mean_reversion_with_portfolio_positions(trade, trade_log, portfolio, user_perso_parameters):
+    threshold_low = 0.01
+    if trade.get("price") <= threshold_low:
+        market_id = trade.get("market_id")
+        position = trade.get("position")
+        if (market_id, position) in portfolio["positions"]:
+            position = "hold"
+            amount = 0
+        else:
+            amount = 10
+    else:
+        market_id = trade.get("market_id")
+        position = "hold"
+        amount = 0
+    return {"market_id": market_id, "position": position, "amount": amount}`,
 		},
 		{
-			name: 'Better Price Only',
-			description: 'Only buys if the current price is lower than the minimum previously paid.',
-			code: `def strategy(trade, trade_log, portfolio, params):
-    key = (trade["market_id"], trade["position"])
-    past = [t["cost"]/t["amount"] for t in trade_log if (t["market_id"], t["position"]) == key and t["amount"] > 0]
-    min_price = min(past) if past else float("inf")
-    if trade["price"] <= 0.01 and trade["price"] < min_price:
-        return {
-            "market_id": trade["market_id"],
-            "position": trade["position"],
-            "amount": 10,
-            "user_perso_parameters": params
-        }
-    return {"market_id": trade["market_id"], "position": "hold", "amount": 0}`
+			id: 'mean_reversion_with_trade_log',
+			name: 'Better Price',
+			description: 'Only buy if the current price is lower than the minimum price you previously paid.',
+			logic: 'If price ≤ threshold AND price < min(past prices) → BUY',
+			uses: ['trade.price', 'trade_log'],
+			tags: ['price improvement', 'trade-log'],
+			code: `def mean_reversion_with_trade_log(trade, trade_log, portfolio, user_perso_parameters):
+    threshold_low = 0.01
+    if trade.get("price") <= threshold_low:
+        market_id = trade.get("market_id")
+        position = trade.get("position")
+        trades_on_market = [t for t in trade_log if t["market_id"] == market_id and t["position"] == position]
+        if len(trades_on_market) > 0:
+            min_price = min(int(t["cost"])/int(t["amount"]) for t in trades_on_market)
+            if trade.get("price") < min_price:
+                amount = 10
+            else:
+                position = "hold"
+                amount = 0
+        else:
+            amount = 10
+    else:
+        market_id = trade.get("market_id")
+        position = "hold"
+        amount = 0
+    return {"market_id": market_id, "position": position, "amount": amount}`,
 		},
 		{
-			name: 'Cooldown Strategy',
-			description: 'Waits at least 1 day between trades on the same market/position.',
-			code: `def strategy(trade, trade_log, portfolio, params):
-    key = (trade["market_id"], trade["position"])
-    past = [t for t in trade_log if (t["market_id"], t["position"]) == key]
-    if past:
-        last_time = max(t["time"] for t in past)
-        if trade["timestamp"] - last_time < 86400:
-            return {"market_id": trade["market_id"], "position": "hold", "amount": 0}
-    if trade["price"] <= 0.01:
-        return {
-            "market_id": trade["market_id"],
-            "position": trade["position"],
-            "amount": 10,
-            "user_perso_parameters": params
-        }
-    return {"market_id": trade["market_id"], "position": "hold", "amount": 0}`
+			id: 'mean_reversion_with_trade_log_time',
+			name: 'Cooldown',
+			description: 'Enforce a 1-day cooldown between trades on the same market/position.',
+			logic: 'If price ≤ threshold AND >1 day since last trade on same market → BUY',
+			uses: ['trade.price', 'trade.timestamp', 'trade_log'],
+			tags: ['time-based', 'rate-limiting'],
+			code: `def mean_reversion_with_trade_log_time(trade, trade_log, portfolio, user_perso_parameters):
+    threshold_low = 0.01
+    if trade.get("price") <= threshold_low:
+        market_id = trade.get("market_id")
+        position = trade.get("position")
+        trades_on_market = [t for t in trade_log if t["market_id"] == market_id and t["position"] == position]
+        if len(trades_on_market) > 0:
+            from datetime import timedelta
+            latest = max(t["time"] for t in trades_on_market)
+            if trade.get("timestamp") - latest > timedelta(days=1):
+                amount = 10
+            else:
+                position = "hold"
+                amount = 0
+        else:
+            amount = 10
+    else:
+        market_id = trade.get("market_id")
+        position = "hold"
+        amount = 0
+    return {"market_id": market_id, "position": position, "amount": amount}`,
+		},
+		{
+			id: 'mean_reversion_with_user_perso_parameter_internal',
+			name: 'Scaled by Exposure',
+			description: 'Amount scales with how many trades you\'ve made on a market (up to 100). More confidence = bigger position.',
+			logic: 'If price ≤ threshold → BUY min(100, trade_count_on_market) shares',
+			uses: ['trade.price', 'user_perso_parameters'],
+			tags: ['adaptive', 'custom-state'],
+			code: `def mean_reversion_with_user_perso_parameter_internal(trade, trade_log, portfolio, user_perso_parameters):
+    threshold_low = 0.01
+    if "trade_count" not in user_perso_parameters:
+        user_perso_parameters["trade_count"] = {}
+    if trade.get("market_id") not in user_perso_parameters["trade_count"]:
+        user_perso_parameters["trade_count"][trade.get("market_id")] = 0
+    user_perso_parameters["trade_count"][trade.get("market_id")] += 1
+    if trade.get("price") <= threshold_low:
+        market_id = trade.get("market_id")
+        position = trade.get("position")
+        amount = min(100, user_perso_parameters["trade_count"][market_id])
+    else:
+        market_id = trade.get("market_id")
+        position = "hold"
+        amount = 0
+    return {"market_id": market_id, "position": position, "amount": amount, "user_perso_parameters": user_perso_parameters}`,
 		},
 	];
 
-	function loadExample(idx: number) {
-		selectedExample = idx;
-		strategyCode = exampleStrategies[idx].code;
-		codeLines = exampleStrategies[idx].code.split('\n');
+	function selectStrategy(idx: number) {
+		selectedStrategy = idx;
+		if (termInstance) {
+			termInstance.clear();
+			const s = strategies[idx];
+			termInstance.writeln(`${G}✓ Strategy selected: ${s.name}${R}`);
+			termInstance.writeln(`  ${s.description}`);
+			termInstance.writeln('');
+			showCode(termInstance);
+			termInstance.writeln('');
+			showParams(termInstance);
+			termInstance.writeln('');
+			termInstance.writeln(`  ${DIM}Configure params with ${O}set${R}${DIM} commands, or:${R}`);
+			termInstance.writeln('');
+			termInstance.writeln(`  ${O}>>> Type ${G}run${R}${O} to launch the backtest <<<${R}`);
+			termPrompt(termInstance);
+		}
 	}
 
-	// Strategy code editor terminal (xterm)
-	let codeTermContainer: HTMLDivElement;
-	let codeTermInitialized = $state(false);
-	let codeTermInstance: any = $state(null);
-	let codeInputLine = '';
-	let codeLines: string[] = [];
+	// Terminal state
+	let termContainer: HTMLDivElement;
+	let termInitialized = $state(false);
+	let termInstance: any = $state(null);
+	let inputLine = '';
 
-	async function initCodeTerm() {
-		if (codeTermInitialized || !codeTermContainer) return;
-		codeTermInitialized = true;
+	function showParams(term: any) {
+		term.writeln(`${O}━━━ Parameters ━━━${R}`);
+		term.writeln(`  ${G}cash${R}         $${initialCash.toLocaleString()}        ${DIM}set cash <amount>${R}`);
+		term.writeln(`  ${G}reimburse${R}    ${reimburseOpenPositions ? 'on' : 'off'}                 ${DIM}set reimburse on/off${R}`);
+		term.writeln(`  ${G}price${R}        ${priceInf ?? '0'} → ${priceSup ?? '1'}            ${DIM}set price <min> <max>${R}`);
+		term.writeln(`${O}━━━━━━━━━━━━━━━━━━━${R}`);
+	}
+
+	function showCode(term: any) {
+		if (selectedStrategy === null) return;
+		const s = strategies[selectedStrategy];
+		term.writeln(`${O}━━━ ${s.name} — Python Code ━━━${R}`);
+		term.writeln('');
+		// Show the code with dynamic param values injected
+		const code = s.code
+			.replace(/threshold_low = [\d.]+/, `threshold_low = ${priceInf ?? 0.01}`)
+			.replace(/amount = 10(?!\d)/, `amount = ${Math.floor(initialCash * 0.01) || 10}`);
+		for (const line of code.split('\n')) {
+			term.writeln(`  ${G}${line}${R}`);
+		}
+		term.writeln('');
+		term.writeln(`${DIM}Config: cash=${O}$${initialCash.toLocaleString()}${R}${DIM}, reimburse=${O}${reimburseOpenPositions ? 'on' : 'off'}${R}${DIM}, price_filter=${O}${priceInf ?? '0'}→${priceSup ?? '1'}${R}`);
+		term.writeln(`${O}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${R}`);
+	}
+
+	function termPrompt(term: any) {
+		term.write(`\r\n${O}❯${R} `);
+		term.scrollToBottom();
+	}
+
+	function handleInput(term: any, input: string) {
+		const trimmed = input.trim().toLowerCase();
+
+		if (trimmed === 'run') {
+			if (selectedStrategy === null) {
+				term.writeln(`${O}Select a strategy first by clicking one above.${R}`);
+				termPrompt(term);
+				return;
+			}
+			const s = strategies[selectedStrategy];
+			term.writeln('');
+			term.writeln(`${G}━━━ Running: ${s.name} ━━━${R}`);
+			term.writeln(`${DIM}cash=$${initialCash.toLocaleString()}, reimburse=${reimburseOpenPositions ? 'yes' : 'no'}, price=${priceInf ?? '0'}→${priceSup ?? '1'}${R}`);
+			term.writeln(`${O}Starting backtest...${R}`);
+			onRunBacktest(s.code, s.id, {
+				initialCash,
+				reimburseOpenPositions,
+				priceInf,
+				priceSup,
+			});
+			return;
+		}
+		if (trimmed === 'params') {
+			term.writeln('');
+			showParams(term);
+			termPrompt(term);
+			return;
+		}
+		if (trimmed === 'clear') {
+			term.clear();
+			termPrompt(term);
+			return;
+		}
+		if (trimmed === 'code') {
+			if (selectedStrategy !== null) {
+				term.writeln('');
+				showCode(term);
+			} else {
+				term.writeln(`${O}Select a strategy first.${R}`);
+			}
+			termPrompt(term);
+			return;
+		}
+		if (trimmed.startsWith('set ')) {
+			const parts = input.trim().substring(4).trim().split(/\s+/);
+			const key = parts[0].toLowerCase();
+			let valid = true;
+			if (key === 'cash' && parts[1]) {
+				const val = parseNum(parts[1]);
+				if (!isNaN(val) && val > 0) {
+					initialCash = val;
+				} else {
+					term.writeln(`${O}Invalid. Use: set cash 10000${R}`);
+					valid = false;
+				}
+			} else if (key === 'reimburse') {
+				reimburseOpenPositions = parts[1]?.toLowerCase() === 'on' || parts[1]?.toLowerCase() === 'true' || parts[1]?.toLowerCase() === 'yes';
+			} else if (key === 'price') {
+				const min = parts[1] ? parseNum(parts[1]) : null;
+				const max = parts[2] ? parseNum(parts[2]) : null;
+				priceInf = min !== null && !isNaN(min) ? min : null;
+				priceSup = max !== null && !isNaN(max) ? max : null;
+			} else {
+				term.writeln(`${O}Unknown param. Options: cash, reimburse, price${R}`);
+				valid = false;
+			}
+			if (valid) {
+				term.writeln(`${G}✓ Updated${R}`);
+				term.writeln('');
+				if (selectedStrategy !== null) showCode(term);
+				term.writeln('');
+				showParams(term);
+			}
+			termPrompt(term);
+			return;
+		}
+
+		if (trimmed === 'help') {
+			term.writeln('');
+			term.writeln(`  ${O}run${R}                    — Run backtest with selected strategy`);
+			term.writeln(`  ${O}params${R}                 — Show current parameters`);
+			term.writeln(`  ${O}code${R}                   — Show strategy code with current params`);
+			term.writeln(`  ${O}set cash <n>${R}           — Set initial bankroll`);
+			term.writeln(`  ${O}set reimburse on/off${R}   — Toggle end-of-backtest reimbursement`);
+			term.writeln(`  ${O}set price <min> <max>${R}  — Price range filter (supports 0,2 or 0.2)`);
+			term.writeln(`  ${O}clear${R}                  — Clear terminal`);
+			termPrompt(term);
+			return;
+		}
+
+		termPrompt(term);
+	}
+
+	async function initTerm() {
+		if (termInitialized || !termContainer) return;
+		termInitialized = true;
 
 		const { Terminal } = await import('@xterm/xterm');
 		const { FitAddon } = await import('@xterm/addon-fit');
@@ -185,242 +372,116 @@
 			fontSize: 13,
 			cursorBlink: true,
 			cursorStyle: 'block',
-			scrollback: 5000,
+			scrollback: 1000,
 		});
 
 		const fitAddon = new FitAddon();
 		term.loadAddon(fitAddon);
-		term.open(codeTermContainer);
+		term.open(termContainer);
 		fitAddon.fit();
-		codeTermInstance = term;
+		termInstance = term;
 
 		const resizeObserver = new ResizeObserver(() => fitAddon.fit());
-		resizeObserver.observe(codeTermContainer);
+		resizeObserver.observe(termContainer);
 
 		await new Promise(r => setTimeout(r, 150));
 		fitAddon.fit();
 
-		// Strategy editor intro
-		term.writeln(`${O}━━━ STRATEGY EDITOR ━━━${R}`);
+		term.writeln(`${O}━━━ STRATEGY & PARAMETERS ━━━${R}`);
 		term.writeln('');
-		term.writeln('Write your Python strategy function below.');
-		term.writeln('Your function receives 4 arguments for each trade:');
+		term.writeln(`Select a strategy above, then configure parameters below.`);
 		term.writeln('');
-		term.writeln(`  ${O}trade${R}      - Current trade data (price, amount, position, market_id, title...)`);
-		term.writeln(`  ${O}trade_log${R}  - List of your past executed trades`);
-		term.writeln(`  ${O}portfolio${R}  - Your portfolio: { cash, positions }`);
-		term.writeln(`  ${O}params${R}     - Custom dict to persist data across trades`);
+		showParams(term);
 		term.writeln('');
-		term.writeln('Return: { market_id, position ("hold" or outcome), amount, user_perso_parameters }');
-		term.writeln('');
-		term.writeln(`${DIM}Commands: ${O}load <n>${R}${DIM} (load example 1-${exampleStrategies.length}), ${O}clear${R}${DIM}, ${O}show${R}${DIM} (show code), ${O}examples${R}${DIM}${R}`);
-		term.writeln(`${DIM}Type your code line by line. Use ${O}done${R}${DIM} to finish, ${O}undo${R}${DIM} to remove last line.${R}`);
-		term.writeln('');
-		term.writeln(`${G}def strategy(trade, trade_log, portfolio, params):${R}`);
-		codeLines = ['def strategy(trade, trade_log, portfolio, params):'];
-		codePrompt(term);
+		term.writeln(`${DIM}Commands: ${O}run${R}${DIM}, ${O}params${R}${DIM}, ${O}code${R}${DIM}, ${O}set cash/reimburse/price${R}${DIM}, ${O}help${R}${DIM}, ${O}clear${R}`);
+		termPrompt(term);
 
-		// Input handler
 		term.onData((data: string) => {
 			const code = data.charCodeAt(0);
 			if (data === '\r') {
 				term.write('\r\n');
-				handleCodeInput(term, codeInputLine);
-				codeInputLine = '';
+				handleInput(term, inputLine);
+				inputLine = '';
 			} else if (data === '\x7f') {
-				if (codeInputLine.length > 0) {
-					codeInputLine = codeInputLine.slice(0, -1);
+				if (inputLine.length > 0) {
+					inputLine = inputLine.slice(0, -1);
 					term.write('\b \b');
 				}
 			} else if (code >= 32) {
-				codeInputLine += data;
+				inputLine += data;
 				term.write(data);
 			}
 		});
 	}
 
-	function codePrompt(term: any) {
-		const lineNum = codeLines.length + 1;
-		const pad = String(lineNum).padStart(3, ' ');
-		term.write(`${DIM}${pad} |${R}     `);
-		term.scrollToBottom();
-	}
-
-	function handleCodeInput(term: any, input: string) {
-		const trimmed = input.trim().toLowerCase();
-
-		if (trimmed === 'done') {
-			strategyCode = codeLines.join('\n');
-			term.writeln('');
-			term.writeln(`${G}━━━ Strategy saved! (${codeLines.length} lines) ━━━${R}`);
-			term.writeln(`${DIM}Strategy code is ready. Run backtest when available.${R}`);
-			term.write(`\r\n${O}❯${R} `);
-			onRunBacktest(strategyCode);
-			return;
-		}
-		if (trimmed === 'undo') {
-			if (codeLines.length > 1) {
-				codeLines.pop();
-				term.writeln(`${DIM}Removed last line. (${codeLines.length} lines remaining)${R}`);
-			} else {
-				term.writeln(`${DIM}Cannot remove function definition.${R}`);
-			}
-			codePrompt(term);
-			return;
-		}
-		if (trimmed === 'show') {
-			term.writeln('');
-			term.writeln(`${O}━━━ Current Code ━━━${R}`);
-			codeLines.forEach((line, i) => {
-				const pad = String(i + 1).padStart(3, ' ');
-				term.writeln(`${DIM}${pad} |${R} ${G}${line}${R}`);
-			});
-			term.writeln(`${O}━━━━━━━━━━━━━━━━━━━━${R}`);
-			term.writeln('');
-			codePrompt(term);
-			return;
-		}
-		if (trimmed === 'clear') {
-			term.clear();
-			codePrompt(term);
-			return;
-		}
-		if (trimmed === 'examples') {
-			term.writeln('');
-			exampleStrategies.forEach((ex, i) => {
-				term.writeln(`  ${O}${i + 1}${R} - ${ex.name}: ${DIM}${ex.description}${R}`);
-			});
-			term.writeln(`\n${DIM}Type ${O}load <number>${R}${DIM} to load an example.${R}`);
-			term.writeln('');
-			codePrompt(term);
-			return;
-		}
-		if (trimmed.startsWith('load ')) {
-			const num = parseInt(trimmed.replace('load ', ''));
-			if (num >= 1 && num <= exampleStrategies.length) {
-				const ex = exampleStrategies[num - 1];
-				codeLines = ex.code.split('\n');
-				strategyCode = ex.code;
-				selectedExample = num - 1;
-				term.writeln('');
-				term.writeln(`${G}Loaded: ${ex.name}${R}`);
-				term.writeln('');
-				codeLines.forEach((line, i) => {
-					const pad = String(i + 1).padStart(3, ' ');
-					term.writeln(`${DIM}${pad} |${R} ${G}${line}${R}`);
-				});
-				term.writeln('');
-				term.writeln(`${DIM}Type ${O}done${R}${DIM} to save, or continue editing.${R}`);
-				term.writeln('');
-				codePrompt(term);
-			} else {
-				term.writeln(`${O}Invalid. Use load 1-${exampleStrategies.length}${R}`);
-				codePrompt(term);
-			}
-			return;
-		}
-
-		// Regular code line
-		codeLines.push('    ' + input);
-		codePrompt(term);
-	}
-
-	// Initialize xterm when container is available
 	$effect(() => {
-		if (browser && codeTermContainer) {
-			// Reset if container changed (e.g. after edit config round-trip)
-			if (codeTermInstance && !codeTermContainer.querySelector('.xterm')) {
-				codeTermInstance = null;
-				codeTermInitialized = false;
+		if (browser && termContainer) {
+			if (termInstance && !termContainer.querySelector('.xterm')) {
+				termInstance = null;
+				termInitialized = false;
 			}
-			setTimeout(() => initCodeTerm(), 100);
+			setTimeout(() => initTerm(), 100);
 		}
 	});
 
-	// Cleanup on destroy
 	onDestroy(() => {
-		if (codeTermInstance) {
-			codeTermInstance.dispose();
-			codeTermInstance = null;
-			codeTermInitialized = false;
+		if (termInstance) {
+			termInstance.dispose();
+			termInstance = null;
+			termInitialized = false;
 		}
 	});
 </script>
 
-<div class="strategy-editor-page">
-	<!-- TOP: Dataset panel with edit button -->
-	<div class="data-panel" class:collapsed={dataCollapsed}>
-		<button class="data-header" onclick={() => dataCollapsed = !dataCollapsed}>
+<div class="strategy-page">
+	<!-- TOP: Dataset summary bar -->
+	<div class="data-bar">
+		<div class="data-header">
 			<span class="data-title">
 				<span class="cbl">DATASET</span>
-				<span class="data-tag"><span class="data-tag-label">SOURCE</span> {dataSource === 'synthesis' ? 'Synthesis API' : 'Parquet'}</span>
-				<span class="data-tag"><span class="data-tag-label">TRADES</span> {mockTrades.length.toLocaleString()}</span>
-				<span class="data-tag"><span class="data-tag-label">PLATFORM</span> Polymarket</span>
-				<span class="data-tag"><span class="data-tag-label">TIMELINE</span> {useTimePeriod ? `${timestampStartStr} → ${timestampEndStr}` : 'All time'}</span>
-				{#if filterTitleSearch}<span class="data-tag"><span class="data-tag-label">TITLE</span> {filterTitleSearch}</span>{/if}
-				{#if filterCategories.size > 0}<span class="data-tag"><span class="data-tag-label">CATEGORY</span> {Array.from(filterCategories).join(', ')}</span>{/if}
-				{#if filterVolumeInf || filterVolumeSup}<span class="data-tag"><span class="data-tag-label">VOLUME</span> {filterVolumeInf ?? '0'} → {filterVolumeSup ?? '∞'}</span>{/if}
+				<span class="data-tag"><span class="dtl">SOURCE</span> {dataSource === 'synthesis' ? 'Synthesis API' : 'Parquet'}</span>
+				<span class="data-tag"><span class="dtl">MARKETS</span> {selectedMarkets.length}</span>
+				<span class="data-tag"><span class="dtl">PLATFORM</span> Polymarket</span>
+				<span class="data-tag"><span class="dtl">TIME</span> {useTimePeriod ? `${timestampStartStr} → ${timestampEndStr}` : 'All time'}</span>
+				{#if filterCategories.size > 0}<span class="data-tag"><span class="dtl">CATEGORY</span> {Array.from(filterCategories).join(', ')}</span>{/if}
 			</span>
-			<span class="data-right">
-				<span class="config-bar-edit" role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); onEditConfig(); }} onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); onEditConfig(); } }}>
-						EDIT CONFIG
-				</span>
-				<span class="data-toggle">{dataCollapsed ? '▸' : '▾'}</span>
-			</span>
-		</button>
-		{#if !dataCollapsed}
-			<div class="data-table-wrap">
-				<table class="data-table">
-					<thead>
-						<tr>
-							<th>TIMESTAMP</th>
-							<th>MARKET</th>
-							<th>POSITION</th>
-							<th>PRICE</th>
-							<th>AMOUNT</th>
-							<th>VOLUME</th>
-							<th>CATEGORY</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each mockTrades as t}
-							<tr>
-								<td class="td-dim">{t.timestamp}</td>
-								<td class="td-title">{t.title}</td>
-								<td class:td-yes={t.position === 'Yes'} class:td-no={t.position === 'No'}>{t.position}</td>
-								<td>${t.price.toFixed(2)}</td>
-								<td>{t.amount}</td>
-								<td class="td-dim">{t.volume.toLocaleString()}</td>
-								<td class="td-dim">{t.category}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
-		{/if}
+			<span class="edit-btn" role="button" tabindex="0" onclick={() => onEditConfig()} onkeydown={(e) => { if (e.key === 'Enter') onEditConfig(); }}>EDIT CONFIG</span>
+		</div>
 	</div>
 
-	<!-- MIDDLE: Example strategies -->
-	<div class="examples-bar">
-		{#each exampleStrategies as example, i}
-			<button
-				class="example-chip"
-				class:selected={selectedExample === i}
-				onclick={() => { loadExample(i); if (codeTermInstance) { codeTermInstance.clear(); codeTermInstance.writeln(`${G}Loaded: ${example.name}${R}\n`); codeLines.forEach((line, j) => { const pad = String(j+1).padStart(3,' '); codeTermInstance.writeln(`${DIM}${pad} |${R} ${G}${line}${R}`); }); codeTermInstance.writeln(`\n${DIM}Type done to save, or continue editing.${R}\n`); codePrompt(codeTermInstance); } }}
-			>
-				<span class="example-name">{example.name}</span>
-				<span class="example-desc">{example.description}</span>
-			</button>
-		{/each}
+	<!-- MIDDLE: Strategy cards -->
+	<div class="strategies-section">
+		<div class="strategies-label">SELECT STRATEGY</div>
+		<div class="strategies-grid">
+			{#each strategies as s, i}
+				<button
+					class="strategy-card"
+					class:selected={selectedStrategy === i}
+					onclick={() => selectStrategy(i)}
+				>
+					<div class="sc-header">
+						<span class="sc-num">{i + 1}</span>
+						<span class="sc-name">{s.name}</span>
+						{#if selectedStrategy === i}
+							<span class="sc-active">SELECTED</span>
+						{/if}
+					</div>
+					<p class="sc-desc">{s.description}</p>
+					<div class="sc-logic">
+						<span class="sc-logic-label">LOGIC</span>
+						<span class="sc-logic-text">{s.logic}</span>
+					</div>
+				</button>
+			{/each}
+		</div>
 	</div>
 
-	<!-- BOTTOM: Code Terminal -->
-	<div class="code-term-wrapper" bind:this={codeTermContainer}></div>
+	<!-- BOTTOM: Params terminal -->
+	<div class="term-wrapper" bind:this={termContainer}></div>
 </div>
 
 <style>
-	/* ═══════════════ STRATEGY EDITOR PAGE ═══════════════ */
-	.strategy-editor-page {
+	.strategy-page {
 		flex: 1;
 		display: flex;
 		flex-direction: column;
@@ -428,37 +489,10 @@
 		background: #000;
 	}
 
-	.cbl {
-		color: #f97316;
-		font-weight: 700;
-		font-size: 11px;
-		letter-spacing: 1px;
-		margin-right: 6px;
-	}
-	.config-bar-edit {
-		background: transparent;
-		border: 1px solid #555;
-		color: #ccc;
-		padding: 6px 16px;
-		font-family: monospace;
-		font-size: 12px;
-		cursor: pointer;
-		border-radius: 4px;
-		letter-spacing: 1px;
-		transition: all 0.2s;
-		font-weight: 600;
-	}
-	.config-bar-edit:hover {
-		color: #f97316;
-		border-color: #f97316;
-		background: rgba(249, 115, 22, 0.08);
-	}
-
-	/* ── Data Panel (top section) ── */
-	.data-panel {
+	/* ── Data Bar ── */
+	.data-bar {
 		flex-shrink: 0;
-		border-bottom: 1px solid #fff;
-		overflow: hidden;
+		border-bottom: 1px solid #222;
 		background: #000;
 	}
 	.data-header {
@@ -466,205 +500,158 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		padding: 14px 20px;
+		padding: 10px 20px;
 		background: #000;
 		border: none;
 		color: #eee;
 		cursor: pointer;
-		font-size: 14px;
-	}
-	.data-header:hover {
-		background: #0a0a0a;
-	}
-	.data-title {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-	}
-	.data-tag {
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-		font-family: monospace;
-		font-size: 12px;
-		color: #ccc;
-		background: #111;
-		padding: 3px 10px;
-		border-radius: 3px;
-		border: 1px solid #222;
-	}
-	.data-tag-label {
-		color: #f97316;
-		font-weight: 700;
-		font-size: 10px;
-		letter-spacing: 0.5px;
-	}
-	.data-right {
-		display: flex;
-		align-items: center;
-		gap: 16px;
-	}
-	.data-toggle {
-		color: #f97316;
-		font-size: 16px;
-	}
-	.data-table-wrap {
-		max-height: 220px;
-		overflow-y: auto;
-		background: #000;
-	}
-	.data-table-wrap::-webkit-scrollbar {
-		width: 5px;
-	}
-	.data-table-wrap::-webkit-scrollbar-track {
-		background: #000;
-	}
-	.data-table-wrap::-webkit-scrollbar-thumb {
-		background: #333;
-		border-radius: 3px;
-	}
-	.data-table {
-		width: 100%;
-		border-collapse: collapse;
 		font-size: 13px;
-		font-family: 'Share Tech Mono', monospace;
 	}
-	.data-table th {
-		position: sticky;
-		top: 0;
-		background: #000;
-		color: #f97316;
-		text-align: left;
-		padding: 8px 16px;
-		font-weight: 600;
-		font-size: 11px;
-		letter-spacing: 0.5px;
-		border-bottom: 1px solid #333;
+	.data-header:hover { background: #0a0a0a; }
+	.data-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+	.cbl { color: #f97316; font-weight: 700; font-size: 11px; letter-spacing: 1px; }
+	.data-tag {
+		display: inline-flex; align-items: center; gap: 4px;
+		font-family: monospace; font-size: 11px; color: #aaa;
+		background: #111; padding: 2px 8px; border-radius: 3px; border: 1px solid #222;
 	}
-	.data-table td {
-		padding: 7px 16px;
-		color: #ddd;
-		border-bottom: 1px solid #111;
-		white-space: nowrap;
+	.dtl { color: #f97316; font-weight: 700; font-size: 9px; letter-spacing: 0.5px; }
+	.data-right { display: flex; align-items: center; gap: 12px; }
+	.edit-btn {
+		background: transparent; border: 1px solid #555; color: #ccc;
+		padding: 4px 12px; font-family: monospace; font-size: 11px;
+		cursor: pointer; border-radius: 3px; letter-spacing: 1px; font-weight: 600;
 	}
-	.data-table tr:hover td {
-		background: #0a0a0a;
-	}
-	.td-dim {
-		color: #777;
-	}
-	.td-title {
-		color: #ccc;
-		max-width: 300px;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-	.td-yes {
-		color: #22c55e;
-		font-weight: 600;
-	}
-	.td-no {
-		color: #ef4444;
-		font-weight: 600;
-	}
+	.edit-btn:hover { color: #f97316; border-color: #f97316; }
 
-	/* ── Examples Bar (middle section) ── */
-	.examples-bar {
-		display: flex;
+	/* ── Strategy Cards ── */
+	.strategies-section {
 		flex-shrink: 0;
 		overflow-x: auto;
+		overflow-y: hidden;
+		border-bottom: 1px solid #f97316;
 		background: #000;
-		border-bottom: 1px solid #fff;
+		padding: 12px 16px 14px;
 	}
-	.examples-bar::-webkit-scrollbar {
-		height: 0;
+	.strategies-label {
+		font-family: 'Share Tech Mono', monospace;
+		font-size: 10px;
+		font-weight: 700;
+		color: #f97316;
+		letter-spacing: 2px;
+		margin-bottom: 10px;
+		padding-left: 2px;
 	}
-	.example-chip {
-		flex: 1;
-		min-width: 0;
+	.strategies-grid {
+		display: flex;
+		gap: 10px;
+		min-width: min-content;
+	}
+	.strategy-card {
+		flex: 0 0 210px;
 		display: flex;
 		flex-direction: column;
-		gap: 6px;
-		padding: 14px 18px;
-		background: transparent;
-		border: none;
-		border-right: 1px solid #333;
-		color: #888;
+		gap: 10px;
+		padding: 14px 16px;
+		background: #0a0a0a;
+		border: 1px solid #333;
+		border-radius: 6px;
+		color: #ccc;
 		cursor: pointer;
 		text-align: left;
-		transition: all 0.2s;
+		transition: all 0.15s;
 	}
-	.example-chip:last-child {
-		border-right: none;
+	.strategy-card:hover {
+		border-color: #f97316;
+		background: #111;
 	}
-	.example-chip:hover {
-		background: #0a0a0a;
+	.strategy-card.selected {
+		border-color: #f97316;
+		background: #1a0d00;
+		box-shadow: 0 0 16px rgba(249, 115, 22, 0.2), inset 0 0 30px rgba(249, 115, 22, 0.03);
 	}
-	.example-chip:hover .example-name {
-		color: #fff;
+	.sc-header {
+		display: flex;
+		align-items: center;
+		gap: 8px;
 	}
-	.example-chip.selected {
-		background: #0a0a0a;
-		border-bottom: 2px solid #f97316;
+	.sc-num {
+		font-family: 'Share Tech Mono', monospace;
+		font-size: 11px;
+		font-weight: 700;
+		color: #555;
+		background: #1a1a1a;
+		width: 22px;
+		height: 22px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 4px;
+		flex-shrink: 0;
 	}
-	.example-chip.selected .example-name {
-		color: #f97316;
-	}
-	.example-name {
-		font-family: monospace;
+	.strategy-card:hover .sc-num { color: #f97316; background: #1a0d00; }
+	.strategy-card.selected .sc-num { color: #000; background: #f97316; }
+	.sc-name {
+		font-family: 'Share Tech Mono', monospace;
 		font-size: 13px;
 		font-weight: 700;
-		letter-spacing: 0.5px;
-		color: #ccc;
-		white-space: nowrap;
-	}
-	.example-desc {
-		font-size: 11px;
-		color: #f97316;
-		line-height: 1.4;
-		display: -webkit-box;
-		-webkit-line-clamp: 2;
-		-webkit-box-orient: vertical;
-		overflow: hidden;
-		opacity: 0.7;
-	}
-	.example-chip:hover .example-desc {
-		opacity: 1;
-	}
-	.example-chip.selected .example-desc {
-		opacity: 1;
-	}
-
-	/* Code Terminal (takes all remaining space) */
-	.code-term-wrapper {
+		color: #fff;
+		letter-spacing: 0.3px;
 		flex: 1;
+	}
+	.strategy-card.selected .sc-name { color: #f97316; }
+	.sc-active {
+		font-size: 8px;
+		font-weight: 700;
+		color: #f97316;
+		background: rgba(249, 115, 22, 0.2);
+		padding: 2px 6px;
+		border-radius: 3px;
+		letter-spacing: 1px;
+		flex-shrink: 0;
+	}
+	.sc-desc {
+		font-size: 12px;
+		color: #bbb;
+		line-height: 1.5;
+		margin: 0;
+	}
+	.strategy-card.selected .sc-desc { color: #ddd; }
+	.sc-logic {
+		font-size: 11px;
+		font-family: monospace;
+		background: #050505;
+		padding: 8px 10px;
+		border-radius: 4px;
+		border: 1px solid #222;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.sc-logic-label {
+		font-size: 9px;
+		font-weight: 700;
+		color: #f97316;
+		letter-spacing: 1px;
+	}
+	.sc-logic-text {
+		color: #ccc;
+	}
+	.strategy-card:hover .sc-logic { border-color: #444; }
+	.strategy-card.selected .sc-logic { border-color: #f97316; background: #0a0500; }
+	.strategy-card.selected .sc-logic-text { color: #eee; }
+
+	/* ── Terminal ── */
+	.term-wrapper {
+		flex: 1;
+		min-height: 120px;
 		width: 100%;
 		box-sizing: border-box;
 		position: relative;
 	}
-	.code-term-wrapper :global(.xterm) {
-		padding: 12px;
-		height: 100%;
-	}
-	.code-term-wrapper :global(.xterm-viewport) {
-		background-color: #000 !important;
-		overflow-y: auto !important;
-	}
-	.code-term-wrapper :global(.xterm-viewport::-webkit-scrollbar) {
-		width: 6px;
-	}
-	.code-term-wrapper :global(.xterm-viewport::-webkit-scrollbar-track) {
-		background: #000;
-	}
-	.code-term-wrapper :global(.xterm-viewport::-webkit-scrollbar-thumb) {
-		background: #f97316;
-		border-radius: 3px;
-	}
-	.code-term-wrapper :global(.xterm-char-measure-element),
-	.code-term-wrapper :global(.xterm-helpers),
-	.code-term-wrapper :global(.xterm-helper-textarea),
-	.code-term-wrapper :global(span),
-	.code-term-wrapper :global(canvas) {
-		font-family: courier-new, courier, monospace !important;
-	}
+	.term-wrapper :global(.xterm) { padding: 12px; height: 100%; }
+	.term-wrapper :global(.xterm-viewport) { background-color: #000 !important; overflow-y: auto !important; }
+	.term-wrapper :global(.xterm-viewport::-webkit-scrollbar) { width: 6px; }
+	.term-wrapper :global(.xterm-viewport::-webkit-scrollbar-track) { background: #000; }
+	.term-wrapper :global(.xterm-viewport::-webkit-scrollbar-thumb) { background: #f97316; border-radius: 3px; }
 </style>

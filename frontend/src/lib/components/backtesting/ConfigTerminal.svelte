@@ -2,23 +2,15 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { browser } from '$app/environment';
 
-	type WizardStep = 'intro' | 'data_source' | 'time_period' | 'start_date' | 'end_date' | 'title' | 'volume_min' | 'volume_max' | 'category' | 'outcomes' | 'review' | 'done';
+	type WizardStep = 'intro' | 'data_source' | 'category_select' | 'market_loading' | 'market_select' | 'position_filter' | 'time_period' | 'start_date' | 'end_date' | 'review' | 'done';
 
 	interface EngineConfig {
 		data_source: 'synthesis' | 'parquet';
 		platform: string[];
 		timestamp_start: string | null;
 		timestamp_end: string | null;
-		market_title: string[] | null;
-		volume_inf: number | null;
-		volume_sup: number | null;
 		market_category: string[] | null;
 		position: string[] | null;
-		possible_outcomes: string[] | null;
-		price_inf: number | null;
-		price_sup: number | null;
-		amount_inf: number | null;
-		amount_sup: number | null;
 	}
 
 	interface ConfigCompletePayload {
@@ -32,6 +24,7 @@
 		filterVolumeSup: number | null;
 		filterCategories: Set<string>;
 		filterOutcomesSearch: string;
+		selectedMarkets: any[];
 	}
 
 	let { onConfigComplete }: { onConfigComplete?: (payload: ConfigCompletePayload) => void } = $props();
@@ -45,22 +38,48 @@
 	let useTimePeriod = $state(false);
 	let timestampStartStr = $state('');
 	let timestampEndStr = $state('');
-	let filterPlatform: Set<string> = $state(new Set(['polymarket']));
-	let filterTitleSearch = $state('');
-	let filterVolumeInf: number | null = $state(null);
-	let filterVolumeSup: number | null = $state(null);
-	let filterCategories: Set<string> = $state(new Set());
-	let filterOutcomesSearch = $state('');
-	let filterPriceInf: number | null = $state(null);
-	let filterPriceSup: number | null = $state(null);
-	let filterAmountInf: number | null = $state(null);
-	let filterAmountSup: number | null = $state(null);
-	let filterPosition: Set<string> = $state(new Set());
+	let selectedCategories: string[] = $state([]);
+	let positionFilter: 'both' | 'yes' | 'no' = $state('both');
+
+	// Market selection state
+	let availableMarkets: any[] = $state([]);
+	let selectedMarketsList: any[] = $state([]);
+
+	function formatVolume(v: number): string {
+		if (v >= 1e6) return `$${(v / 1e6).toFixed(1)}M`;
+		if (v >= 1e3) return `$${(v / 1e3).toFixed(0)}K`;
+		return `$${v.toFixed(0)}`;
+	}
 
 	const availableCategories = [
 		'crypto', 'culture', 'economy', 'elections', 'finance',
-		'geopolitics', 'politic', 'sport', 'tech', 'world'
+		'geopolitics', 'politics', 'sports', 'tech', 'world',
+		'science', 'entertainment', 'health', 'weather'
 	];
+
+	async function fetchMarketsByCategory(term: any) {
+		try {
+			const tagsParam = selectedCategories.join(',');
+			term.writeln(`${DIM}Fetching ended markets for: ${selectedCategories.join(', ')}...${R}`);
+			const response = await fetch(`/api/markets?limit=250&tags=${encodeURIComponent(tagsParam)}&ended=true`);
+			if (!response.ok) throw new Error('API error');
+			const markets = await response.json();
+			if (Array.isArray(markets) && markets.length > 0) {
+				availableMarkets = markets;
+				term.writeln(`${G}✓ Found ${markets.length} ended markets${R}`);
+				wizardStep = 'market_select';
+				showWizardStep(term);
+			} else {
+				term.writeln(`${O}No ended markets found for these categories. Try different ones.${R}`);
+				wizardStep = 'category_select';
+				showWizardStep(term);
+			}
+		} catch (err) {
+			term.writeln(`${O}Failed to fetch markets. Try again.${R}`);
+			wizardStep = 'category_select';
+			showWizardStep(term);
+		}
+	}
 
 	// Xterm state
 	let xtermContainer: HTMLDivElement | undefined = $state();
@@ -107,32 +126,14 @@
 		'\x1b[32mReady.\x1b[0m Type \x1b[38;5;208mgo\x1b[0m to start.',
 	];
 
-	// Helper functions
-	function formatDateForInput(date: Date): string {
-		return date.toISOString().split('T')[0];
-	}
-
-	function parseDateFromInput(dateStr: string): Date {
-		return new Date(dateStr + 'T00:00:00');
-	}
-
-	// Compute engine config
 	function getEngineConfig(): EngineConfig {
 		return {
 			data_source: dataSource,
-			platform: Array.from(filterPlatform),
+			platform: ['polymarket'],
 			timestamp_start: useTimePeriod && timestampStartStr ? timestampStartStr : null,
 			timestamp_end: useTimePeriod && timestampEndStr ? timestampEndStr : null,
-			market_title: filterTitleSearch.trim() ? filterTitleSearch.trim().split(',').map(s => s.trim()).filter(Boolean) : null,
-			volume_inf: filterVolumeInf,
-			volume_sup: filterVolumeSup,
-			market_category: filterCategories.size > 0 ? Array.from(filterCategories) : null,
-			position: filterPosition.size > 0 ? Array.from(filterPosition) : null,
-			possible_outcomes: filterOutcomesSearch.trim() ? filterOutcomesSearch.trim().split(',').map(s => s.trim()).filter(Boolean) : null,
-			price_inf: filterPriceInf,
-			price_sup: filterPriceSup,
-			amount_inf: filterAmountInf,
-			amount_sup: filterAmountSup,
+			market_category: selectedCategories.length > 0 ? selectedCategories : null,
+			position: positionFilter === 'both' ? null : [positionFilter === 'yes' ? 'Yes' : 'No'],
 		};
 	}
 
@@ -144,11 +145,12 @@
 				useTimePeriod,
 				timestampStartStr,
 				timestampEndStr,
-				filterTitleSearch,
-				filterVolumeInf,
-				filterVolumeSup,
-				filterCategories,
-				filterOutcomesSearch,
+				filterTitleSearch: '',
+				filterVolumeInf: null,
+				filterVolumeSup: null,
+				filterCategories: new Set(selectedCategories),
+				filterOutcomesSearch: '',
+				selectedMarkets: selectedMarketsList,
 			});
 		}
 	}
@@ -162,16 +164,63 @@
 		const step = wizardStep;
 		term.writeln('');
 		if (step === 'data_source') {
-			term.writeln(`${O}━━━ STEP 1/5: DATA SOURCE ━━━${R}`);
+			term.writeln(`${O}━━━ STEP 1/6: DATA SOURCE ━━━${R}`);
 			term.writeln('');
 			term.writeln(`Select your data source:`);
 			term.writeln('');
-			term.writeln(`  ${O}1${R}  Synthesis API  ${DIM}— Live historical trades & OHLC candles via Synthesis Trade API${R}`);
+			term.writeln(`  ${O}1${R}  Synthesis API  ${DIM}— Live historical trades via Synthesis Trade API${R}`);
 			term.writeln(`  ${O}2${R}  Parquet files   ${DIM}— Local .parquet dataset (404M+ pre-downloaded trades)${R}`);
 			term.writeln('');
 			term.writeln(`${DIM}Type ${O}1${R}${DIM} or ${O}2${R}${DIM} (default: 1)${R}`);
+		} else if (step === 'category_select') {
+			term.writeln(`${O}━━━ STEP 2/6: SELECT CATEGORIES ━━━${R}`);
+			term.writeln('');
+			term.writeln('Available categories:');
+			term.writeln('');
+			for (let i = 0; i < availableCategories.length; i++) {
+				const idx = String(i + 1).padStart(2, ' ');
+				term.writeln(`  ${O}${idx}${R}  ${availableCategories[i]}`);
+			}
+			term.writeln('');
+			term.writeln(`Select categories (comma-separated), e.g. ${O}1,3,5${R} or ${O}crypto,sports${R}`);
+			term.writeln(`${DIM}Type ${O}all${R}${DIM} to select all categories${R}`);
+		} else if (step === 'market_loading') {
+			term.writeln(`${O}━━━ STEP 3/6: SELECT MARKETS ━━━${R}`);
+			fetchMarketsByCategory(term);
+			return;
+		} else if (step === 'market_select') {
+			term.writeln('');
+			term.writeln(`Ended markets for ${O}${selectedCategories.join(', ')}${R} (by volume):`);
+			term.writeln('');
+			const displayCount = Math.min(availableMarkets.length, 30);
+			for (let i = 0; i < displayCount; i++) {
+				const m = availableMarkets[i];
+				const idx = String(i + 1).padStart(2, ' ');
+				const q = (m.question || m.title || '').slice(0, 45);
+				const qPad = q.padEnd(47);
+				const vol = formatVolume(m.volume || 0);
+				const endDate = m.endDate ? new Date(m.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '?';
+				const outcome = m.resolvedOutcome ? `${G}${m.resolvedOutcome}${R}` : `${DIM}unclear${R}`;
+				term.writeln(`  ${O}${idx}${R}  ${qPad} ${DIM}Vol: ${vol}  End: ${endDate}${R}  → ${outcome}`);
+			}
+			if (availableMarkets.length > 30) {
+				term.writeln(`  ${DIM}... and ${availableMarkets.length - 30} more${R}`);
+			}
+			term.writeln('');
+			term.writeln(`Select markets (comma-separated), e.g. ${O}1,3,5${R}`);
+			term.writeln(`${DIM}Type ${O}all${R}${DIM} to select all, or ${O}top <n>${R}${DIM} for top N by volume${R}`);
+		} else if (step === 'position_filter') {
+			term.writeln(`${O}━━━ STEP 4/6: POSITION FILTER ━━━${R}`);
+			term.writeln('');
+			term.writeln(`Filter trades by position side:`);
+			term.writeln('');
+			term.writeln(`  ${O}1${R}  Both    ${DIM}— Include Yes and No trades${R}`);
+			term.writeln(`  ${O}2${R}  Yes     ${DIM}— Only Yes trades${R}`);
+			term.writeln(`  ${O}3${R}  No      ${DIM}— Only No trades${R}`);
+			term.writeln('');
+			term.writeln(`${DIM}Type ${O}1${R}${DIM}, ${O}2${R}${DIM}, or ${O}3${R}${DIM} (default: 1 — both)${R}`);
 		} else if (step === 'time_period') {
-			term.writeln(`${O}━━━ STEP 2/5: TIME PERIOD ━━━${R}`);
+			term.writeln(`${O}━━━ STEP 5/6: TIME PERIOD ━━━${R}`);
 			term.writeln('');
 			term.writeln(`Enable time period filter? (${O}yes${R}/${O}no${R})`);
 			term.writeln(`${DIM}Press ENTER for no (use all data)${R}`);
@@ -181,42 +230,26 @@
 		} else if (step === 'end_date') {
 			term.writeln(`End date (${O}YYYY-MM-DD${R}):`);
 			term.writeln(`${DIM}e.g. 2025-01-01${R}`);
-		} else if (step === 'title') {
-			term.writeln(`${O}━━━ STEP 3/5: MARKET TITLE ━━━${R}`);
-			term.writeln('');
-			term.writeln(`Filter by market title keywords (comma-separated)`);
-			term.writeln(`${DIM}e.g. "Bitcoin, Election, Trump" — ENTER to skip${R}`);
-		} else if (step === 'volume_min') {
-			term.writeln(`${O}━━━ STEP 4/5: VOLUME RANGE ━━━${R}`);
-			term.writeln('');
-			term.writeln(`Min volume:`);
-			term.writeln(`${DIM}ENTER to skip (no minimum)${R}`);
-		} else if (step === 'volume_max') {
-			term.writeln(`Max volume:`);
-			term.writeln(`${DIM}ENTER to skip (no maximum)${R}`);
-		} else if (step === 'category') {
-			term.writeln(`${O}━━━ STEP 5/5: CATEGORIES ━━━${R}`);
-			term.writeln('');
-			term.writeln(`Available: ${availableCategories.map(c => `${O}${c}${R}`).join(', ')}`);
-			term.writeln('');
-			term.writeln(`Select categories (comma-separated)`);
-			term.writeln(`${DIM}e.g. "crypto, sport" — ENTER to skip (all categories)${R}`);
-		} else if (step === 'outcomes') {
-			term.writeln(`Filter by possible outcomes (comma-separated)`);
-			term.writeln(`${DIM}e.g. "Yes, No, Trump" — ENTER to skip${R}`);
 		} else if (step === 'review') {
-			term.writeln(`${O}━━━ ENGINE CONFIG ━━━${R}`);
+			term.writeln(`${O}━━━ STEP 6/6: REVIEW CONFIG ━━━${R}`);
 			term.writeln('');
 			term.writeln(`${G}Data:${R}        ${dataSource === 'synthesis' ? 'Synthesis API (live)' : 'Parquet files (local)'}`);
 			term.writeln(`${G}Platform:${R}    Polymarket`);
+			term.writeln(`${G}Categories:${R}  ${selectedCategories.join(', ')}`);
+			if (selectedMarketsList.length > 0) {
+				term.writeln(`${G}Markets:${R}     ${selectedMarketsList.length} selected (ended)`);
+				for (const m of selectedMarketsList.slice(0, 5)) {
+					term.writeln(`  ${DIM}• ${(m.question || m.title || '').slice(0, 60)}${R}`);
+				}
+				if (selectedMarketsList.length > 5) {
+					term.writeln(`  ${DIM}... and ${selectedMarketsList.length - 5} more${R}`);
+				}
+			}
+			term.writeln(`${G}Position:${R}    ${positionFilter === 'both' ? 'Yes & No' : positionFilter === 'yes' ? 'Yes only' : 'No only'}`);
 			term.writeln(`${G}Time:${R}        ${useTimePeriod ? `${timestampStartStr} → ${timestampEndStr}` : 'ALL TIME'}`);
-			term.writeln(`${G}Title:${R}       ${filterTitleSearch || '—'}`);
-			term.writeln(`${G}Volume:${R}      ${filterVolumeInf ?? '—'} → ${filterVolumeSup ?? '—'}`);
-			term.writeln(`${G}Categories:${R}  ${filterCategories.size > 0 ? Array.from(filterCategories).join(', ') : '—'}`);
-			term.writeln(`${G}Outcomes:${R}    ${filterOutcomesSearch || '—'}`);
 			term.writeln('');
 			term.writeln(`Type ${O}confirm${R} to finalize, ${O}reset${R} to start over, or ${O}edit <step>${R} to change a setting.`);
-			term.writeln(`${DIM}Steps: data, time, title, volume, category${R}`);
+			term.writeln(`${DIM}Steps: data, categories, markets, position, time${R}`);
 		}
 		prompt(term);
 	}
@@ -225,18 +258,16 @@
 		const val = input.trim();
 		const valLower = val.toLowerCase();
 
-		// Global commands available from any step
+		// Global commands
 		if (valLower === 'reset') {
 			dataSource = 'synthesis';
-			filterPlatform = new Set(['polymarket']);
 			useTimePeriod = false;
 			timestampStartStr = '';
 			timestampEndStr = '';
-			filterTitleSearch = '';
-			filterVolumeInf = null;
-			filterVolumeSup = null;
-			filterCategories = new Set();
-			filterOutcomesSearch = '';
+			selectedCategories = [];
+			positionFilter = 'both';
+			availableMarkets = [];
+			selectedMarketsList = [];
 			term.clear();
 			term.writeln(`${O}Terminal reset.${R}`);
 			wizardStep = 'intro';
@@ -273,9 +304,94 @@
 				if (valLower === '2' || valLower === 'parquet') {
 					dataSource = 'parquet';
 					term.writeln(`${G}✓ Data source: Parquet files (local dataset)${R}`);
+					wizardStep = 'time_period';
 				} else {
 					dataSource = 'synthesis';
 					term.writeln(`${G}✓ Data source: Synthesis API (live historical data)${R}`);
+					wizardStep = 'category_select';
+				}
+				showWizardStep(term);
+				break;
+
+			case 'category_select':
+				if (valLower === 'all') {
+					selectedCategories = [...availableCategories];
+					term.writeln(`${G}✓ Selected all categories${R}`);
+					wizardStep = 'market_loading';
+					showWizardStep(term);
+				} else {
+					// Support both numbers (1,3,5) and names (crypto,sports)
+					const parts = val.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+					const resolved: string[] = [];
+					for (const p of parts) {
+						const num = parseInt(p);
+						if (!isNaN(num) && num >= 1 && num <= availableCategories.length) {
+							resolved.push(availableCategories[num - 1]);
+						} else if (availableCategories.includes(p)) {
+							resolved.push(p);
+						}
+					}
+					if (resolved.length > 0) {
+						selectedCategories = [...new Set(resolved)];
+						term.writeln(`${G}✓ Categories: ${selectedCategories.join(', ')}${R}`);
+						wizardStep = 'market_loading';
+						showWizardStep(term);
+					} else {
+						term.writeln(`${O}Invalid selection. Use numbers (1,3,5) or names (crypto,sports)${R}`);
+						prompt(term);
+					}
+				}
+				break;
+
+			case 'market_loading':
+				// Auto-handled by fetchMarketsByCategory
+				prompt(term);
+				break;
+
+			case 'market_select':
+				if (valLower === 'all') {
+					selectedMarketsList = [...availableMarkets];
+					term.writeln(`${G}✓ Selected all ${availableMarkets.length} markets${R}`);
+					wizardStep = 'position_filter';
+					showWizardStep(term);
+				} else if (valLower.startsWith('top ')) {
+					const n = parseInt(valLower.replace('top ', ''));
+					if (n > 0 && n <= availableMarkets.length) {
+						selectedMarketsList = availableMarkets.slice(0, n);
+						term.writeln(`${G}✓ Selected top ${n} markets by volume${R}`);
+						wizardStep = 'position_filter';
+						showWizardStep(term);
+					} else {
+						term.writeln(`${O}Invalid number. Choose 1-${availableMarkets.length}${R}`);
+						prompt(term);
+					}
+				} else {
+					const nums = val.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n >= 1 && n <= availableMarkets.length);
+					if (nums.length > 0) {
+						selectedMarketsList = nums.map(n => availableMarkets[n - 1]);
+						term.writeln(`${G}✓ Selected ${nums.length} market(s):${R}`);
+						for (const m of selectedMarketsList) {
+							term.writeln(`  ${DIM}• ${(m.question || m.title || '').slice(0, 60)}${R}`);
+						}
+						wizardStep = 'position_filter';
+						showWizardStep(term);
+					} else {
+						term.writeln(`${O}Invalid selection. Use numbers like: 1,3,5${R}`);
+						prompt(term);
+					}
+				}
+				break;
+
+			case 'position_filter':
+				if (valLower === '2' || valLower === 'yes') {
+					positionFilter = 'yes';
+					term.writeln(`${G}✓ Position: Yes only${R}`);
+				} else if (valLower === '3' || valLower === 'no') {
+					positionFilter = 'no';
+					term.writeln(`${G}✓ Position: No only${R}`);
+				} else {
+					positionFilter = 'both';
+					term.writeln(`${G}✓ Position: Both (Yes & No)${R}`);
 				}
 				wizardStep = 'time_period';
 				showWizardStep(term);
@@ -289,7 +405,7 @@
 				} else {
 					useTimePeriod = false;
 					term.writeln(`${G}✓ Time period: ALL TIME${R}`);
-					wizardStep = 'title';
+					wizardStep = 'review';
 					showWizardStep(term);
 				}
 				break;
@@ -310,53 +426,12 @@
 				if (/^\d{4}-\d{2}-\d{2}$/.test(val)) {
 					timestampEndStr = val;
 					term.writeln(`${G}✓ Period: ${timestampStartStr} → ${val}${R}`);
-					wizardStep = 'title';
+					wizardStep = 'review';
 					showWizardStep(term);
 				} else {
 					term.writeln(`${O}Invalid format. Use YYYY-MM-DD${R}`);
 					prompt(term);
 				}
-				break;
-
-			case 'title':
-				filterTitleSearch = val;
-				term.writeln(`${G}✓ Title: ${val || 'no filter'}${R}`);
-				wizardStep = 'volume_min';
-				showWizardStep(term);
-				break;
-
-			case 'volume_min':
-				filterVolumeInf = val ? parseFloat(val) : null;
-				term.writeln(`${G}✓ Volume min: ${filterVolumeInf ?? 'none'}${R}`);
-				wizardStep = 'volume_max';
-				showWizardStep(term);
-				break;
-
-			case 'volume_max':
-				filterVolumeSup = val ? parseFloat(val) : null;
-				term.writeln(`${G}✓ Volume max: ${filterVolumeSup ?? 'none'}${R}`);
-				wizardStep = 'category';
-				showWizardStep(term);
-				break;
-
-			case 'category':
-				if (val) {
-					const cats = val.split(',').map(s => s.trim().toLowerCase()).filter(c => availableCategories.includes(c));
-					filterCategories = new Set(cats);
-					term.writeln(`${G}✓ Categories: ${cats.length > 0 ? cats.join(', ') : 'none matched'}${R}`);
-				} else {
-					filterCategories = new Set();
-					term.writeln(`${G}✓ Categories: all${R}`);
-				}
-				wizardStep = 'outcomes';
-				showWizardStep(term);
-				break;
-
-			case 'outcomes':
-				filterOutcomesSearch = val;
-				term.writeln(`${G}✓ Outcomes: ${val || 'no filter'}${R}`);
-				wizardStep = 'review';
-				showWizardStep(term);
 				break;
 
 			case 'review':
@@ -366,15 +441,12 @@
 					wizardStep = 'done';
 					setTimeout(() => { fireConfigComplete(); }, 500);
 				} else if (valLower === 'reset') {
-					filterPlatform = new Set(['polymarket']);
+					selectedCategories = [];
+					availableMarkets = [];
+					selectedMarketsList = [];
 					useTimePeriod = false;
 					timestampStartStr = '';
 					timestampEndStr = '';
-					filterTitleSearch = '';
-					filterVolumeInf = null;
-					filterVolumeSup = null;
-					filterCategories = new Set();
-					filterOutcomesSearch = '';
 					term.writeln(`${O}Config reset.${R}`);
 					wizardStep = 'data_source';
 					showWizardStep(term);
@@ -382,14 +454,16 @@
 					const target = valLower.replace('edit ', '').trim();
 					const stepMap: Record<string, WizardStep> = {
 						data: 'data_source', source: 'data_source',
-						time: 'time_period', title: 'title',
-						volume: 'volume_min', category: 'category', outcomes: 'outcomes',
+						categories: 'category_select', category: 'category_select',
+						markets: 'market_loading', market: 'market_loading',
+						position: 'position_filter',
+						time: 'time_period',
 					};
 					if (stepMap[target]) {
 						wizardStep = stepMap[target];
 						showWizardStep(term);
 					} else {
-						term.writeln(`${O}Unknown step. Options: data, time, title, volume, category, outcomes${R}`);
+						term.writeln(`${O}Unknown step. Options: data, categories, markets, time${R}`);
 						prompt(term);
 					}
 				} else {
@@ -457,24 +531,19 @@
 		fitAddon.fit();
 		xtermInstance = term;
 
-		// Responsive resize
 		const resizeObserver = new ResizeObserver(() => fitAddon.fit());
 		resizeObserver.observe(xtermContainer);
 
-		// Wait for layout to stabilize before printing intro
 		await new Promise(r => setTimeout(r, 150));
 		fitAddon.fit();
 
-		// Setup input handler first
 		setupInput(term);
 
-		// If returning from edit, skip intro and show review
 		if (wizardStep !== 'intro') {
 			showWizardStep(term);
 			return;
 		}
 
-		// Typewriter intro
 		let lineIdx = 0;
 		const typeInterval = setInterval(() => {
 			if (lineIdx < introLines.length) {
@@ -487,23 +556,14 @@
 		}, 60);
 	}
 
-	// Exported method so parent can reset the wizard
 	export function resetWizard() {
 		dataSource = 'synthesis';
-		filterPlatform = new Set(['polymarket']);
 		useTimePeriod = false;
 		timestampStartStr = '';
 		timestampEndStr = '';
-		filterTitleSearch = '';
-		filterVolumeInf = null;
-		filterVolumeSup = null;
-		filterCategories = new Set();
-		filterOutcomesSearch = '';
-		filterPriceInf = null;
-		filterPriceSup = null;
-		filterAmountInf = null;
-		filterAmountSup = null;
-		filterPosition = new Set();
+		selectedCategories = [];
+		availableMarkets = [];
+		selectedMarketsList = [];
 		wizardStep = 'intro';
 		currentInputLine = '';
 
@@ -513,7 +573,6 @@
 			xtermInitialized = false;
 		}
 
-		// Re-initialize after a tick
 		if (browser && xtermContainer) {
 			setTimeout(() => initXterm(), 100);
 		}
@@ -549,7 +608,6 @@
 		overflow: hidden;
 	}
 
-	/* ═══════════════ INTRO SCREEN ═══════════════ */
 	.engine-intro {
 		display: flex;
 		flex-direction: column;
