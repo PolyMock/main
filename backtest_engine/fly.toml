@@ -7,7 +7,11 @@ app = 'backtest-engine-api'
 primary_region = 'sjc'
 
 [build]
-  dockerfile = 'Dockerfile'
+  dockerfile = './Dockerfile'
+  build_target = 'api'
+  
+[build.docker]
+  build_context = '.'
 
 [env]
   DATA_PATH = '/data/prediction-market-data/data'
