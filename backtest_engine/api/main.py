@@ -322,6 +322,9 @@ async def run_backtest(request: Request, backtest_request: BacktestRequest):
             detail=f"Backtest execution failed: {str(e)[:200]}"
         )
 
+
+import time
+import sys
 @app.post("/trades", response_model=TradesResponse, tags=["Trades"])
 @limiter.limit("20/minute")
 async def showcase_trades(request: Request, trades_request: TradesFilterRequest):
@@ -336,6 +339,8 @@ async def showcase_trades(request: Request, trades_request: TradesFilterRequest)
     Returns paginated list of trade snapshots matching filters.
     """
     try:
+        start = time.time()
+        print(f"[API] Request received: page={trades_request.page}, limit={trades_request.limit}", file=sys.stderr)
         # Parse datetime strings
         timestamp_start = None
         timestamp_end = None
@@ -375,14 +380,18 @@ async def showcase_trades(request: Request, trades_request: TradesFilterRequest)
         )
         
         platform_str = trades_request.platform[0] if trades_request.platform else "polymarket"
-        
+        print(f"[API] Engine initialized in {time.time() - start:.2f}s", file=sys.stderr)
+
+
         # Fetch paginated trades
+        fetch_start = time.time()
         result = await asyncio.to_thread(
             engine.showcase_trades,
             page=trades_request.page,
             limit=trades_request.limit,
             platform=platform_str
         )
+        print(f"[API] showcase_trades took {time.time() - fetch_start:.2f}s", file=sys.stderr)
         
         return {
             'trades': result['trades'],

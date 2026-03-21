@@ -117,7 +117,11 @@ import inspect
 import os
 
 
-DATA_PATH = os.getenv("DATA_PATH", "/data/prediction-market-data/data")
+# Try external disk first, then environment variable, then Docker fallback
+if os.path.exists("/Volumes/Extreme SSD/prediction-market-data/data"):
+    DATA_PATH = "/Volumes/Extreme SSD/prediction-market-data/data"
+else:
+    DATA_PATH = os.getenv("DATA_PATH", "/data/prediction-market-data/data")
 
 class BacktestEngine:
 
@@ -725,75 +729,77 @@ class BacktestEngine:
             "user_perso_parameters": user_perso_parameters
         }))
 
-    def showcase_trades(self, page : int = 1, limit: int = 100, platform: str = "polymarket"):
-
-        # Get trade files
+    def showcase_trades(self, page: int = 1, limit: int = 100, platform: str = "polymarket"):
+        """Fetch paginated trades using DuckDB wildcard query (memory efficient)"""
+        
+        # Validate platform and get file list (excluding macOS metadata files)
         if platform == "polymarket":
-            trade_files = [f for f in glob(f"{DATA_PATH}/polymarket/standardized_trades/*.parquet") 
-                        if not f.split('/')[-1].startswith("._")]
+            pattern = f"{DATA_PATH}/polymarket/standardized_trades/*.parquet"
         elif platform == "kalshi":
-            trade_files = [f for f in glob(f"{DATA_PATH}/kalshi/standardized_trades/*.parquet") 
-                        if not f.split('/')[-1].startswith("._")]
+            pattern = f"{DATA_PATH}/kalshi/standardized_trades/*.parquet"
         else:
             raise ValueError(f"Unknown platform: {platform}")
         
-        trades_list = []
+        # Get list of files, filtering out macOS metadata files (._*)
+        trade_files = [f for f in glob(pattern) if not f.split('/')[-1].startswith("._")]
+        
         con = duckdb.connect()
         
-        for trade_file in trade_files:
-            # Read this file with filters
-            query = f"""
-                SELECT {self.selected_columns}
-                FROM read_parquet('{trade_file}')
-                WHERE 1=1
-            """
-            
-            # Apply filters
-            if self.timestamp_start:
-                query += f" AND timestamp >= '{self.timestamp_start}'"
-            if self.timestamp_end:
-                query += f" AND timestamp <= '{self.timestamp_end}'"
-            if self.market_id is not None:
-                query += f" AND market_id IN {tuple(self.market_id)}"
-            if self.market_title is not None:
-                query += f" AND title IN {tuple(self.market_title)}"
-            if self.market_category is not None:
-                query += f" AND category IN {tuple(self.market_category)}"
-            if self.volume_inf is not None:
-                query += f" AND volume >= {self.volume_inf}"
-            if self.volume_sup is not None:
-                query += f" AND volume <= {self.volume_sup}"
-            if self.price_inf is not None:
-                query += f" AND price >= {self.price_inf}"
-            if self.price_sup is not None:
-                query += f" AND price <= {self.price_sup}"
-            if self.amount_inf is not None:
-                query += f" AND amount >= {self.amount_inf}"
-            if self.amount_sup is not None:
-                query += f" AND amount <= {self.amount_sup}"
-            if self.position is not None:
-                conditions = " OR ".join(f"position = '{pos}'" for pos in self.position)
-                query += f" AND ({conditions})"
-            if self.possible_outcomes is not None:
-                conditions = " OR ".join(f"list_contains(possible_outcomes, '{outcome}')" for outcome in self.possible_outcomes)
-                query += f" AND ({conditions})"
-            if self.wallet_maker is not None:
-                conditions = " OR ".join(f"wallet_maker = '{wallet}'" for wallet in self.wallet_maker)
-                query += f" AND ({conditions})"
-            if self.wallet_taker is not None:
-                conditions = " OR ".join(f"wallet_taker = '{wallet}'" for wallet in self.wallet_taker)
-                query += f" AND ({conditions})"
-
-            
-            df = con.execute(query).df()
-            trades_list.extend(df.to_dict('records'))
-            
-            # Stop when we have enough
-            if len(trades_list) >= limit*page:
-                break
+        # Format file list as SQL string array for DuckDB
+        file_list_str = str(trade_files)
+        
+        # Build query using file list - DuckDB fetches only needed rows
+        query = f"""
+            SELECT {self.selected_columns}
+            FROM read_parquet({file_list_str}, union_by_name=True)
+            WHERE 1=1
+        """
+        
+        # Apply all filters
+        if self.timestamp_start:
+            query += f" AND timestamp >= '{self.timestamp_start}'"
+        if self.timestamp_end:
+            query += f" AND timestamp <= '{self.timestamp_end}'"
+        if self.market_id is not None:
+            query += f" AND market_id IN {tuple(self.market_id)}"
+        if self.market_title is not None:
+            query += f" AND title IN {tuple(self.market_title)}"
+        if self.market_category is not None:
+            query += f" AND category IN {tuple(self.market_category)}"
+        if self.volume_inf is not None:
+            query += f" AND volume >= {self.volume_inf}"
+        if self.volume_sup is not None:
+            query += f" AND volume <= {self.volume_sup}"
+        if self.price_inf is not None:
+            query += f" AND price >= {self.price_inf}"
+        if self.price_sup is not None:
+            query += f" AND price <= {self.price_sup}"
+        if self.amount_inf is not None:
+            query += f" AND amount >= {self.amount_inf}"
+        if self.amount_sup is not None:
+            query += f" AND amount <= {self.amount_sup}"
+        
+        if self.position is not None:
+            conditions = " OR ".join(f"position = '{pos}'" for pos in self.position)
+            query += f" AND ({conditions})"
+        if self.possible_outcomes is not None:
+            conditions = " OR ".join(f"list_contains(possible_outcomes, '{outcome}')" for outcome in self.possible_outcomes)
+            query += f" AND ({conditions})"
+        if self.wallet_maker is not None:
+            conditions = " OR ".join(f"wallet_maker = '{wallet}'" for wallet in self.wallet_maker)
+            query += f" AND ({conditions})"
+        if self.wallet_taker is not None:
+            conditions = " OR ".join(f"wallet_taker = '{wallet}'" for wallet in self.wallet_taker)
+            query += f" AND ({conditions})"
+        
+        # Add ORDER BY, LIMIT, OFFSET for pagination (memory efficient)
+        query += f" ORDER BY timestamp LIMIT {limit} OFFSET {(page-1)*limit}"
+        
+        # Execute single query - only materializes needed rows
+        trades_list = con.execute(query).df().to_dict('records')
         
         return {
-            "trades": trades_list[(page-1)*limit:page*limit],
+            "trades": trades_list,
             "platform": platform
         }
     

@@ -87,3 +87,6 @@ __pycache__/
 backtest_engine/data/assets/
 frontend/pnpm-lock.yaml
 landing 2/
+assets/
+landing 2/
+frontend/pnpm-lock.yaml

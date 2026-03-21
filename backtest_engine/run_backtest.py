@@ -45,7 +45,10 @@ engine = BacktestEngine(
 # Run backtest
 print("Running backtest...")
 # metrics = engine.run(strategy)
-print(engine.showcase_trades())
+import time
+start = time.time()
+result = engine.showcase_trades(page=1, limit=5, platform="polymarket")
+print(f"Direct call took: {time.time() - start:.2f}s")
 
 # metrics = engine.run_with_user_code("""def mean_reversion(trade, trade_log, portfolio, user_perso_parameters):
 #     threshold_low = 0.01
