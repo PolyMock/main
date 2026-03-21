@@ -798,8 +798,13 @@ class BacktestEngine:
         # Add ORDER BY, LIMIT, OFFSET for pagination (memory efficient)
         query += f" ORDER BY timestamp LIMIT {limit} OFFSET {(page-1)*limit}"
         
-        # Execute single query - only materializes needed rows
-        trades_list = con.execute(query).df().to_dict('records')
+        # Execute query and fetch only needed rows (not all rows into dataframe)
+        cursor = con.execute(query)
+        rows = cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        
+        # Convert rows to list of dicts with native Python types (not numpy)
+        trades_list = [dict(zip(columns, row)) for row in rows]
         
         return {
             "trades": trades_list,
