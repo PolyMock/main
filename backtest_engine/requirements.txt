@@ -1,0 +1,10 @@
+duckdb
+pandas
+pyarrow
+yfinance
+fastapi
+uvicorn[standard]
+slowapi
+RestrictedPython
+pydantic
+python-multipart

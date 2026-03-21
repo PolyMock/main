@@ -84,4 +84,6 @@ __pycache__/
 *.pyo
 
 # Backtest engine data (fetched from API)
-backtest_engine/data/
+backtest_engine/data/assets/
+frontend/pnpm-lock.yaml
+landing 2/

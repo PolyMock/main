@@ -114,10 +114,9 @@ import duckdb
 import pandas as pd
 import json
 import inspect
-import os
 
 
-DATA_PATH = os.getenv("DATA_PATH", "/data/prediction-market-data/data")
+DATA_PATH = "/Volumes/Extreme SSD/prediction-market-data/data"
 
 class BacktestEngine:
 
@@ -161,6 +160,8 @@ class BacktestEngine:
         self.tp_sp_log = {}
         self.settle_log = []
         self.portfolio = {"cash": initial_cash, "positions": {}}
+        self.valid_market_ids = set()  # Initialize as set for file-by-file accumulation
+        self.market_possible_outcomes = {}  # Initialize for file-by-file accumulation
 
 # =======================================================================================================================================
 
@@ -332,14 +333,8 @@ class BacktestEngine:
             dfs.append(df)
 
         print(f"Finished loading all trade files. Total trades loaded: {sum(len(df) for df in dfs)}")
-        
-        # Efficiently merge pre-sorted dataframes using mergesort (O(n log k) for nearly-sorted data)
-        self.polymarket_trades_df = pd.concat(dfs, ignore_index=True).sort_values(
-            "timestamp", kind="mergesort"
-        ).reset_index(drop=True)
-        
-        # Final sanity check
-        print(f"Final combined trades sorted: {self.polymarket_trades_df['timestamp'].is_monotonic_increasing}")
+        self.polymarket_trades_df = pd.concat(dfs, ignore_index=True)
+        print(self.polymarket_trades_df["timestamp"].is_monotonic_increasing) # sanity check
 
 # =======================================================================================================================================
 
@@ -617,6 +612,177 @@ class BacktestEngine:
 
 # =======================================================================================================================================
 
+    def _process_trades_batch(self, trades_df: pd.DataFrame, strategy_func: Callable, user_perso_parameters: dict) -> dict:
+        """Process a batch of trades while preserving portfolio state. Returns updated user_perso_parameters."""
+        
+        for idx, trade in trades_df.iterrows():
+            self.cpt_trade += 1
+            if self.cpt_trade % 1000 == 0:
+                print(f"Processing trade {self.cpt_trade} | Portfolio value: ${self._mark_to_market_portfolio_value():.2f}")
+
+            trade_dict = trade.to_dict()
+
+            # Update rolling price dict with current trade
+            self._last_known_price[(trade_dict["market_id"], trade_dict["position"])] = trade_dict["price"]
+
+            # Check all open positions for resolution
+            self._settle_resolved_positions(pd.Timestamp(trade_dict["timestamp"]).tz_localize(None))
+            self._settle_take_profit_stop_losses(pd.Timestamp(trade_dict["timestamp"]).tz_localize(None), 
+                                                 trade_dict['market_id'], trade_dict['position'], trade_dict['price'])
+            self._record_portfolio_snapshot(trade_dict.get("timestamp"))
+                      
+            # Call user strategy
+            action = strategy_func(trade_dict, self.trade_log, self.portfolio, user_perso_parameters)
+            user_perso_parameters = action.get("user_perso_parameters", user_perso_parameters)
+            
+            if not self._is_valid_action(action):
+                continue
+
+            direction = action.get("direction")
+            if direction == "hold":
+                continue
+
+            price = self._get_market_last_price(action["market_id"], action["position"])
+            key = (action["market_id"], action["position"])
+
+            if direction == "buy":
+                cost = round(action["amount"] * price, 6)
+                if cost > self.portfolio["cash"]:
+                    continue
+                self.portfolio["cash"] -= cost
+                self.portfolio["positions"][key] = self.portfolio["positions"].get(key, 0) + action["amount"]
+                print(f"[BUY] market={action['market_id']} pos={action['position']} amount={action['amount']} price={price} cost={cost}")
+                enriched_action = {
+                    "market_id": action["market_id"],
+                    "position": action["position"],
+                    "direction": "buy",
+                    "amount": action["amount"],
+                    "cost": cost,
+                    "time": trade_dict.get("timestamp"),
+                    "take_profit": action.get("take_profit", None),
+                    "stop_loss": action.get("stop_loss", None)
+                }
+                if enriched_action["take_profit"] is not None or enriched_action["stop_loss"] is not None:
+                    self.tp_sp_log[enriched_action["market_id"], enriched_action["position"], enriched_action["time"]] = \
+                        (enriched_action["amount"], enriched_action["take_profit"], enriched_action["stop_loss"])
+
+            elif direction == "sell":
+                held = self.portfolio["positions"].get(key, 0)
+                if held == 0:
+                    continue
+                amount_to_sell = min(action["amount"], held)
+                proceeds = round(amount_to_sell * price, 6)
+                self.portfolio["cash"] += proceeds
+                self.portfolio["positions"][key] = held - amount_to_sell
+                if self.portfolio["positions"][key] == 0:
+                    del self.portfolio["positions"][key]
+                print(f"[SELL] market={action['market_id']} pos={action['position']} amount={amount_to_sell} price={price}")
+                enriched_action = {
+                    "market_id": action["market_id"],
+                    "position": action["position"],
+                    "direction": "sell",
+                    "amount": amount_to_sell,
+                    "cost": -proceeds,
+                    "time": trade_dict.get("timestamp")
+                }
+            
+            self.trade_log.append(enriched_action)
+        
+        return user_perso_parameters
+
+# =======================================================================================================================================
+
+    def run_streaming(self, strategy_func: Callable):
+        """Run backtest by streaming through parquet files, preserving portfolio state across files."""
+        
+        self.cpt_trade = 0
+        print("Loading market outcomes...")
+        self.load_all_outcomes()
+        
+        user_perso_parameters = {}
+        self._last_known_price = {}
+        self.settle_log = []
+        self.portfolio_value_history = [{"timestamp": None, "value": float(self.initial_cash)}]
+        
+        # Get trade files in order
+        trade_files = sorted([f for f in glob(f"{DATA_PATH}/polymarket/standardized_trades/*.parquet") 
+                             if not f.split('/')[-1].startswith("._")])
+        
+        con = duckdb.connect()
+        total_files = len(trade_files)
+        
+        print(f"Starting streaming backtest on {total_files} files...")
+        
+        for file_idx, trade_file in enumerate(trade_files, 1):
+            print(f"\n[File {file_idx}/{total_files}] Loading {trade_file.split('/')[-1]}...")
+            
+            # Load trades from single file
+            query = f"""
+                SELECT {self.selected_columns}
+                FROM read_parquet('{trade_file}')
+                WHERE 1=1
+            """
+            
+            # Apply all filters
+            if self.timestamp_start:
+                query += f" AND timestamp >= '{self.timestamp_start}'"
+            if self.timestamp_end:
+                query += f" AND timestamp <= '{self.timestamp_end}'"
+
+            if self.market_id is not None:
+                query += f" AND market_id IN {tuple(self.market_id)}"
+            if self.market_title is not None:
+                query += f" AND title IN {tuple(self.market_title)}"
+            if self.volume_inf is not None:
+                query += f" AND volume >= {self.volume_inf}"
+            if self.volume_sup is not None:
+                query += f" AND volume <= {self.volume_sup}"
+            if self.market_category is not None:
+                query += f" AND category IN {tuple(self.market_category)}"
+
+            if self.price_inf is not None:
+                query += f" AND price >= {self.price_inf}"
+            if self.price_sup is not None:
+                query += f" AND price <= {self.price_sup}"
+            if self.amount_inf is not None:
+                query += f" AND amount >= {self.amount_inf}"
+            if self.amount_sup is not None:
+                query += f" AND amount <= {self.amount_sup}"
+
+            if self.position is not None:
+                conditions = " OR ".join(f"position = '{pos}'" for pos in self.position)
+                query += f" AND ({conditions})"
+            if self.possible_outcomes is not None:
+                conditions = " OR ".join(f"list_contains(possible_outcomes, '{outcome}')" for outcome in self.possible_outcomes)
+                query += f" AND ({conditions})"
+            
+            df = con.execute(query).df()
+            if df.empty:
+                print(f"  No trades in this file, skipping...")
+                continue
+            
+            # Convert timestamps
+            df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True).dt.tz_convert(None)
+            df = df.sort_values("timestamp").reset_index(drop=True)
+            
+            print(f"  Loaded {len(df)} trades from file")
+            
+            # Update valid markets from this batch
+            self.valid_market_ids.update(set(df["market_id"].unique()))
+            self.market_possible_outcomes.update(df.groupby("market_id")["possible_outcomes"].first().to_dict())
+            
+            # Process trades from this file (preserves portfolio state)
+            user_perso_parameters = self._process_trades_batch(df, strategy_func, user_perso_parameters)
+        
+        # Final settlement
+        if self.reimburse_open_positions:
+            self._reimburse_open_positions()
+            self._record_portfolio_snapshot(None)
+        
+        print(f"\nBacktest complete. Processed {self.cpt_trade} trades.")
+        return self._calculate_metrics()
+
+# =======================================================================================================================================
 
     def run(self, strategy_func: Callable):
 
