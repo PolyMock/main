@@ -730,7 +730,7 @@ class BacktestEngine:
         }))
 
     def showcase_trades(self, page: int = 1, limit: int = 100, platform: str = "polymarket"):
-        """Fetch paginated trades - load files incrementally until we have enough"""
+        """Fetch paginated trades - load files with per-file LIMIT"""
         
         # Validate platform and get file list (excluding macOS metadata files)
         if platform == "polymarket":
@@ -748,56 +748,30 @@ class BacktestEngine:
         
         con = duckdb.connect()
         all_trades = []
+        needed_for_page = limit * page  # How many total records we need
         
         # Load files one by one until we have enough trades for pagination
         for trade_file in trade_files:
-            # Build WHERE clause with filters
-            where_clause = "WHERE 1=1"
+            # Build WHERE clause with filters (only if set)
+            where_parts = []
             
             if self.timestamp_start:
-                where_clause += f" AND timestamp >= '{self.timestamp_start}'"
+                where_parts.append(f"timestamp >= '{self.timestamp_start}'")
             if self.timestamp_end:
-                where_clause += f" AND timestamp <= '{self.timestamp_end}'"
-            if self.market_id is not None:
-                market_ids = ",".join(f"'{m}'" for m in self.market_id)
-                where_clause += f" AND market_id IN ({market_ids})"
-            if self.market_title is not None:
-                titles = ",".join(f"'{m}'" for m in self.market_title)
-                where_clause += f" AND title IN ({titles})"
-            if self.market_category is not None:
-                categories = ",".join(f"'{c}'" for c in self.market_category)
-                where_clause += f" AND category IN ({categories})"
-            if self.volume_inf is not None:
-                where_clause += f" AND volume >= {self.volume_inf}"
-            if self.volume_sup is not None:
-                where_clause += f" AND volume <= {self.volume_sup}"
-            if self.price_inf is not None:
-                where_clause += f" AND price >= {self.price_inf}"
-            if self.price_sup is not None:
-                where_clause += f" AND price <= {self.price_sup}"
-            if self.amount_inf is not None:
-                where_clause += f" AND amount >= {self.amount_inf}"
-            if self.amount_sup is not None:
-                where_clause += f" AND amount <= {self.amount_sup}"
+                where_parts.append(f"timestamp <= '{self.timestamp_end}'")
+                
+            where_clause = "WHERE " + " AND ".join(where_parts) if where_parts else "WHERE 1=1"
             
-            if self.position is not None:
-                positions = " OR ".join(f"position = '{pos}'" for pos in self.position)
-                where_clause += f" AND ({positions})"
-            if self.possible_outcomes is not None:
-                outcomes = " OR ".join(f"list_contains(possible_outcomes, '{outcome}')" for outcome in self.possible_outcomes)
-                where_clause += f" AND ({outcomes})"
-            if self.wallet_maker is not None:
-                wallets = " OR ".join(f"wallet_maker = '{w}'" for w in self.wallet_maker)
-                where_clause += f" AND ({wallets})"
-            if self.wallet_taker is not None:
-                wallets = " OR ".join(f"wallet_taker = '{w}'" for w in self.wallet_taker)
-                where_clause += f" AND ({wallets})"
+            # Build query with LIMIT to prevent loading too much from each file
+            # Load extra to account for filtering, then slice properly
+            load_limit = min(needed_for_page * 2, 10000)  # Load 2x what we need, cap at 10k
             
             query = f"""
                 SELECT {self.selected_columns}
                 FROM read_parquet('{trade_file}')
                 {where_clause}
-                ORDER BY timestamp
+                ORDER BY timestamp DESC
+                LIMIT {load_limit}
             """
             
             # Fetch rows as native Python types (not numpy)
@@ -810,7 +784,7 @@ class BacktestEngine:
             all_trades.extend(file_trades)
             
             # Early stop: if we have enough for all requested pages, break
-            if len(all_trades) >= limit * page:
+            if len(all_trades) >= needed_for_page:
                 break
         
         # Return only the requested page (manual slicing)
