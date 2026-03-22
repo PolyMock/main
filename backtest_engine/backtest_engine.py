@@ -217,7 +217,7 @@ class BacktestEngine:
 
 # =======================================================================================================================================
 
-    def load_trades(self):
+    def load_trades(self, on_progress=None):
         
         # dfs = []
         # if "kalshi" in self.platform:
@@ -225,7 +225,7 @@ class BacktestEngine:
         #     self.kalshi_trades_df["timestamp"] = pd.to_datetime(self.kalshi_trades_df["timestamp"], utc=True).dt.tz_convert(None)
         #     dfs.append(self.kalshi_trades_df)
         if "polymarket" in self.platform:
-            self.load_trades_polymarket_streaming()
+            self.load_trades_polymarket_streaming(on_progress=on_progress)
             # self.polymarket_trades_df["timestamp"] = pd.to_datetime(self.polymarket_trades_df["timestamp"], utc=True).dt.tz_convert(None)
             # dfs.append(self.polymarket_trades_df)
         # if not dfs:
@@ -330,14 +330,15 @@ class BacktestEngine:
         query += " ORDER BY timestamp"
         self.polymarket_trades_df = con.execute(query).df()
 
-    def load_trades_polymarket_streaming(self):
+    def load_trades_polymarket_streaming(self, on_progress=None):
         
         trade_files = [f for f in glob(f"{DATA_PATH}/polymarket/standardized_trades/*.parquet") 
                     if not f.split('/')[-1].startswith("._")]
         con = duckdb.connect()
         dfs = []
+        total_files = len(trade_files)
         
-        for trade_file in trade_files:
+        for file_idx, trade_file in enumerate(trade_files, 1):
             print(f"Loading trades from {trade_file}...")
             query = f"""
                 SELECT {self.selected_columns}
@@ -383,6 +384,11 @@ class BacktestEngine:
             df = df.sort_values("timestamp").reset_index(drop=True)
             df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True).dt.tz_convert(None)
             dfs.append(df)
+            
+            # Report progress per file loaded
+            if on_progress:
+                progress_pct = int((file_idx / total_files) * 100)
+                on_progress(stage="loading_trades", progress=progress_pct, files_loaded=file_idx, total_files=total_files)
 
         print(f"Finished loading all trade files. Total trades loaded: {sum(len(df) for df in dfs)}")
         
@@ -671,14 +677,14 @@ class BacktestEngine:
 # =======================================================================================================================================
 
 
-    def run(self, strategy_func: Callable):
+    def run(self, strategy_func: Callable, on_progress=None):
 
         self.cpt_trade = 0
 
         """Run the backtest loop with the given strategy function."""
         
         print("Loading trades...")
-        self.load_trades()
+        self.load_trades(on_progress=on_progress)
         print("Loading market outcomes...")
         self.load_all_outcomes()
         user_perso_parameters= {}
@@ -688,10 +694,16 @@ class BacktestEngine:
         self.portfolio_value_history = [{"timestamp": None, "value": float(self.initial_cash)}]
 
         print("Starting backtest...")
+        total_trades = len(self.trades_df)
         for idx, trade in self.trades_df.iterrows():
 
             self.cpt_trade += 1
-            print(f"Processing trade {self.cpt_trade}/{len(self.trades_df)}", end="\r")
+            print(f"Processing trade {self.cpt_trade}/{total_trades}", end="\r")
+            
+            # Report progress every 1000 trades (minimal overhead)
+            if on_progress and self.cpt_trade % 1000 == 0:
+                progress_pct = int((self.cpt_trade / total_trades) * 100)
+                on_progress(stage="running_backtest", progress=progress_pct, trades_processed=self.cpt_trade, total_trades=total_trades)
 
             trade_dict = trade.to_dict()
 
@@ -768,7 +780,7 @@ class BacktestEngine:
         print(self.settle_log)
         return self._calculate_metrics()
 
-    def run_with_user_code(self, user_code: str):
+    def run_with_user_code(self, user_code: str, on_progress=None):
         """Compile and run a user-provided strategy function."""
         compiled_strategy = RestrictedStrategyExecutor.compile_strategy(user_code)
         return self.run(lambda trade, trade_log, portfolio, user_perso_parameters: RestrictedStrategyExecutor.execute_strategy(compiled_strategy, {
@@ -776,7 +788,7 @@ class BacktestEngine:
             "trade_log": trade_log,
             "portfolio": portfolio,
             "user_perso_parameters": user_perso_parameters
-        }))
+        }), on_progress=on_progress)
 
     def showcase_trades(self, page: int = 1, limit: int = 100, platform: str = "polymarket"):
         """Fetch paginated trades - load files with per-file LIMIT"""
