@@ -30,6 +30,6 @@ primary_region = 'sjc'
 
 [[vm]]
   memory = '4gb'
-  cpu_kind = 'shared'
-  cpus = 1
+  cpu_kind = 'performance'
+  cpus = 2
   memory_mb = 4096
