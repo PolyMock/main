@@ -29,7 +29,7 @@ primary_region = 'sjc'
     handlers = ['tls', 'http']
 
 [[vm]]
-  memory = '4gb'
+  memory = '8gb'
   cpu_kind = 'performance'
   cpus = 2
-  memory_mb = 4096
+  memory_mb = 8192
