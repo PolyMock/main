@@ -96,14 +96,11 @@ class BacktestRequest(BaseModel):
     
     @validator('strategy_code')
     def validate_strategy_code(cls, v):
-        """Pre-validate strategy code (Part 2) syntax"""
+        """Validate strategy code is not empty - syntax validated after assembly"""
         if not v.strip():
             raise ValueError("Strategy code cannot be empty")
-        try:
-            # Validate Part 2 code is syntactically valid Python
-            compile(v, "<string>", "exec")
-        except SyntaxError as e:
-            raise ValueError(f"Invalid Python syntax in strategy code: {str(e)[:200]}")
+        if len(v) > 10000:
+            raise ValueError("Strategy code exceeds maximum length of 10000 characters")
         return v
 
 class BacktestResponse(BaseModel):
