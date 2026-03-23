@@ -2,41 +2,53 @@
 
 ## Overview
 
-FastAPI backend that accepts user strategy code and runs backtests on historical prediction market data (Polymarket and Kalshi). All parameters from `BacktestEngine.__init__()` are exposed.
+FastAPI backend for backtesting trading strategies on historical prediction market data (Polymarket). Accepts user strategy code (Part 2 only) and runs it against historical trade data with customizable filters.
 
-**Base URL**: `http://localhost:8000`
+**Base URL**: `https://backtest-engine-api.fly.dev`
+
+**All parameters from `BacktestEngine.__init__()` are exposed as request fields.**
 
 ---
 
-## Endpoints
+## Table of Contents
 
-### 1. Health Check
+1. [Health Check](#1-health-check)
+2. [Run Backtest](#2-run-backtest)
+3. [Validate Strategy](#3-validate-strategy)
+4. [Get Example Strategy](#4-get-example-strategy)
+5. [Showcase Trades](#5-showcase-trades-paginated)
+
+---
+
+## 1. Health Check
 **`GET /health`**
 
 Check API server status.
 
-**Response (200)**:
+**Response (200 OK)**:
 ```json
 {
   "status": "healthy",
-  "timestamp": "2026-03-17T10:30:00.000000",
+  "timestamp": "2026-03-22T12:00:00.123456",
   "version": "1.0.0"
 }
 ```
 
 ---
 
-### 2. Run Backtest
+## 2. Run Backtest
 **`POST /backtest`**
 
-Execute a strategy-based backtest on historical data.
+Execute a strategy-based backtest on historical Polymarket data.
 
-**Rate Limit**: 10 requests/minute per IP
+**Rate Limit**: 10 requests/minute per IP  
+**Timeout**: 20+ minutes (typical backtest duration: 5-20 minutes)
 
-**Request Body** (JSON):
+### Request Body (JSON)
+
 ```json
 {
-  "strategy_code": "def mean_reversion(trade, trade_log, portfolio, user_perso_parameters):\n    # Your strategy here\n    return {...}",
+  "strategy_code": "threshold_low = 0.01\nmarket_id = trade.get(\"market_id\")\nposition = trade.get(\"position\")\ndirection = \"hold\"\namount = 0\n\nif trade.get(\"price\") <= threshold_low:\n    direction = \"buy\"\n    amount = 10\n\naction = {\"market_id\": market_id, \"position\": position, \"direction\": direction, \"amount\": amount}\n\nreturn action",
   
   "initial_cash": 10000.0,
   "platform": ["polymarket"],
@@ -44,8 +56,8 @@ Execute a strategy-based backtest on historical data.
   
   "strat_var": [true, true, true, true, true, true, true, true, true, true, true, true],
   
-  "timestamp_start": "2024-01-01T00:00:00",
-  "timestamp_end": "2024-12-31T23:59:59",
+  "timestamp_start": null,
+  "timestamp_end": null,
   
   "market_id": null,
   "market_title": null,
@@ -65,157 +77,232 @@ Execute a strategy-based backtest on historical data.
 }
 ```
 
-**Parameter Details**:
+### Parameter Reference
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `strategy_code` | string | required | Python function code defining your strategy |
-| `initial_cash` | float | 10000 | Starting portfolio cash |
-| `platform` | list[str] | ["polymarket"] | Sources: "polymarket", "kalshi", or both |
-| `reimburse_open_positions` | bool | false | Refund unsettled positions at market price on final trade |
-| `strat_var` | list[bool] | [true]*12 | Columns to load: [platform, timestamp, title, volume, market_id, category, position, possible_outcomes, price, amount, wallet_maker, wallet_taker] |
-| `timestamp_start` | string | null | ISO format, e.g., "2024-01-01T00:00:00" |
-| `timestamp_end` | string | null | ISO format, e.g., "2024-12-31T23:59:59" |
-| `market_id` | list[str] | null | Filter by specific market IDs |
-| `market_title` | list[str] | null | Filter by market title (Kalshi only) |
-| `market_category` | list[str] | null | Filter by category (e.g., "politics", "sports") |
-| `volume_inf` | float | null | Minimum volume (Kalshi only) |
-| `volume_sup` | float | null | Maximum volume (Kalshi only) |
-| `position` | list[str] | null | Filter by position: ["Yes"], ["No"], or both |
-| `possible_outcomes` | list[str] | null | Filter by outcome names |
-| `price_inf` | float | null | Minimum price (0.0-1.0) |
-| `price_sup` | float | null | Maximum price (0.0-1.0) |
-| `amount_inf` | float | null | Minimum amount traded |
-| `amount_sup` | float | null | Maximum amount traded |
-| `wallet_maker` | list[str] | null | Filter by maker wallet address (Polymarket only) |
-| `wallet_taker` | list[str] | null | Filter by taker wallet address (Polymarket only) |
+| **strategy_code** | string | **required** | Python code for Part 2 of strategy (inner logic only, no function signature) |
+| **initial_cash** | float | 10000 | Starting portfolio cash (USD) |
+| **platform** | list[str] | ["polymarket"] | Data source: "polymarket" or both ["polymarket", "kalshi"] |
+| **reimburse_open_positions** | bool | false | Refund unsettled positions at market price on final trade |
+| **strat_var** | list[bool] | [true]*12 | Columns to load: [platform, timestamp, title, volume, market_id, category, position, possible_outcomes, price, amount, wallet_maker, wallet_taker] |
+| timestamp_start | string (ISO) | null | Start date (e.g., "2025-01-25T00:00:00") |
+| timestamp_end | string (ISO) | null | End date (e.g., "2025-01-26T23:59:59") |
+| market_id | list[str] | null | Filter by market IDs |
+| market_title | list[str] | null | Filter by exact market titles |
+| market_category | list[str] | null | Filter by category (e.g., "sports", "politics") |
+| volume_inf | float | null | Minimum volume |
+| volume_sup | float | null | Maximum volume |
+| position | list[str] | null | Filter by position: ["Yes"], ["No"], or both |
+| possible_outcomes | list[str] | null | Filter by outcome names |
+| price_inf | float | null | Minimum price (0.0-1.0) |
+| price_sup | float | null | Maximum price (0.0-1.0) |
+| amount_inf | float | null | Minimum trade amount |
+| amount_sup | float | null | Maximum trade amount |
+| wallet_maker | list[str] | null | Filter by maker wallet address |
+| wallet_taker | list[str] | null | Filter by taker wallet address |
 
-⚠️ **Critical Columns**: The following `strat_var` indices are mandatory and cannot be disabled:
-- Index 1: `timestamp` (needed for settlement tracking)
-- Index 4: `market_id` (needed for trade validation)
-- Index 6: `position` (needed for position management)
-- Index 8: `price` (needed for calculations)
+### ⚠️ Critical Columns (Cannot Disable)
 
-**Response (200)**:
+The following `strat_var` indices are **mandatory** (always loaded regardless of setting):
+- Index 1: `timestamp` — needed for settlement tracking
+- Index 4: `market_id` — needed for trade validation
+- Index 6: `position` — needed for position management
+- Index 8: `price` — needed for P&L calculations
+
+### Strategy Code Format
+
+Submit **Part 2 only** (the inner logic without function wrapper):
+
+```python
+# ❌ WRONG - Do not submit the full function
+def strategy_function(trade, trade_log, portfolio, user_perso_parameters):
+    threshold_low = 0.01
+    ...
+    return action
+
+# ✅ CORRECT - Submit only the inner code
+threshold_low = 0.01
+market_id = trade.get("market_id")
+position = trade.get("position")
+direction = "hold"
+amount = 0
+
+if trade.get("price") <= threshold_low:
+    direction = "buy"
+    amount = 10
+
+action = {"market_id": market_id, "position": position, "direction": direction, "amount": amount}
+return action
+```
+
+The API automatically assembles the full function:
+1. **Part 1** (signature): `def strategy_function(trade, trade_log, portfolio, user_perso_parameters):`
+2. **Part 2** (your code): The strategy logic you submit
+3. **Part 3** (return): `return action`
+
+### Response (200 OK - Success)
+
 ```json
 {
   "status": "success",
-  "trades_executed": 60890,
-  "buy_count": 60890,
+  "trades_executed": 665,
+  "buy_count": 665,
   "sell_count": 0,
-  "unique_markets_traded": 5294,
-  "final_cash": 9635.57,
-  "total_pnl": -364.43,
-  "roi_percent": -3.64,
-  "max_drawdown": -0.101,
-  "sharpe_ratio": -0.124,
-  "sortino_ratio": -0.064,
-  "calmar_ratio": -0.117,
-  "volatility": 0.074,
-  "downside_risk": 0.142,
-  "total_positions_settled": 49,
-  "winning_positions": 49,
+  "unique_markets_traded": 1,
+  "final_cash": 9991.27,
+  "total_pnl": -8.73,
+  "roi_percent": -0.0873,
+  "max_drawdown": -0.00841,
+  "sharpe_ratio": -0.0207,
+  "sortino_ratio": -0.0119,
+  "calmar_ratio": -0.0828,
+  "volatility": 0.0220,
+  "downside_risk": 0.0381,
+  "total_positions_settled": 0,
+  "winning_positions": 0,
   "losing_positions": 0,
-  "execution_time_seconds": 62.88
+  "execution_time_seconds": 40.17
 }
 ```
 
-**Response (400 - Validation Error)**:
+### Response (400 Bad Request - Validation Error)
+
 ```json
 {
-  "status": "error",
-  "error": "Validation error: Invalid strategy code: SyntaxError ...",
-  "detail": null
+  "detail": "Value error, Invalid start date format: 2025-01-25. Use ISO format (e.g., 2025-01-01T00:00:00)"
 }
 ```
 
-**Response (408 - Timeout)**:
+### Response (422 Unprocessable Entity - Invalid Request)
+
 ```json
 {
-  "status": "error",
-  "error": "Strategy execution timeout (exceeded 5 seconds per trade)",
-  "detail": null
+  "detail": [
+    {
+      "loc": ["body", "strategy_code"],
+      "msg": "Strategy code cannot be empty",
+      "type": "value_error"
+    }
+  ]
 }
 ```
 
-**Response (422 - Invalid Request)**:
+### Response (500 Internal Server Error)
+
 ```json
 {
-  "status": "error",
-  "error": "Value error, Column 'timestamp' (index 1) is critical and must be enabled in strat_var",
-  "detail": null
+  "detail": "Backtest execution failed: Strategy execution timeout"
+}
+```
+
+### Response Metrics Explained
+
+| Metric | Definition |
+|--------|-----------|
+| `trades_executed` | Total number of buy/sell actions executed |
+| `buy_count` | Number of "buy" trades |
+| `sell_count` | Number of "sell" trades |
+| `unique_markets_traded` | Number of distinct markets with trades |
+| `final_cash` | Portfolio cash balance at end (USD) |
+| `total_pnl` | Total Profit/Loss in absolute dollars |
+| `roi_percent` | Return on Investment as percentage |
+| `max_drawdown` | Largest peak-to-trough decline |
+| `sharpe_ratio` | Risk-adjusted return (assumes 0% risk-free rate) |
+| `sortino_ratio` | Downside risk-adjusted return |
+| `calmar_ratio` | Return / Max Drawdown ratio |
+| `volatility` | Standard deviation of returns |
+| `downside_risk` | Volatility of downside returns only |
+| `total_positions_settled` | Number of positions that closed |
+| `winning_positions` | Settled positions with positive PnL |
+| `losing_positions` | Settled positions with negative PnL |
+| `execution_time_seconds` | Wall-clock time for backtest computation |
+
+---
+
+## 3. Validate Strategy
+**`POST /validate-strategy`**
+
+Pre-validate strategy code syntax and security without running a full backtest.
+
+### Request Body
+
+```json
+{
+  "strategy_code": "threshold_low = 0.01\nif trade.get(\"price\") <= threshold_low:\n    direction = \"buy\"\nreturn {\"market_id\": trade[\"market_id\"], \"position\": trade[\"position\"], \"direction\": direction, \"amount\": 10}"
+}
+```
+
+### Response (200 OK - Valid)
+
+```json
+{
+  "status": "valid",
+  "message": "Strategy code is syntactically correct and safe to execute"
+}
+```
+
+### Response (400 Bad Request - Invalid)
+
+```json
+{
+  "detail": "Strategy validation failed: SyntaxError: invalid syntax (line 1)"
 }
 ```
 
 ---
 
-### 3. Example Strategy
+## 4. Get Example Strategy
 **`GET /strategies/example`**
 
-Get example strategy code and parameter documentation.
+Retrieve example strategy code and parameter documentation.
 
-**Response (200)**:
+### Response (200 OK)
+
 ```json
 {
-  "example_code": "def mean_reversion(trade, trade_log, portfolio, user_perso_parameters):\n    ...",
-  "description": "A simple strategy that buys when price <= 0.01",
+  "example_code": "# Simple mean reversion strategy\nthreshold_low = 0.01\nmarket_id = trade.get(\"market_id\")\nposition = trade.get(\"position\")\ndirection = \"hold\"\namount = 0\n\nif trade.get(\"price\") <= threshold_low:\n    direction = \"buy\"\n    amount = 10\n\naction = {\"market_id\": market_id, \"position\": position, \"direction\": direction, \"amount\": amount}\nreturn action",
+  "description": "A simple mean reversion strategy that buys when price <= $0.01",
   "parameters": {
-    "trade": "Current trade dict with keys: market_id, position, price, amount, ...",
-    "trade_log": "List of all executed trades",
-    "portfolio": "Dict with cash and positions",
-    "user_perso_parameters": "Dict for storing strategy state across trades"
+    "trade": {
+      "type": "dict",
+      "description": "Current trade data with keys: market_id, position, price, amount, timestamp, platform, and other fields based on strat_var selection"
+    },
+    "trade_log": {
+      "type": "list",
+      "description": "All previously executed trades (read-only)"
+    },
+    "portfolio": {
+      "type": "dict",
+      "description": "Current portfolio state: {cash: float, positions: {(market_id, position): amount}}"
+    },
+    "user_perso_parameters": {
+      "type": "dict",
+      "description": "Persistent state dict that survives across trades"
+    }
   },
-  "return": {
-    "market_id": "The market to trade",
-    "position": "Yes or No",
-    "direction": "buy, sell, or hold",
-    "amount": "Number of contracts",
-    "take_profit": "(optional) Exit price for profit",
-    "stop_loss": "(optional) Exit price for loss"
+  "return_format": {
+    "market_id": "str - Market to trade",
+    "position": "str - 'Yes' or 'No'",
+    "direction": "str - 'buy', 'sell', or 'hold'",
+    "amount": "int - Number of contracts",
+    "take_profit": "(optional) float - Exit price for profit",
+    "stop_loss": "(optional) float - Exit price for loss"
   }
 }
 ```
 
 ---
 
-### 4. Validate Strategy
-**`POST /validate-strategy`**
-
-Pre-validate strategy code syntax and security without running a full backtest.
-
-**Request Body**:
-```json
-{
-  "strategy_code": "def my_strategy(trade, trade_log, portfolio, user_perso_parameters):\n    return {...}"
-}
-```
-
-**Response (200)**:
-```json
-{
-  "status": "valid",
-  "message": "Strategy code is syntactically correct and safe"
-}
-```
-
-**Response (400 - Invalid)**:
-```json
-{
-  "status": "error",
-  "error": "Strategy validation failed: SyntaxError: invalid syntax ..."
-}
-```
-
----
-
-### 5. Showcase Trades (Paginated)
+## 5. Showcase Trades (Paginated)
 **`POST /trades`**
 
-Get paginated trade data with full filtering support for frontend preview/exploration. Perfect for displaying historical trades with pagination, filtering, and sorting.
+Get paginated trade data with filtering support. Perfect for frontend preview/exploration of historical market data.
 
 **Rate Limit**: 20 requests/minute per IP
 
-**Request Body** (JSON):
+### Request Body
+
 ```json
 {
   "page": 1,
@@ -224,8 +311,8 @@ Get paginated trade data with full filtering support for frontend preview/explor
   
   "strat_var": null,
   
-  "timestamp_start": "2024-01-01T00:00:00",
-  "timestamp_end": "2024-12-31T23:59:59",
+  "timestamp_start": "2025-01-01T00:00:00",
+  "timestamp_end": "2025-01-31T23:59:59",
   
   "market_id": null,
   "market_title": null,
@@ -245,61 +332,48 @@ Get paginated trade data with full filtering support for frontend preview/explor
 }
 ```
 
-**Parameter Details**:
+### Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `page` | int | 1 | Page number (1-indexed) |
-| `limit` | int | 100 | Trades per page (1-10000) |
-| `platform` | list[str] | ["polymarket"] | Filter by platform(s): "polymarket", "kalshi", or both |
-| `strat_var` | list[bool] | null | Columns to include: [platform, timestamp, title, volume, market_id, category, position, possible_outcomes, price, amount, wallet_maker, wallet_taker]. `null` = all columns |
-| `timestamp_start` | string | null | ISO format start date, e.g., "2024-01-01T00:00:00" (accepts both `T` and SPACE separators) |
-| `timestamp_end` | string | null | ISO format end date, e.g., "2024-12-31T23:59:59" |
-| `market_id` | list[str] | null | Filter by specific market IDs |
-| `market_title` | list[str] | null | Filter by market title (Kalshi only) |
-| `market_category` | list[str] | null | Filter by category (e.g., "politics", "sports") |
-| `volume_inf` | float | null | Minimum volume (Kalshi only) |
-| `volume_sup` | float | null | Maximum volume (Kalshi only) |
-| `position` | list[str] | null | Filter by position: ["Yes"], ["No"], or both |
-| `possible_outcomes` | list[str] | null | Filter by outcome names |
-| `price_inf` | float | null | Minimum price (0.0-1.0) |
-| `price_sup` | float | null | Maximum price (0.0-1.0) |
-| `amount_inf` | float | null | Minimum amount traded |
-| `amount_sup` | float | null | Maximum amount traded |
-| `wallet_maker` | list[str] | null | Filter by maker wallet address (Polymarket only) |
-| `wallet_taker` | list[str] | null | Filter by taker wallet address (Polymarket only) |
+| page | int | 1 | Page number (1-indexed) |
+| limit | int | 100 | Trades per page (1-10000) |
+| platform | list[str] | ["polymarket"] | Filter by platform |
+| strat_var | list[bool] | null | Columns to include (null = all) |
+| timestamp_start | string (ISO) | null | Start date |
+| timestamp_end | string (ISO) | null | End date |
+| market_id | list[str] | null | Filter by market IDs |
+| market_title | list[str] | null | Filter by title |
+| market_category | list[str] | null | Filter by category |
+| volume_inf | float | null | Min volume |
+| volume_sup | float | null | Max volume |
+| position | list[str] | null | Filter positions: ["Yes"], ["No"], or both |
+| possible_outcomes | list[str] | null | Filter outcome names |
+| price_inf | float | null | Min price (0.0-1.0) |
+| price_sup | float | null | Max price (0.0-1.0) |
+| amount_inf | float | null | Min trade amount |
+| amount_sup | float | null | Max trade amount |
+| wallet_maker | list[str] | null | Filter maker wallets |
+| wallet_taker | list[str] | null | Filter taker wallets |
 
-**Response (200)**:
+### Response (200 OK)
+
 ```json
 {
   "trades": [
     {
       "platform": "polymarket",
-      "timestamp": "2024-01-15 14:32:45",
-      "title": "Will USD/EUR go above 1.10 by April 1?",
-      "volume": 150000.5,
-      "market_id": "0xABC123",
-      "category": "economics",
+      "timestamp": "2025-01-25T14:32:45",
+      "title": "Will the Jets make the first pick of the 2025 NFL Draft?",
+      "volume": 150000.50,
+      "market_id": "0xABC123def",
+      "category": "sports",
       "position": "Yes",
       "possible_outcomes": ["Yes", "No"],
       "price": 0.65,
       "amount": 100,
-      "wallet_maker": "0x1234...",
-      "wallet_taker": "0x5678..."
-    },
-    {
-      "platform": "polymarket",
-      "timestamp": "2024-01-15 14:31:20",
-      "title": "Will BTC reach $50k by March?",
-      "volume": 280000.0,
-      "market_id": "0xDEF456",
-      "category": "crypto",
-      "position": "No",
-      "possible_outcomes": ["Yes", "No"],
-      "price": 0.42,
-      "amount": 250,
-      "wallet_maker": "0x9ABC...",
-      "wallet_taker": "0xDEF0..."
+      "wallet_maker": "0x1234abcd...",
+      "wallet_taker": "0x5678efgh..."
     }
   ],
   "page": 1,
@@ -310,75 +384,12 @@ Get paginated trade data with full filtering support for frontend preview/explor
 }
 ```
 
-**Response (400 - Validation Error)**:
+### Response (400 Bad Request)
+
 ```json
 {
-  "status": "error",
-  "detail": "Validation error: Invalid start date format: 2024-01-01. Use ISO format (e.g., 2024-01-01T00:00:00)"
+  "detail": "Validation error: Invalid page number: must be >= 1"
 }
-```
-
-**Response (500 - Server Error)**:
-```json
-{
-  "status": "error",
-  "detail": "Failed to fetch trades: [error details]"
-}
-```
-
-**Key Features**:
-- ✅ Supports all backtest engine filters (timestamps, prices, positions, wallets, markets)
-- ✅ Pagination with offset/limit for large result sets
-- ✅ Returns total_trades and total_pages metadata for UI pagination
-- ✅ Results sorted by timestamp DESC (most recent first)
-- ✅ Column selection via strat_var (if null, returns all columns)
-- ✅ Handles both polymarket and kalshi platforms
-- ✅ ISO datetime parsing (accepts both `2024-01-01T00:00:00` and `2024-01-01 00:00:00`)
-
----
-
-## Strategy Function Signature
-
-Your strategy must be a Python function with this exact signature:
-
-```python
-def my_strategy(trade, trade_log, portfolio, user_perso_parameters):
-    """
-    Args:
-        trade (dict): Current trade with keys:
-            - market_id (str): Unique market identifier
-            - position (str): "Yes" or "No"
-            - price (float): Current price (0.0-1.0)
-            - amount (int): Contract size
-            - timestamp (datetime): Trade timestamp
-            - platform (str): "polymarket" or "kalshi"
-            - ... other fields depending on strat_var selection
-        
-        trade_log (list): All previously executed trades (read-only)
-        
-        portfolio (dict): Current portfolio state:
-            - cash (float): Available cash
-            - positions (dict): {(market_id, position): amount}
-        
-        user_perso_parameters (dict): Persistent state across trades
-    
-    Returns:
-        dict: Action with keys:
-            - market_id (str): Market to trade
-            - position (str): "Yes" or "No"
-            - direction (str): "buy", "sell", or "hold"
-            - amount (int): Number of contracts
-            - take_profit (float, optional): Exit price for profit
-            - stop_loss (float, optional): Exit price for loss
-            - user_perso_parameters (dict, optional): Updated state
-    """
-    # Your logic here
-    return {
-        "market_id": trade["market_id"],
-        "position": trade["position"],
-        "direction": "hold" if trade["price"] > 0.5 else "buy",
-        "amount": 10
-    }
 ```
 
 ---
