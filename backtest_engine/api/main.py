@@ -228,6 +228,20 @@ async def run_backtest(request: Request, backtest_request: BacktestRequest):
     try:
         start_time = datetime.now()
         
+        # Check if data files exist
+        import os
+        from glob import glob
+        data_path = os.getenv("DATA_PATH", "/data/prediction-market-data/data")
+        polymarket_files = glob(f"{data_path}/polymarket/standardized_trades/*.parquet")
+        
+        if not polymarket_files:
+            raise ValueError(
+                f"No Polymarket trade data found. Expected parquet files at: "
+                f"{data_path}/polymarket/standardized_trades/\n"
+                f"Current DATA_PATH: {data_path}\n"
+                f"Please ensure the backtest data volume is mounted and populated."
+            )
+        
         # Parse datetime strings if provided
         timestamp_start = None
         timestamp_end = None
