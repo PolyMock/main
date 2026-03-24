@@ -416,8 +416,8 @@
 		<a href="/" class="nav-link" class:active={currentPath === '/'} on:click={closeMobileMenu}>TERMINAL</a>
 		<a href="/news" class="nav-link" class:active={currentPath === '/news'} on:click={closeMobileMenu}>NEWS</a>
 		<a href="/dashboard" class="nav-link" class:active={currentPath === '/dashboard'} on:click={closeMobileMenu}>DASHBOARD</a>
-		<a href="/backtesting?tab=summary" class="nav-link" class:active={currentPath === '/backtesting' && (!$page.url.searchParams.get('tab') || $page.url.searchParams.get('tab') === 'summary')} on:click={closeMobileMenu}>PERFORMANCE</a>
-		<a href="/backtesting?tab=strategy" class="nav-link" class:active={currentPath === '/backtesting' && $page.url.searchParams.get('tab') === 'strategy'} on:click={closeMobileMenu}>BACKTESTING</a>
+		<a href="/performance" class="nav-link" class:active={currentPath === '/performance'} on:click={closeMobileMenu}>PERFORMANCE</a>
+		<a href="/backtesting" class="nav-link" class:active={currentPath === '/backtesting'} on:click={closeMobileMenu}>BACKTESTING</a>
 		<a href="/marketplace" class="nav-link" class:active={currentPath === '/marketplace'} on:click={closeMobileMenu}>MARKETPLACE</a>
 	</div>
 
@@ -555,7 +555,7 @@
 								<path d="M4 2H12C12.5523 2 13 2.44772 13 3V13C13 13.5523 12.5523 14 12 14H4C3.44772 14 3 13.5523 3 13V3C3 2.44772 3.44772 2 4 2Z" stroke="currentColor" stroke-width="1.5"/>
 								<path d="M6 6H10M6 9H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
 							</svg>
-							My Strategies
+							My Posts
 						</a>
 						<button class="dropdown-item" on:click={handleLogout}>
 							<svg width="16" height="16" viewBox="0 0 16 16" fill="none">

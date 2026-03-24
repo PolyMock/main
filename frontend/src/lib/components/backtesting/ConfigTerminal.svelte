@@ -2,7 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { browser } from '$app/environment';
 
-	type WizardStep = 'intro' | 'data_source' | 'category_select' | 'market_loading' | 'market_select' | 'position_filter' | 'time_period' | 'start_date' | 'end_date' | 'review' | 'done';
+	type WizardStep = 'intro' | 'category_select' | 'market_loading' | 'market_select' | 'position_filter' | 'time_period' | 'start_date' | 'end_date' | 'review' | 'done';
 
 	interface EngineConfig {
 		data_source: 'synthesis' | 'parquet';
@@ -163,17 +163,8 @@
 	function showWizardStep(term: any) {
 		const step = wizardStep;
 		term.writeln('');
-		if (step === 'data_source') {
-			term.writeln(`${O}━━━ STEP 1/6: DATA SOURCE ━━━${R}`);
-			term.writeln('');
-			term.writeln(`Select your data source:`);
-			term.writeln('');
-			term.writeln(`  ${O}1${R}  Synthesis API  ${DIM}— Live historical trades via Synthesis Trade API${R}`);
-			term.writeln(`  ${O}2${R}  Parquet files   ${DIM}— Local .parquet dataset (404M+ pre-downloaded trades)${R}`);
-			term.writeln('');
-			term.writeln(`${DIM}Type ${O}1${R}${DIM} or ${O}2${R}${DIM} (default: 1)${R}`);
-		} else if (step === 'category_select') {
-			term.writeln(`${O}━━━ STEP 2/6: SELECT CATEGORIES ━━━${R}`);
+		if (step === 'category_select') {
+			term.writeln(`${O}━━━ STEP 1/5: SELECT CATEGORIES ━━━${R}`);
 			term.writeln('');
 			term.writeln('Available categories:');
 			term.writeln('');
@@ -185,7 +176,7 @@
 			term.writeln(`Select categories (comma-separated), e.g. ${O}1,3,5${R} or ${O}crypto,sports${R}`);
 			term.writeln(`${DIM}Type ${O}all${R}${DIM} to select all categories${R}`);
 		} else if (step === 'market_loading') {
-			term.writeln(`${O}━━━ STEP 3/6: SELECT MARKETS ━━━${R}`);
+			term.writeln(`${O}━━━ STEP 2/5: SELECT MARKETS ━━━${R}`);
 			fetchMarketsByCategory(term);
 			return;
 		} else if (step === 'market_select') {
@@ -210,7 +201,7 @@
 			term.writeln(`Select markets (comma-separated), e.g. ${O}1,3,5${R}`);
 			term.writeln(`${DIM}Type ${O}all${R}${DIM} to select all, or ${O}top <n>${R}${DIM} for top N by volume${R}`);
 		} else if (step === 'position_filter') {
-			term.writeln(`${O}━━━ STEP 4/6: POSITION FILTER ━━━${R}`);
+			term.writeln(`${O}━━━ STEP 3/5: POSITION FILTER ━━━${R}`);
 			term.writeln('');
 			term.writeln(`Filter trades by position side:`);
 			term.writeln('');
@@ -220,7 +211,7 @@
 			term.writeln('');
 			term.writeln(`${DIM}Type ${O}1${R}${DIM}, ${O}2${R}${DIM}, or ${O}3${R}${DIM} (default: 1 — both)${R}`);
 		} else if (step === 'time_period') {
-			term.writeln(`${O}━━━ STEP 5/6: TIME PERIOD ━━━${R}`);
+			term.writeln(`${O}━━━ STEP 4/5: TIME PERIOD ━━━${R}`);
 			term.writeln('');
 			term.writeln(`Enable time period filter? (${O}yes${R}/${O}no${R})`);
 			term.writeln(`${DIM}Press ENTER for no (use all data)${R}`);
@@ -231,9 +222,9 @@
 			term.writeln(`End date (${O}YYYY-MM-DD${R}):`);
 			term.writeln(`${DIM}e.g. 2025-01-01${R}`);
 		} else if (step === 'review') {
-			term.writeln(`${O}━━━ STEP 6/6: REVIEW CONFIG ━━━${R}`);
+			term.writeln(`${O}━━━ STEP 5/5: REVIEW CONFIG ━━━${R}`);
 			term.writeln('');
-			term.writeln(`${G}Data:${R}        ${dataSource === 'synthesis' ? 'Synthesis API (live)' : 'Parquet files (local)'}`);
+			term.writeln(`${G}Data:${R}        Synthesis API + Parquet dataset (404M+ trades)`);
 			term.writeln(`${G}Platform:${R}    Polymarket`);
 			term.writeln(`${G}Categories:${R}  ${selectedCategories.join(', ')}`);
 			if (selectedMarketsList.length > 0) {
@@ -249,7 +240,7 @@
 			term.writeln(`${G}Time:${R}        ${useTimePeriod ? `${timestampStartStr} → ${timestampEndStr}` : 'ALL TIME'}`);
 			term.writeln('');
 			term.writeln(`Type ${O}confirm${R} to finalize, ${O}reset${R} to start over, or ${O}edit <step>${R} to change a setting.`);
-			term.writeln(`${DIM}Steps: data, categories, markets, position, time${R}`);
+			term.writeln(`${DIM}Steps: categories, markets, position, time${R}`);
 		}
 		prompt(term);
 	}
@@ -284,7 +275,8 @@
 		switch (wizardStep) {
 			case 'intro':
 				if (valLower === 'go') {
-					wizardStep = 'data_source';
+					dataSource = 'synthesis';
+					wizardStep = 'category_select';
 					showWizardStep(term);
 				} else if (valLower === 'help') {
 					term.writeln('Available commands:');
@@ -300,19 +292,7 @@
 				}
 				break;
 
-			case 'data_source':
-				if (valLower === '2' || valLower === 'parquet') {
-					dataSource = 'parquet';
-					term.writeln(`${G}✓ Data source: Parquet files (local dataset)${R}`);
-					wizardStep = 'time_period';
-				} else {
-					dataSource = 'synthesis';
-					term.writeln(`${G}✓ Data source: Synthesis API (live historical data)${R}`);
-					wizardStep = 'category_select';
-				}
-				showWizardStep(term);
-				break;
-
+	
 			case 'category_select':
 				if (valLower === 'all') {
 					selectedCategories = [...availableCategories];
@@ -448,12 +428,11 @@
 					timestampStartStr = '';
 					timestampEndStr = '';
 					term.writeln(`${O}Config reset.${R}`);
-					wizardStep = 'data_source';
+					wizardStep = 'category_select';
 					showWizardStep(term);
 				} else if (valLower.startsWith('edit ')) {
 					const target = valLower.replace('edit ', '').trim();
 					const stepMap: Record<string, WizardStep> = {
-						data: 'data_source', source: 'data_source',
 						categories: 'category_select', category: 'category_select',
 						markets: 'market_loading', market: 'market_loading',
 						position: 'position_filter',
@@ -463,7 +442,7 @@
 						wizardStep = stepMap[target];
 						showWizardStep(term);
 					} else {
-						term.writeln(`${O}Unknown step. Options: data, categories, markets, time${R}`);
+						term.writeln(`${O}Unknown step. Options: categories, markets, position, time${R}`);
 						prompt(term);
 					}
 				} else {

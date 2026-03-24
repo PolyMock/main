@@ -69,6 +69,20 @@ export interface StrategyConfig {
   startDate: Date;
   endDate: Date;
   initialBankroll: number;
+
+  // Strategy run parameters (captured at backtest time)
+  strategyType?: string;
+  position?: string;
+  priceInf?: number;
+  priceSup?: number;
+  amount?: number;
+  threshold?: number;
+  stopLoss?: number;
+  takeProfit?: number;
+  trailingStop?: number;
+  maxHoldHours?: number;
+  cooldownHours?: number;
+  initialCash?: number;
 }
 
 export interface BacktestTrade {

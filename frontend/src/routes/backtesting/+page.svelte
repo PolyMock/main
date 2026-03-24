@@ -5,26 +5,13 @@
 </svelte:head>
 
 <script lang="ts">
-	import { browser } from '$app/environment';
-	import { page } from '$app/stores';
 	import { walletStore } from '$lib/wallet/stores';
 	import type { BacktestResult } from '$lib/backtesting/types';
-	import TradeSummary from '$lib/components/backtesting/TradeSummary.svelte';
 	import ConfigTerminal from '$lib/components/backtesting/ConfigTerminal.svelte';
 	import CodeEditor from '$lib/components/backtesting/CodeEditor.svelte';
 	import BacktestResults from '$lib/components/backtesting/BacktestResults.svelte';
 
 	const BACKTEST_API_URL = 'https://main-production-5e3b.up.railway.app';
-
-	// Main tab state
-	let activeMainTab: 'summary' | 'strategies' = $state('summary');
-
-	$effect(() => {
-		if (browser) {
-			const tab = $page.url.searchParams.get('tab');
-			activeMainTab = tab === 'strategy' ? 'strategies' : 'summary';
-		}
-	});
 
 	// Strategy sub-tab state
 	let strategyTab: 'configure' | 'strategy' | 'results' = $state('configure');
@@ -81,12 +68,15 @@
 		}
 	}
 
+	let lastStrategyParams: any = $state(null);
+
 	async function runSynthesisBacktest(strategyCode: string, strategyType: string | null, strategyParams?: any) {
 		isRunning = true;
 		error = '';
 		progress = 0;
 		progressMessage = 'Sending backtest request...';
 		strategyTab = 'results';
+		lastStrategyParams = strategyParams;
 
 		try {
 			if (selectedMarkets.length === 0) {
@@ -114,6 +104,11 @@
 					position: configState.config?.position ?? null,
 					timestampStart: configState.useTimePeriod ? configState.timestampStartStr : null,
 					timestampEnd: configState.useTimePeriod ? configState.timestampEndStr : null,
+					strategyParams: strategyParams?.strategyParams ?? null,
+					stopLoss: strategyParams?.stopLoss ?? null,
+					takeProfit: strategyParams?.takeProfit ?? null,
+					trailingStop: strategyParams?.trailingStop ?? null,
+					maxHoldHours: strategyParams?.maxHoldHours ?? null,
 				}),
 			});
 
@@ -143,7 +138,23 @@
 						progress = msg.progress ?? progress;
 						progressMessage = msg.message ?? progressMessage;
 					} else if (msg.type === 'result') {
-						backtestResult = msg.data;
+						backtestResult = {
+							...msg.data,
+							strategyConfig: {
+								strategyType,
+								initialCash: lastStrategyParams?.initialCash ?? config.initialBankroll ?? 10000,
+								priceInf: lastStrategyParams?.priceInf ?? null,
+								priceSup: lastStrategyParams?.priceSup ?? null,
+								position: configState.config?.position ?? null,
+								stopLoss: lastStrategyParams?.stopLoss ?? null,
+								takeProfit: lastStrategyParams?.takeProfit ?? null,
+								trailingStop: lastStrategyParams?.trailingStop ?? null,
+								maxHoldHours: lastStrategyParams?.maxHoldHours ?? null,
+								amount: lastStrategyParams?.strategyParams?.amount ?? null,
+								threshold: lastStrategyParams?.strategyParams?.threshold ?? null,
+								cooldownHours: lastStrategyParams?.strategyParams?.cooldownHours ?? null,
+							},
+						};
 						progress = 100;
 						progressMessage = 'Backtest complete!';
 					} else if (msg.type === 'error') {
@@ -213,10 +224,6 @@
 </script>
 
 <div class="backtesting-container">
-	{#if activeMainTab === 'summary'}
-		<TradeSummary />
-
-	{:else if activeMainTab === 'strategies'}
 		<div class="strategy-backtesting">
 			{#if strategyTab === 'configure'}
 				<ConfigTerminal onConfigComplete={handleConfigComplete} />
@@ -240,35 +247,96 @@
 				<BacktestResults
 					{backtestResult}
 					{selectedMarkets}
-					{config}
+					config={{ ...config, strategyType: backtestResult.strategyConfig?.strategyType, exitRules: { ...config.exitRules, stopLoss: backtestResult.strategyConfig?.stopLoss, takeProfit: backtestResult.strategyConfig?.takeProfit, trailingStop: backtestResult.strategyConfig?.trailingStop, maxHoldTime: backtestResult.strategyConfig?.maxHoldHours }, strategyParams: backtestResult.strategyConfig }}
 					walletConnected={$walletStore.connected}
 				/>
 			{/if}
 
 			{#if isRunning}
 				<div class="running-overlay">
-					<div class="running-content">
-						<div class="video-wrapper">
-							<video autoplay loop muted playsinline>
-								<source src="/loader.mp4" type="video/mp4" />
-							</video>
+					<!-- Skeleton hero bar -->
+					<div class="skel-hero">
+						<div class="skel-hero-left">
+							<div class="skel-label-sm shimmer"></div>
+							<div class="skel-value-lg shimmer"></div>
+							<div class="skel-label-sm shimmer" style="width:60px"></div>
 						</div>
-						<div class="loading-text-block">
-							<p class="loading-status">{progressMessage || 'Initializing backtest engine...'}</p>
-							<div class="progress-track">
-								<div class="progress-glow" style="width: {progress}%"></div>
+						<div class="skel-hero-divider"></div>
+						<div class="skel-hero-cap">
+							<div class="skel-line shimmer" style="width:110px"></div>
+							<div class="skel-line shimmer" style="width:130px"></div>
+						</div>
+						<div class="skel-hero-stats">
+							{#each Array(6) as _}
+								<div class="skel-stat">
+									<div class="skel-line shimmer" style="width:40px;height:14px"></div>
+									<div class="skel-line shimmer" style="width:32px;height:8px"></div>
+								</div>
+							{/each}
+						</div>
+					</div>
+
+					<!-- Skeleton charts row -->
+					<div class="skel-charts">
+						{#each Array(3) as _, i}
+							{#if i > 0}<div class="skel-chart-sep"></div>{/if}
+							<div class="skel-chart-card">
+								<div class="skel-chart-head">
+									<div class="skel-line shimmer" style="width:90px;height:10px"></div>
+									<div class="skel-line shimmer" style="width:70px;height:12px"></div>
+								</div>
+								<div class="skel-chart-body shimmer"></div>
+								<div class="skel-chart-foot">
+									<div class="skel-line shimmer" style="width:80px;height:9px"></div>
+									<div class="skel-line shimmer" style="width:60px;height:9px"></div>
+								</div>
 							</div>
-							<p class="loading-pct">{progress}%</p>
+						{/each}
+					</div>
+
+					<!-- Progress section -->
+					<div class="skel-progress-section">
+						<div class="skel-spinner">
+							<svg viewBox="0 0 50 50">
+								<circle cx="25" cy="25" r="20" fill="none" stroke="#1a1a1a" stroke-width="3"/>
+								<circle cx="25" cy="25" r="20" fill="none" stroke="#f97316" stroke-width="3" stroke-dasharray="31.4 94.2" stroke-linecap="round" class="spinner-arc"/>
+							</svg>
 						</div>
-						<div class="loading-steps">
-							<span class="step" class:done={progress >= 5} class:active={progress > 0 && progress < 5}>Connecting</span>
-							<span class="step-dot">—</span>
-							<span class="step" class:done={progress >= 20} class:active={progress >= 5 && progress < 20}>Fetching trades</span>
-							<span class="step-dot">—</span>
-							<span class="step" class:done={progress >= 90} class:active={progress >= 20 && progress < 90}>Running strategy</span>
-							<span class="step-dot">—</span>
-							<span class="step" class:done={progress >= 100} class:active={progress >= 90 && progress < 100}>Finalizing</span>
+						<div class="skel-progress-info">
+							<p class="skel-progress-msg">{progressMessage || 'Initializing backtest engine...'}</p>
+							<div class="skel-progress-track">
+								<div class="skel-progress-fill" style="width: {progress}%"></div>
+							</div>
+							<div class="skel-progress-steps">
+								<span class="skel-step" class:done={progress >= 5} class:active={progress > 0 && progress < 5}>Connecting</span>
+								<span class="skel-step-dot"></span>
+								<span class="skel-step" class:done={progress >= 20} class:active={progress >= 5 && progress < 20}>Fetching trades</span>
+								<span class="skel-step-dot"></span>
+								<span class="skel-step" class:done={progress >= 90} class:active={progress >= 20 && progress < 90}>Running strategy</span>
+								<span class="skel-step-dot"></span>
+								<span class="skel-step" class:done={progress >= 100} class:active={progress >= 90 && progress < 100}>Finalizing</span>
+							</div>
 						</div>
+					</div>
+
+					<!-- Skeleton metrics grid -->
+					<div class="skel-tabs">
+						<div class="skel-tab-active shimmer" style="width:70px"></div>
+						<div class="skel-tab shimmer" style="width:85px"></div>
+						<div class="skel-tab shimmer" style="width:60px"></div>
+					</div>
+					<div class="skel-metrics-grid">
+						{#each Array(4) as _}
+							<div class="skel-panel">
+								<div class="skel-line shimmer" style="width:100px;height:11px;margin-bottom:14px"></div>
+								{#each Array(5) as _}
+									<div class="skel-metric-row">
+										<div class="skel-line shimmer" style="width:70px;height:10px"></div>
+										<div class="skel-line shimmer" style="width:45px;height:10px"></div>
+									</div>
+								{/each}
+							</div>
+						{/each}
 					</div>
 				</div>
 			{/if}
@@ -280,7 +348,6 @@
 				</div>
 			{/if}
 		</div>
-	{/if}
 </div>
 
 <style>
@@ -308,116 +375,182 @@
 		position: relative;
 	}
 
+	/* ═══ SKELETON LOADING OVERLAY ═══ */
 	.running-overlay {
 		position: absolute;
 		inset: 0;
-		background: #000000;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 10;
-	}
-
-	.running-content {
-		text-align: center;
-		color: #fff;
+		background: #0a0a0a;
 		display: flex;
 		flex-direction: column;
-		align-items: center;
-		gap: 24px;
+		z-index: 10;
+		overflow: hidden;
 	}
 
-	.video-wrapper {
-		width: 180px;
-		height: 180px;
-		border-radius: 50%;
+	/* Shimmer animation */
+	@keyframes shimmer {
+		0% { background-position: -400px 0; }
+		100% { background-position: 400px 0; }
+	}
+	.shimmer {
+		background: linear-gradient(90deg, #111 0%, #1a1a1a 40%, #222 50%, #1a1a1a 60%, #111 100%);
+		background-size: 800px 100%;
+		animation: shimmer 1.8s ease-in-out infinite;
+		border-radius: 4px;
+	}
+
+	.skel-line { height: 12px; border-radius: 3px; }
+
+	/* Skeleton hero bar */
+	.skel-hero {
+		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+		gap: 20px;
+		padding: 16px 24px;
+		background: #000;
+		border-bottom: 1px solid #1a1a1a;
+	}
+	.skel-hero-left { display: flex; flex-direction: column; gap: 6px; }
+	.skel-hero-left .skel-label-sm { width: 50px; height: 9px; }
+	.skel-hero-left .skel-value-lg { width: 160px; height: 28px; border-radius: 4px; }
+	.skel-hero-divider { width: 1px; height: 48px; background: #1a1a1a; }
+	.skel-hero-cap { display: flex; flex-direction: column; gap: 6px; }
+	.skel-hero-stats { display: flex; gap: 20px; margin-left: auto; }
+	.skel-stat { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+
+	/* Skeleton charts */
+	.skel-charts {
+		flex-shrink: 0;
+		display: flex;
+		padding: 12px 16px;
+		gap: 0;
+		border-bottom: 1px solid #1a1a1a;
+	}
+	.skel-chart-sep { width: 12px; flex-shrink: 0; }
+	.skel-chart-card {
+		flex: 1;
+		min-width: 0;
+		background: #0f0f0f;
+		border: 1px solid #1a1a1a;
+		border-radius: 8px;
 		overflow: hidden;
 		display: flex;
-		align-items: center;
-		justify-content: center;
-		box-shadow: 0 0 60px rgba(249, 115, 22, 0.15), 0 0 120px rgba(249, 115, 22, 0.05);
-		animation: pulse-ring 2s ease-in-out infinite;
-	}
-
-	.video-wrapper video {
-		width: 180px;
-		height: 180px;
-		object-fit: cover;
-		display: block;
-	}
-
-	@keyframes pulse-ring {
-		0%, 100% { box-shadow: 0 0 40px rgba(249, 115, 22, 0.12), 0 0 80px rgba(249, 115, 22, 0.04); }
-		50% { box-shadow: 0 0 60px rgba(249, 115, 22, 0.25), 0 0 120px rgba(249, 115, 22, 0.08); }
-	}
-
-	.loading-text-block {
-		display: flex;
 		flex-direction: column;
+	}
+	.skel-chart-head {
+		display: flex;
+		justify-content: space-between;
 		align-items: center;
-		gap: 10px;
-		width: 320px;
+		padding: 10px 14px;
+		border-bottom: 1px solid #1a1a1a;
+		background: #0a0a0a;
+	}
+	.skel-chart-body {
+		flex: 1;
+		min-height: 140px;
+		margin: 8px;
+		border-radius: 4px;
+	}
+	.skel-chart-foot {
+		display: flex;
+		justify-content: space-between;
+		padding: 8px 14px;
+		border-top: 1px solid #1a1a1a;
+		background: #0a0a0a;
 	}
 
-	.loading-status {
+	/* Progress section */
+	.skel-progress-section {
+		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+		gap: 16px;
+		padding: 18px 24px;
+		background: #000;
+		border-bottom: 1px solid #1a1a1a;
+	}
+	.skel-spinner {
+		width: 36px;
+		height: 36px;
+		flex-shrink: 0;
+	}
+	.skel-spinner svg { width: 100%; height: 100%; }
+	@keyframes spin { to { transform: rotate(360deg); } }
+	.spinner-arc {
+		transform-origin: center;
+		animation: spin 1s linear infinite;
+	}
+	.skel-progress-info { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+	.skel-progress-msg {
 		margin: 0;
 		font-size: 13px;
 		font-family: 'Share Tech Mono', monospace;
 		color: #f97316;
 		letter-spacing: 0.5px;
-		min-height: 20px;
 	}
-
-	.progress-track {
+	.skel-progress-track {
 		width: 100%;
-		height: 2px;
+		height: 3px;
 		background: #1a1a1a;
-		border-radius: 1px;
+		border-radius: 2px;
 		overflow: hidden;
-		position: relative;
 	}
-
-	.progress-glow {
+	.skel-progress-fill {
 		height: 100%;
 		background: linear-gradient(90deg, #f97316, #fb923c);
-		border-radius: 1px;
+		border-radius: 2px;
 		transition: width 0.4s ease;
-		box-shadow: 0 0 8px rgba(249, 115, 22, 0.6);
+		box-shadow: 0 0 8px rgba(249, 115, 22, 0.5);
 	}
-
-	.loading-pct {
-		margin: 0;
-		font-size: 11px;
-		font-family: 'Share Tech Mono', monospace;
-		color: #555;
-		letter-spacing: 1px;
-	}
-
-	.loading-steps {
+	.skel-progress-steps {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: 6px;
 		font-family: 'Share Tech Mono', monospace;
 		font-size: 10px;
 		letter-spacing: 0.5px;
 	}
+	.skel-step { color: #333; transition: color 0.3s ease; }
+	.skel-step.active { color: #f97316; }
+	.skel-step.done { color: #666; }
+	.skel-step-dot { width: 12px; height: 1px; background: #222; }
 
-	.step {
-		color: #333;
-		transition: color 0.3s ease;
+	/* Skeleton tabs */
+	.skel-tabs {
+		flex-shrink: 0;
+		display: flex;
+		gap: 8px;
+		padding: 12px 24px 0;
+		border-bottom: 1px solid #1a1a1a;
+	}
+	.skel-tab-active, .skel-tab {
+		height: 32px;
+		border-radius: 4px 4px 0 0;
+	}
+	.skel-tab-active {
+		border-bottom: 2px solid #f97316;
 	}
 
-	.step.active {
-		color: #f97316;
+	/* Skeleton metrics grid */
+	.skel-metrics-grid {
+		flex: 1;
+		display: grid;
+		grid-template-columns: repeat(4, 1fr);
+		gap: 16px;
+		padding: 16px 24px;
+		overflow: hidden;
 	}
-
-	.step.done {
-		color: #555;
+	.skel-panel {
+		background: #0f0f0f;
+		border: 1px solid #1a1a1a;
+		border-radius: 8px;
+		padding: 16px;
 	}
-
-	.step-dot {
-		color: #222;
-		font-size: 8px;
+	.skel-metric-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 10px;
 	}
 
 	.error-banner {

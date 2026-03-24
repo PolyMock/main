@@ -107,21 +107,21 @@
 			height,
 			layout: {
 				background: { type: lc.ColorType.Solid, color: '#0a0a0a' },
-				textColor: '#555',
+				textColor: '#ccc',
 				fontFamily: "'Share Tech Mono', monospace",
 				fontSize: 10,
 			},
 			grid: {
-				vertLines: { color: 'rgba(255,255,255,0.03)' },
-				horzLines: { color: 'rgba(255,255,255,0.03)' },
+				vertLines: { color: 'rgba(255,255,255,0.06)' },
+				horzLines: { color: 'rgba(255,255,255,0.06)' },
 			},
 			crosshair: {
 				mode: lc.CrosshairMode.Normal,
 				vertLine: { color: 'rgba(249,115,22,0.3)', width: 1, style: lc.LineStyle.Dashed, labelBackgroundColor: '#f97316' },
 				horzLine: { color: 'rgba(249,115,22,0.3)', width: 1, style: lc.LineStyle.Dashed, labelBackgroundColor: '#f97316' },
 			},
-			rightPriceScale: { borderColor: 'rgba(255,255,255,0.06)', scaleMargins: { top: 0.08, bottom: 0.08 } },
-			timeScale: { borderColor: 'rgba(255,255,255,0.06)', timeVisible: false, rightOffset: 3 },
+			rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)', scaleMargins: { top: 0.08, bottom: 0.08 } },
+			timeScale: { borderColor: 'rgba(255,255,255,0.1)', timeVisible: false, rightOffset: 3 },
 			handleScroll: { vertTouchDrag: false },
 		};
 	}
@@ -138,10 +138,9 @@
 		const drawdownData = buildDrawdownData();
 		const tradeVol = buildTradeVolumeData();
 		const isProfitable = backtestResult.endingCapital >= backtestResult.startingCapital;
-		const h = 220;
 
 		// ── Chart 1: Equity Curve ────────────────────────────────────────
-		equityChart = lc.createChart(equityEl, chartOpts(lc, equityEl, h));
+		equityChart = lc.createChart(equityEl, chartOpts(lc, equityEl, equityEl.clientHeight || 200));
 
 		const eqSeries = equityChart.addSeries(lc.AreaSeries, {
 			lineColor: isProfitable ? '#26a65b' : '#ef5350',
@@ -170,7 +169,7 @@
 		equityChart.timeScale().fitContent();
 
 		// ── Chart 2: Drawdown ────────────────────────────────────────────
-		drawdownChart = lc.createChart(drawdownEl, chartOpts(lc, drawdownEl, h));
+		drawdownChart = lc.createChart(drawdownEl, chartOpts(lc, drawdownEl, drawdownEl.clientHeight || 200));
 
 		const ddSeries = drawdownChart.addSeries(lc.AreaSeries, {
 			lineColor: '#ef5350',
@@ -188,7 +187,7 @@
 		drawdownChart.timeScale().fitContent();
 
 		// ── Chart 3: Trade Activity ──────────────────────────────────────
-		tradesChart = lc.createChart(tradesEl, chartOpts(lc, tradesEl, h));
+		tradesChart = lc.createChart(tradesEl, chartOpts(lc, tradesEl, tradesEl.clientHeight || 200));
 
 		// Cost histogram
 		if (tradeVol.barData.length > 0) {
@@ -219,24 +218,11 @@
 
 		tradesChart.timeScale().fitContent();
 
-		// ── Sync time scales ─────────────────────────────────────────────
-		const charts = [equityChart, drawdownChart, tradesChart];
-		for (let i = 0; i < charts.length; i++) {
-			charts[i].timeScale().subscribeVisibleLogicalRangeChange((range: any) => {
-				if (!range) return;
-				for (let j = 0; j < charts.length; j++) {
-					if (j !== i) {
-						charts[j]?.timeScale().setVisibleLogicalRange(range);
-					}
-				}
-			});
-		}
-
 		// ── Resize observer ──────────────────────────────────────────────
 		const ro = new ResizeObserver(() => {
-			if (equityEl && equityChart) equityChart.applyOptions({ width: equityEl.clientWidth });
-			if (drawdownEl && drawdownChart) drawdownChart.applyOptions({ width: drawdownEl.clientWidth });
-			if (tradesEl && tradesChart) tradesChart.applyOptions({ width: tradesEl.clientWidth });
+			if (equityEl && equityChart) equityChart.applyOptions({ width: equityEl.clientWidth, height: equityEl.clientHeight });
+			if (drawdownEl && drawdownChart) drawdownChart.applyOptions({ width: drawdownEl.clientWidth, height: drawdownEl.clientHeight });
+			if (tradesEl && tradesChart) tradesChart.applyOptions({ width: tradesEl.clientWidth, height: tradesEl.clientHeight });
 		});
 		ro.observe(equityEl);
 		ro.observe(drawdownEl);
@@ -278,6 +264,8 @@
 		</div>
 	</div>
 
+	<div class="chart-separator"></div>
+
 	<!-- Chart 2: Drawdown -->
 	<div class="chart-card">
 		<div class="chart-head">
@@ -292,6 +280,8 @@
 			<span>Sharpe <b>{m.sharpeRatio.toFixed(2)}</b></span>
 		</div>
 	</div>
+
+	<div class="chart-separator"></div>
 
 	<!-- Chart 3: Trade Activity -->
 	<div class="chart-card">
@@ -310,26 +300,36 @@
 <style>
 	.charts-row {
 		display: flex;
-		gap: 1px;
-		background: #111;
+		gap: 0;
+		background: #000;
 		flex-shrink: 0;
 		border-bottom: 1px solid #1a1a1a;
+		padding: 12px 16px;
 	}
 
 	.chart-card {
 		flex: 1;
 		min-width: 0;
-		background: #0a0a0a;
+		background: #0f0f0f;
 		display: flex;
 		flex-direction: column;
+		border: 1px solid #1a1a1a;
+		border-radius: 8px;
+		overflow: hidden;
+	}
+
+	.chart-separator {
+		width: 12px;
+		flex-shrink: 0;
 	}
 
 	.chart-head {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		padding: 8px 12px;
+		padding: 10px 14px;
 		border-bottom: 1px solid #1a1a1a;
+		background: #0a0a0a;
 	}
 
 	.chart-label {
@@ -343,27 +343,29 @@
 	.chart-val {
 		font-family: 'Share Tech Mono', monospace;
 		font-size: 12px;
-		color: #888;
+		color: #ddd;
 		font-weight: 600;
 	}
 
 	.chart-body {
 		width: 100%;
 		flex: 1;
+		min-height: 0;
 	}
 
 	.chart-foot {
 		display: flex;
 		justify-content: space-between;
-		padding: 6px 12px;
+		padding: 8px 14px;
 		font-family: 'Share Tech Mono', monospace;
 		font-size: 10px;
-		color: #444;
-		border-top: 1px solid #111;
+		color: #aaa;
+		border-top: 1px solid #1a1a1a;
+		background: #0a0a0a;
 	}
 
 	.chart-foot b {
-		color: #888;
+		color: #ddd;
 		font-weight: 600;
 	}
 
@@ -373,6 +375,8 @@
 	@media (max-width: 900px) {
 		.charts-row {
 			flex-direction: column;
+			gap: 8px;
 		}
+		.chart-separator { display: none; }
 	}
 </style>

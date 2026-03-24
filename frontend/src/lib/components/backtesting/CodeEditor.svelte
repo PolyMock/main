@@ -58,19 +58,21 @@
 
 	// Terminal color constants
 	const O = '\x1b[38;5;208m'; // orange
-	const G = '\x1b[32m'; // green
-	const R = '\x1b[0m'; // reset
-	const DIM = '\x1b[90m'; // dim/gray
+	const G = '\x1b[32m';       // green
+	const R = '\x1b[0m';        // reset
+	const DIM = '\x1b[90m';     // dim/gray
+	const W = '\x1b[97m';       // bright white
+	const CYAN = '\x1b[36m';    // cyan for code keywords
 
-	let selectedStrategy: number | null = $state(null);
+	let selectedStrategy: number | null = $state(0); // Auto-select Mean Reversion
 
-	// Strategies matching the real backtest_engine Python strategies
+	// Strategies matching the real backtest_engine Rust strategies
 	const strategies = [
 		{
 			id: 'mean_reversion',
 			name: 'Mean Reversion',
-			description: 'Buy when price drops very low, betting on reversion to the mean.',
-			logic: 'If price ≤ threshold → BUY position, else HOLD',
+			description: 'Buy when price drops below threshold, betting on reversion to the mean. Fixed position size.',
+			logic: 'If price ≤ threshold → BUY fixed amount, else HOLD',
 			uses: ['trade.price', 'trade.position'],
 			tags: ['simple', 'price-based'],
 			code: `def mean_reversion(trade, trade_log, portfolio, user_perso_parameters):
@@ -82,26 +84,6 @@
     else:
         market_id = trade.get("market_id")
         position = "hold"
-    return {"market_id": market_id, "position": position, "amount": amount}`,
-		},
-		{
-			id: 'mean_reversion_with_portfolio_cash',
-			name: 'Cash-Weighted',
-			description: 'Size positions dynamically using 1% of available cash instead of fixed amounts.',
-			logic: 'If price ≤ threshold → BUY with floor(cash/100) shares',
-			uses: ['trade.price', 'portfolio.cash'],
-			tags: ['dynamic sizing', 'portfolio-aware'],
-			code: `def mean_reversion_with_portfolio_cash(trade, trade_log, portfolio, user_perso_parameters):
-    threshold_low = 0.01
-    if trade.get("price") <= threshold_low:
-        market_id = trade.get("market_id")
-        position = trade.get("position")
-        import math
-        amount = math.floor(int(portfolio["cash"])/100)
-    else:
-        market_id = trade.get("market_id")
-        position = "hold"
-        amount = 0
     return {"market_id": market_id, "position": position, "amount": amount}`,
 		},
 		{
@@ -130,7 +112,7 @@
 		{
 			id: 'mean_reversion_with_trade_log',
 			name: 'Better Price',
-			description: 'Only buy if the current price is lower than the minimum price you previously paid.',
+			description: 'Only buy if the current price is lower than the minimum price you previously paid on this market.',
 			logic: 'If price ≤ threshold AND price < min(past prices) → BUY',
 			uses: ['trade.price', 'trade_log'],
 			tags: ['price improvement', 'trade-log'],
@@ -158,7 +140,7 @@
 		{
 			id: 'mean_reversion_with_trade_log_time',
 			name: 'Cooldown',
-			description: 'Enforce a 1-day cooldown between trades on the same market/position.',
+			description: 'Enforce a 1-day cooldown between trades on the same market/position. Prevents overtrading.',
 			logic: 'If price ≤ threshold AND >1 day since last trade on same market → BUY',
 			uses: ['trade.price', 'trade.timestamp', 'trade_log'],
 			tags: ['time-based', 'rate-limiting'],
@@ -186,13 +168,14 @@
 		},
 		{
 			id: 'mean_reversion_with_user_perso_parameter_internal',
-			name: 'Scaled by Exposure',
-			description: 'Amount scales with how many trades you\'ve made on a market (up to 100). More confidence = bigger position.',
-			logic: 'If price ≤ threshold → BUY min(100, trade_count_on_market) shares',
+			name: 'Scaled Entry',
+			description: 'Amount scales with trade count on a market (up to your set amount). Starts small, builds conviction.',
+			logic: 'If price ≤ threshold → BUY min(amount, trade_count) shares',
 			uses: ['trade.price', 'user_perso_parameters'],
 			tags: ['adaptive', 'custom-state'],
 			code: `def mean_reversion_with_user_perso_parameter_internal(trade, trade_log, portfolio, user_perso_parameters):
     threshold_low = 0.01
+    amount = 10
     if "trade_count" not in user_perso_parameters:
         user_perso_parameters["trade_count"] = {}
     if trade.get("market_id") not in user_perso_parameters["trade_count"]:
@@ -201,7 +184,7 @@
     if trade.get("price") <= threshold_low:
         market_id = trade.get("market_id")
         position = trade.get("position")
-        amount = min(100, user_perso_parameters["trade_count"][market_id])
+        amount = min(amount, user_perso_parameters["trade_count"][market_id])
     else:
         market_id = trade.get("market_id")
         position = "hold"
@@ -214,19 +197,58 @@
 		selectedStrategy = idx;
 		if (termInstance) {
 			termInstance.clear();
-			const s = strategies[idx];
-			termInstance.writeln(`${G}✓ Strategy selected: ${s.name}${R}`);
-			termInstance.writeln(`  ${s.description}`);
-			termInstance.writeln('');
-			showCode(termInstance);
-			termInstance.writeln('');
-			showParams(termInstance);
-			termInstance.writeln('');
-			termInstance.writeln(`  ${DIM}Configure params with ${O}set${R}${DIM} commands, or:${R}`);
-			termInstance.writeln('');
-			termInstance.writeln(`  ${O}>>> Type ${G}run${R}${O} to launch the backtest <<<${R}`);
-			termPrompt(termInstance);
+			showTerminalView(termInstance);
 		}
+	}
+
+	function showTerminalView(term: any) {
+		if (selectedStrategy === null) return;
+		const s = strategies[selectedStrategy];
+
+		// Strategy header
+		term.writeln('');
+		term.writeln(`  ${O}STRATEGY${R}  ${W}${s.name}${R}  ${DIM}${s.description}${R}`);
+		term.writeln('');
+
+		// Code block with syntax highlighting (single-pass to avoid escape code corruption)
+		term.writeln(`  ${DIM}┌─ strategy code ──────────────────────────────────────────┐${R}`);
+		const code = s.code
+			.replace(/threshold_low = [\d.]+/, `threshold_low = ${thresholdLow}`)
+			.replace(/amount = 10(?!\d)/, `amount = ${amount}`);
+		for (const line of code.split('\n')) {
+			const highlighted = line.replace(
+				/\b(def|if|else|return|import|for|in|not|from)\b|(threshold_low|amount|market_id|position)(?=\s*=)|(".*?")|(\b\d+\.?\d*\b)/g,
+				(m, kw, param, str, num) => {
+					if (kw) return `${CYAN}${kw}${R}`;
+					if (param) return `${O}${param}${R}`;
+					if (str) return `${G}${str}${R}`;
+					if (num) return `${O}${num}${R}`;
+					return m;
+				}
+			);
+			term.writeln(`  ${DIM}│${R}  ${highlighted}`);
+		}
+		term.writeln(`  ${DIM}└──────────────────────────────────────────────────────────┘${R}`);
+		term.writeln('');
+
+		// Compact params table
+		const fmtVal = (v: any, unit = '') => v != null ? `${O}${v}${unit}${R}` : `${DIM}off${R}`;
+		const slStr = stopLoss != null ? `${(stopLoss * 100).toFixed(0)}%` : null;
+		const tpStr = takeProfit != null ? `${(takeProfit * 100).toFixed(0)}%` : null;
+		const trStr = trailingStop != null ? `${(trailingStop * 100).toFixed(0)}%` : null;
+		const mhStr = maxHoldHours != null ? `${maxHoldHours}h` : null;
+
+		term.writeln(`  ${DIM}┌─ parameters ─────────────────┬─ exit rules ──────────────┐${R}`);
+		term.writeln(`  ${DIM}│${R}  ${G}cash${R}       ${O}$${initialCash.toLocaleString().padEnd(12)}${R}  ${DIM}│${R}  ${G}stoploss${R}    ${fmtVal(slStr).padEnd(16)}  ${DIM}│${R}`);
+		term.writeln(`  ${DIM}│${R}  ${G}threshold${R}  ${O}${String(thresholdLow).padEnd(13)}${R}  ${DIM}│${R}  ${G}takeprofit${R}  ${fmtVal(tpStr).padEnd(16)}  ${DIM}│${R}`);
+		term.writeln(`  ${DIM}│${R}  ${G}amount${R}     ${O}${String(amount).padEnd(13)}${R}  ${DIM}│${R}  ${G}trailing${R}    ${fmtVal(trStr).padEnd(16)}  ${DIM}│${R}`);
+		term.writeln(`  ${DIM}│${R}  ${G}reimburse${R}  ${O}${(reimburseOpenPositions ? 'on' : 'off').padEnd(13)}${R}  ${DIM}│${R}  ${G}maxhold${R}     ${fmtVal(mhStr).padEnd(16)}  ${DIM}│${R}`);
+		term.writeln(`  ${DIM}└──────────────────────────────┴────────────────────────────┘${R}`);
+		term.writeln('');
+
+		// Run hint
+		term.writeln(`  ${W}>>>  Type ${G}run${R}${W} to launch  <<<${R}     ${DIM}${O}help${R}${DIM} for all commands${R}`);
+		termPrompt(term);
 	}
 
 	// Terminal state
@@ -236,36 +258,42 @@
 	let inputLine = '';
 
 	function showParams(term: any) {
-		term.writeln(`${O}━━━ Parameters ━━━${R}`);
-		term.writeln(`  ${G}cash${R}         $${initialCash.toLocaleString()}        ${DIM}set cash <amount>${R}`);
-		term.writeln(`  ${G}reimburse${R}    ${reimburseOpenPositions ? 'on' : 'off'}                 ${DIM}set reimburse on/off${R}`);
-		term.writeln(`  ${G}price${R}        ${priceInf ?? '0'} → ${priceSup ?? '1'}            ${DIM}set price <min> <max>${R}`);
-		term.writeln(`${O}━━━ Strategy Params ━━━${R}`);
-		term.writeln(`  ${G}threshold${R}    ${thresholdLow}              ${DIM}set threshold <value>${R}`);
-		term.writeln(`  ${G}amount${R}       ${amount}                 ${DIM}set amount <shares>${R}`);
-		term.writeln(`${O}━━━ Exit Rules ━━━${R}`);
-		term.writeln(`  ${G}stoploss${R}     ${stopLoss != null ? (stopLoss * 100).toFixed(0) + '%' : 'off'}              ${DIM}set stoploss <% or off>${R}`);
-		term.writeln(`  ${G}takeprofit${R}   ${takeProfit != null ? (takeProfit * 100).toFixed(0) + '%' : 'off'}              ${DIM}set takeprofit <% or off>${R}`);
-		term.writeln(`  ${G}trailing${R}     ${trailingStop != null ? (trailingStop * 100).toFixed(0) + '%' : 'off'}              ${DIM}set trailing <% or off>${R}`);
-		term.writeln(`  ${G}maxhold${R}      ${maxHoldHours != null ? maxHoldHours + 'h' : 'off'}              ${DIM}set maxhold <hours or off>${R}`);
-		term.writeln(`${O}━━━━━━━━━━━━━━━━━━━${R}`);
+		const slStr = stopLoss != null ? `${(stopLoss * 100).toFixed(0)}%` : null;
+		const tpStr = takeProfit != null ? `${(takeProfit * 100).toFixed(0)}%` : null;
+		const trStr = trailingStop != null ? `${(trailingStop * 100).toFixed(0)}%` : null;
+		const mhStr = maxHoldHours != null ? `${maxHoldHours}h` : null;
+		const fmtVal = (v: any) => v != null ? `${O}${v}${R}` : `${DIM}off${R}`;
+
+		term.writeln(`  ${DIM}┌─ parameters ─────────────────┬─ exit rules ──────────────┐${R}`);
+		term.writeln(`  ${DIM}│${R}  ${G}cash${R}       ${O}$${initialCash.toLocaleString().padEnd(12)}${R}  ${DIM}│${R}  ${G}stoploss${R}    ${fmtVal(slStr).padEnd(16)}  ${DIM}│${R}`);
+		term.writeln(`  ${DIM}│${R}  ${G}threshold${R}  ${O}${String(thresholdLow).padEnd(13)}${R}  ${DIM}│${R}  ${G}takeprofit${R}  ${fmtVal(tpStr).padEnd(16)}  ${DIM}│${R}`);
+		term.writeln(`  ${DIM}│${R}  ${G}amount${R}     ${O}${String(amount).padEnd(13)}${R}  ${DIM}│${R}  ${G}trailing${R}    ${fmtVal(trStr).padEnd(16)}  ${DIM}│${R}`);
+		term.writeln(`  ${DIM}│${R}  ${G}reimburse${R}  ${O}${(reimburseOpenPositions ? 'on' : 'off').padEnd(13)}${R}  ${DIM}│${R}  ${G}maxhold${R}     ${fmtVal(mhStr).padEnd(16)}  ${DIM}│${R}`);
+		term.writeln(`  ${DIM}│${R}  ${G}price${R}      ${O}${(priceInf ?? '0') + ' → ' + (priceSup ?? '1')}${R}       ${DIM}│${R}                            ${DIM}│${R}`);
+		term.writeln(`  ${DIM}└──────────────────────────────┴────────────────────────────┘${R}`);
 	}
 
 	function showCode(term: any) {
 		if (selectedStrategy === null) return;
 		const s = strategies[selectedStrategy];
-		term.writeln(`${O}━━━ ${s.name} — Python Code ━━━${R}`);
-		term.writeln('');
-		// Show the code with dynamic param values injected
+		term.writeln(`  ${DIM}┌─ ${s.name} ──────────────────────────────────────────────┐${R}`);
 		const code = s.code
-			.replace(/threshold_low = [\d.]+/, `threshold_low = ${priceInf ?? 0.01}`)
-			.replace(/amount = 10(?!\d)/, `amount = ${Math.floor(initialCash * 0.01) || 10}`);
+			.replace(/threshold_low = [\d.]+/, `threshold_low = ${thresholdLow}`)
+			.replace(/amount = 10(?!\d)/, `amount = ${amount}`);
 		for (const line of code.split('\n')) {
-			term.writeln(`  ${G}${line}${R}`);
+			const highlighted = line.replace(
+				/\b(def|if|else|return|import|for|in|not|from)\b|(threshold_low|amount|market_id|position)(?=\s*=)|(".*?")|(\b\d+\.?\d*\b)/g,
+				(m, kw, param, str, num) => {
+					if (kw) return `${CYAN}${kw}${R}`;
+					if (param) return `${O}${param}${R}`;
+					if (str) return `${G}${str}${R}`;
+					if (num) return `${O}${num}${R}`;
+					return m;
+				}
+			);
+			term.writeln(`  ${DIM}│${R}  ${highlighted}`);
 		}
-		term.writeln('');
-		term.writeln(`${DIM}Config: cash=${O}$${initialCash.toLocaleString()}${R}${DIM}, reimburse=${O}${reimburseOpenPositions ? 'on' : 'off'}${R}${DIM}, price_filter=${O}${priceInf ?? '0'}→${priceSup ?? '1'}${R}`);
-		term.writeln(`${O}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${R}`);
+		term.writeln(`  ${DIM}└──────────────────────────────────────────────────────────┘${R}`);
 	}
 
 	function termPrompt(term: any) {
@@ -278,20 +306,26 @@
 
 		if (trimmed === 'run') {
 			if (selectedStrategy === null) {
-				term.writeln(`${O}Select a strategy first by clicking one above.${R}`);
+				term.writeln(`${O}  Select a strategy first by clicking one above.${R}`);
 				termPrompt(term);
 				return;
 			}
 			const s = strategies[selectedStrategy];
 			term.writeln('');
-			term.writeln(`${G}━━━ Running: ${s.name} ━━━${R}`);
-			term.writeln(`${DIM}cash=$${initialCash.toLocaleString()}, reimburse=${reimburseOpenPositions ? 'yes' : 'no'}, price=${priceInf ?? '0'}→${priceSup ?? '1'}${R}`);
-			term.writeln(`${O}Starting backtest...${R}`);
+			term.writeln(`  ${G}━━━ LAUNCHING: ${s.name} ━━━${R}`);
+			term.writeln(`  ${DIM}cash=$${initialCash.toLocaleString()}  threshold=${thresholdLow}  amount=${amount}  reimburse=${reimburseOpenPositions ? 'yes' : 'no'}${R}`);
+			term.writeln(`  ${DIM}SL=${stopLoss != null ? (stopLoss * 100).toFixed(0) + '%' : 'off'}  TP=${takeProfit != null ? (takeProfit * 100).toFixed(0) + '%' : 'off'}  trailing=${trailingStop != null ? (trailingStop * 100).toFixed(0) + '%' : 'off'}  maxhold=${maxHoldHours != null ? maxHoldHours + 'h' : 'off'}${R}`);
+			term.writeln('');
 			onRunBacktest(s.code, s.id, {
 				initialCash,
 				reimburseOpenPositions,
 				priceInf,
 				priceSup,
+				strategyParams: { threshold_low: thresholdLow, amount },
+				stopLoss,
+				takeProfit,
+				trailingStop,
+				maxHoldHours,
 			});
 			return;
 		}
@@ -303,7 +337,7 @@
 		}
 		if (trimmed === 'clear') {
 			term.clear();
-			termPrompt(term);
+			showTerminalView(term);
 			return;
 		}
 		if (trimmed === 'code') {
@@ -311,7 +345,7 @@
 				term.writeln('');
 				showCode(term);
 			} else {
-				term.writeln(`${O}Select a strategy first.${R}`);
+				term.writeln(`${O}  Select a strategy first.${R}`);
 			}
 			termPrompt(term);
 			return;
@@ -325,7 +359,7 @@
 				if (!isNaN(val) && val > 0) {
 					initialCash = val;
 				} else {
-					term.writeln(`${O}Invalid. Use: set cash 10000${R}`);
+					term.writeln(`  ${O}Invalid. Use: set cash 10000${R}`);
 					valid = false;
 				}
 			} else if (key === 'reimburse') {
@@ -335,14 +369,76 @@
 				const max = parts[2] ? parseNum(parts[2]) : null;
 				priceInf = min !== null && !isNaN(min) ? min : null;
 				priceSup = max !== null && !isNaN(max) ? max : null;
+			} else if (key === 'threshold') {
+				const val = parts[1] ? parseNum(parts[1]) : NaN;
+				if (!isNaN(val) && val >= 0 && val <= 1) {
+					thresholdLow = val;
+				} else {
+					term.writeln(`  ${O}Invalid. Use: set threshold 0.3 (0-1 range)${R}`);
+					valid = false;
+				}
+			} else if (key === 'amount') {
+				const val = parts[1] ? parseNum(parts[1]) : NaN;
+				if (!isNaN(val) && val > 0) {
+					amount = Math.floor(val);
+				} else {
+					term.writeln(`  ${O}Invalid. Use: set amount 10${R}`);
+					valid = false;
+				}
+			} else if (key === 'stoploss' || key === 'sl') {
+				if (parts[1]?.toLowerCase() === 'off') {
+					stopLoss = null;
+				} else {
+					const val = parts[1] ? parseNum(parts[1]) : NaN;
+					if (!isNaN(val) && val > 0) {
+						stopLoss = val / 100;
+					} else {
+						term.writeln(`  ${O}Invalid. Use: set stoploss 20 (%) or off${R}`);
+						valid = false;
+					}
+				}
+			} else if (key === 'takeprofit' || key === 'tp') {
+				if (parts[1]?.toLowerCase() === 'off') {
+					takeProfit = null;
+				} else {
+					const val = parts[1] ? parseNum(parts[1]) : NaN;
+					if (!isNaN(val) && val > 0) {
+						takeProfit = val / 100;
+					} else {
+						term.writeln(`  ${O}Invalid. Use: set takeprofit 50 (%) or off${R}`);
+						valid = false;
+					}
+				}
+			} else if (key === 'trailing') {
+				if (parts[1]?.toLowerCase() === 'off') {
+					trailingStop = null;
+				} else {
+					const val = parts[1] ? parseNum(parts[1]) : NaN;
+					if (!isNaN(val) && val > 0) {
+						trailingStop = val / 100;
+					} else {
+						term.writeln(`  ${O}Invalid. Use: set trailing 10 (%) or off${R}`);
+						valid = false;
+					}
+				}
+			} else if (key === 'maxhold') {
+				if (parts[1]?.toLowerCase() === 'off') {
+					maxHoldHours = null;
+				} else {
+					const val = parts[1] ? parseNum(parts[1]) : NaN;
+					if (!isNaN(val) && val > 0) {
+						maxHoldHours = val;
+					} else {
+						term.writeln(`  ${O}Invalid. Use: set maxhold 168 (hours) or off${R}`);
+						valid = false;
+					}
+				}
 			} else {
-				term.writeln(`${O}Unknown param. Options: cash, reimburse, price${R}`);
+				term.writeln(`  ${O}Unknown: ${key}. Type ${W}help${O} for options.${R}`);
 				valid = false;
 			}
 			if (valid) {
-				term.writeln(`${G}✓ Updated${R}`);
-				term.writeln('');
-				if (selectedStrategy !== null) showCode(term);
+				term.writeln(`  ${G}✓ ${key} updated${R}`);
 				term.writeln('');
 				showParams(term);
 			}
@@ -352,17 +448,31 @@
 
 		if (trimmed === 'help') {
 			term.writeln('');
-			term.writeln(`  ${O}run${R}                    — Run backtest with selected strategy`);
-			term.writeln(`  ${O}params${R}                 — Show current parameters`);
-			term.writeln(`  ${O}code${R}                   — Show strategy code with current params`);
-			term.writeln(`  ${O}set cash <n>${R}           — Set initial bankroll`);
-			term.writeln(`  ${O}set reimburse on/off${R}   — Toggle end-of-backtest reimbursement`);
-			term.writeln(`  ${O}set price <min> <max>${R}  — Price range filter (supports 0,2 or 0.2)`);
-			term.writeln(`  ${O}clear${R}                  — Clear terminal`);
+			term.writeln(`  ${W}COMMANDS${R}`);
+			term.writeln(`  ${O}run${R}                        Launch backtest`);
+			term.writeln(`  ${O}code${R}                       Show strategy code`);
+			term.writeln(`  ${O}params${R}                     Show all parameters`);
+			term.writeln(`  ${O}clear${R}                      Reset terminal view`);
+			term.writeln('');
+			term.writeln(`  ${W}SET PARAMETERS${R}             ${DIM}set <param> <value>${R}`);
+			term.writeln(`  ${O}set cash${R} <n>               Initial bankroll`);
+			term.writeln(`  ${O}set threshold${R} <0-1>        Buy threshold price`);
+			term.writeln(`  ${O}set amount${R} <shares>        Shares per trade`);
+			term.writeln(`  ${O}set reimburse${R} on/off       Reimburse open positions`);
+			term.writeln(`  ${O}set price${R} <min> <max>      Price range filter`);
+			term.writeln('');
+			term.writeln(`  ${W}EXIT RULES${R}`);
+			term.writeln(`  ${O}set sl${R} <% or off>          Stop loss`);
+			term.writeln(`  ${O}set tp${R} <% or off>          Take profit`);
+			term.writeln(`  ${O}set trailing${R} <% or off>    Trailing stop`);
+			term.writeln(`  ${O}set maxhold${R} <hours or off> Max holding time`);
 			termPrompt(term);
 			return;
 		}
 
+		if (trimmed) {
+			term.writeln(`  ${DIM}Unknown command. Type ${O}help${DIM} for options.${R}`);
+		}
 		termPrompt(term);
 	}
 
@@ -400,14 +510,8 @@
 		await new Promise(r => setTimeout(r, 150));
 		fitAddon.fit();
 
-		term.writeln(`${O}━━━ STRATEGY & PARAMETERS ━━━${R}`);
-		term.writeln('');
-		term.writeln(`Select a strategy above, then configure parameters below.`);
-		term.writeln('');
-		showParams(term);
-		term.writeln('');
-		term.writeln(`${DIM}Commands: ${O}run${R}${DIM}, ${O}params${R}${DIM}, ${O}code${R}${DIM}, ${O}set cash/reimburse/price${R}${DIM}, ${O}help${R}${DIM}, ${O}clear${R}`);
-		termPrompt(term);
+		// Show strategy code + params immediately
+		showTerminalView(term);
 
 		term.onData((data: string) => {
 			const code = data.charCodeAt(0);
@@ -447,19 +551,17 @@
 </script>
 
 <div class="strategy-page">
-	<!-- TOP: Dataset summary bar -->
+	<!-- TOP: Dataset summary bar + edit config -->
 	<div class="data-bar">
-		<div class="data-header">
-			<span class="data-title">
-				<span class="cbl">DATASET</span>
-				<span class="data-tag"><span class="dtl">SOURCE</span> {dataSource === 'synthesis' ? 'Synthesis API' : 'Parquet'}</span>
-				<span class="data-tag"><span class="dtl">MARKETS</span> {selectedMarkets.length}</span>
-				<span class="data-tag"><span class="dtl">PLATFORM</span> Polymarket</span>
-				<span class="data-tag"><span class="dtl">TIME</span> {useTimePeriod ? `${timestampStartStr} → ${timestampEndStr}` : 'All time'}</span>
-				{#if filterCategories.size > 0}<span class="data-tag"><span class="dtl">CATEGORY</span> {Array.from(filterCategories).join(', ')}</span>{/if}
-			</span>
-			<span class="edit-btn" role="button" tabindex="0" onclick={() => onEditConfig()} onkeydown={(e) => { if (e.key === 'Enter') onEditConfig(); }}>EDIT CONFIG</span>
+		<div class="data-left">
+			<span class="cbl">DATASET</span>
+			<span class="data-tag"><span class="dtl">SOURCE</span> Synthesis API</span>
+			<span class="data-tag"><span class="dtl">MARKETS</span> {selectedMarkets.length}</span>
+			<span class="data-tag"><span class="dtl">PLATFORM</span> Polymarket</span>
+			<span class="data-tag"><span class="dtl">TIME</span> {useTimePeriod ? `${timestampStartStr} → ${timestampEndStr}` : 'All time'}</span>
+			{#if filterCategories.size > 0}<span class="data-tag"><span class="dtl">CATEGORY</span> {Array.from(filterCategories).join(', ')}</span>{/if}
 		</div>
+		<button class="edit-btn" onclick={() => onEditConfig()}>EDIT CONFIG</button>
 	</div>
 
 	<!-- MIDDLE: Strategy cards -->
@@ -476,20 +578,16 @@
 						<span class="sc-num">{i + 1}</span>
 						<span class="sc-name">{s.name}</span>
 						{#if selectedStrategy === i}
-							<span class="sc-active">SELECTED</span>
+							<span class="sc-active">ACTIVE</span>
 						{/if}
 					</div>
 					<p class="sc-desc">{s.description}</p>
-					<div class="sc-logic">
-						<span class="sc-logic-label">LOGIC</span>
-						<span class="sc-logic-text">{s.logic}</span>
-					</div>
 				</button>
 			{/each}
 		</div>
 	</div>
 
-	<!-- BOTTOM: Params terminal -->
+	<!-- BOTTOM: Terminal -->
 	<div class="term-wrapper" bind:this={termContainer}></div>
 </div>
 
@@ -507,35 +605,35 @@
 		flex-shrink: 0;
 		border-bottom: 1px solid #222;
 		background: #000;
-	}
-	.data-header {
-		width: 100%;
 		display: flex;
-		justify-content: space-between;
 		align-items: center;
-		padding: 10px 20px;
-		background: #000;
-		border: none;
-		color: #eee;
-		cursor: pointer;
-		font-size: 13px;
+		justify-content: space-between;
+		padding: 8px 16px;
+		gap: 12px;
 	}
-	.data-header:hover { background: #0a0a0a; }
-	.data-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-	.cbl { color: #f97316; font-weight: 700; font-size: 11px; letter-spacing: 1px; }
+	.data-left {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+		min-width: 0;
+	}
+	.cbl { color: #f97316; font-weight: 700; font-size: 11px; letter-spacing: 1px; flex-shrink: 0; }
 	.data-tag {
 		display: inline-flex; align-items: center; gap: 4px;
 		font-family: monospace; font-size: 11px; color: #aaa;
 		background: #111; padding: 2px 8px; border-radius: 3px; border: 1px solid #222;
+		white-space: nowrap;
 	}
 	.dtl { color: #f97316; font-weight: 700; font-size: 9px; letter-spacing: 0.5px; }
-	.data-right { display: flex; align-items: center; gap: 12px; }
 	.edit-btn {
-		background: transparent; border: 1px solid #555; color: #ccc;
-		padding: 4px 12px; font-family: monospace; font-size: 11px;
-		cursor: pointer; border-radius: 3px; letter-spacing: 1px; font-weight: 600;
+		flex-shrink: 0;
+		background: transparent; border: 1px solid #f97316; color: #f97316;
+		padding: 6px 16px; font-family: 'Share Tech Mono', monospace; font-size: 11px;
+		cursor: pointer; border-radius: 4px; letter-spacing: 1px; font-weight: 700;
+		transition: all 0.15s;
 	}
-	.edit-btn:hover { color: #f97316; border-color: #f97316; }
+	.edit-btn:hover { background: #f97316; color: #000; }
 
 	/* ── Strategy Cards ── */
 	.strategies-section {
@@ -544,7 +642,7 @@
 		overflow-y: hidden;
 		border-bottom: 1px solid #f97316;
 		background: #000;
-		padding: 12px 16px 14px;
+		padding: 10px 16px 12px;
 	}
 	.strategies-label {
 		font-family: 'Share Tech Mono', monospace;
@@ -552,22 +650,22 @@
 		font-weight: 700;
 		color: #f97316;
 		letter-spacing: 2px;
-		margin-bottom: 10px;
+		margin-bottom: 8px;
 		padding-left: 2px;
 	}
 	.strategies-grid {
 		display: flex;
-		gap: 10px;
+		gap: 8px;
 		min-width: min-content;
 	}
 	.strategy-card {
-		flex: 0 0 210px;
+		flex: 0 0 185px;
 		display: flex;
 		flex-direction: column;
-		gap: 10px;
-		padding: 14px 16px;
+		gap: 8px;
+		padding: 10px 12px;
 		background: #0a0a0a;
-		border: 1px solid #333;
+		border: 1px solid #222;
 		border-radius: 6px;
 		color: #ccc;
 		cursor: pointer;
@@ -581,21 +679,21 @@
 	.strategy-card.selected {
 		border-color: #f97316;
 		background: #1a0d00;
-		box-shadow: 0 0 16px rgba(249, 115, 22, 0.2), inset 0 0 30px rgba(249, 115, 22, 0.03);
+		box-shadow: 0 0 12px rgba(249, 115, 22, 0.15), inset 0 0 20px rgba(249, 115, 22, 0.03);
 	}
 	.sc-header {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: 6px;
 	}
 	.sc-num {
 		font-family: 'Share Tech Mono', monospace;
-		font-size: 11px;
+		font-size: 10px;
 		font-weight: 700;
 		color: #555;
 		background: #1a1a1a;
-		width: 22px;
-		height: 22px;
+		width: 20px;
+		height: 20px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -606,7 +704,7 @@
 	.strategy-card.selected .sc-num { color: #000; background: #f97316; }
 	.sc-name {
 		font-family: 'Share Tech Mono', monospace;
-		font-size: 13px;
+		font-size: 12px;
 		font-weight: 700;
 		color: #fff;
 		letter-spacing: 0.3px;
@@ -614,55 +712,32 @@
 	}
 	.strategy-card.selected .sc-name { color: #f97316; }
 	.sc-active {
-		font-size: 8px;
+		font-size: 7px;
 		font-weight: 700;
 		color: #f97316;
 		background: rgba(249, 115, 22, 0.2);
-		padding: 2px 6px;
+		padding: 2px 5px;
 		border-radius: 3px;
 		letter-spacing: 1px;
 		flex-shrink: 0;
 	}
 	.sc-desc {
-		font-size: 12px;
-		color: #bbb;
-		line-height: 1.5;
+		font-size: 11px;
+		color: #888;
+		line-height: 1.4;
 		margin: 0;
 	}
-	.strategy-card.selected .sc-desc { color: #ddd; }
-	.sc-logic {
-		font-size: 11px;
-		font-family: monospace;
-		background: #050505;
-		padding: 8px 10px;
-		border-radius: 4px;
-		border: 1px solid #222;
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-	}
-	.sc-logic-label {
-		font-size: 9px;
-		font-weight: 700;
-		color: #f97316;
-		letter-spacing: 1px;
-	}
-	.sc-logic-text {
-		color: #ccc;
-	}
-	.strategy-card:hover .sc-logic { border-color: #444; }
-	.strategy-card.selected .sc-logic { border-color: #f97316; background: #0a0500; }
-	.strategy-card.selected .sc-logic-text { color: #eee; }
+	.strategy-card.selected .sc-desc { color: #bbb; }
 
 	/* ── Terminal ── */
 	.term-wrapper {
 		flex: 1;
-		min-height: 120px;
+		min-height: 180px;
 		width: 100%;
 		box-sizing: border-box;
 		position: relative;
 	}
-	.term-wrapper :global(.xterm) { padding: 12px; height: 100%; }
+	.term-wrapper :global(.xterm) { padding: 8px 12px; height: 100%; }
 	.term-wrapper :global(.xterm-viewport) { background-color: #000 !important; overflow-y: auto !important; }
 	.term-wrapper :global(.xterm-viewport::-webkit-scrollbar) { width: 6px; }
 	.term-wrapper :global(.xterm-viewport::-webkit-scrollbar-track) { background: #000; }

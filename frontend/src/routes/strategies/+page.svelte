@@ -4,7 +4,6 @@
 	import { walletStore } from '$lib/wallet/stores';
 	import { authStore } from '$lib/auth/auth-store';
 	import { supabase } from '$lib/supabase';
-	import MiniEquityCurveChart from '$lib/components/MiniEquityCurveChart.svelte';
 	import PaperTradeConfirmModal from '$lib/components/PaperTradeConfirmModal.svelte';
 	import { polymarketService } from '$lib/solana/polymarket-service';
 	import { findSimilarActiveMarkets, calculateBatchInfo, executePaperTrading } from '$lib/services/strategy-paper-trading';
@@ -27,8 +26,20 @@
 		winRate: number;
 		profitFactor: number;
 		maxDrawdown: number;
-		equityCurve: Array<{ timestamp: string; capital: number }>;
+		equityCurve: any[];
 		createdAt: string;
+		avgWin: number;
+		avgLoss: number;
+		winningTrades: number;
+		losingTrades: number;
+		sharpeRatio: number;
+		executionTime: number;
+		marketsAnalyzed: number;
+		backtestData: any;
+		description: string | null;
+		marketIds: string[];
+		positionSizingValue: number;
+		positionSizingType: string;
 	}
 
 	interface PostedTrade {
@@ -199,7 +210,17 @@
 				equityCurve: s.equity_curve || [],
 				createdAt: s.created_at,
 				avgWin: s.avg_win || 0,
-				avgLoss: s.avg_loss || 0
+				avgLoss: s.avg_loss || 0,
+				winningTrades: s.winning_trades || 0,
+				losingTrades: s.losing_trades || 0,
+				sharpeRatio: s.sharpe_ratio || 0,
+				executionTime: s.execution_time || 0,
+				marketsAnalyzed: s.markets_analyzed || 0,
+				backtestData: s.backtest_data || null,
+				description: s.description || s.backtest_data?.description || null,
+				marketIds: s.market_ids || [],
+				positionSizingValue: s.position_sizing_value || 0,
+				positionSizingType: s.position_sizing_type || 'FIXED',
 			}));
 
 			// Fetch posted trades
@@ -245,10 +266,6 @@
 		await fetch('/api/auth/logout', { method: 'POST' });
 		user = null;
 		strategies = [];
-	}
-
-	function viewStrategy(strategyId: number) {
-		goto(`/strategies/${strategyId}`);
 	}
 
 	function openDeleteModal(strategy: Strategy) {
@@ -639,180 +656,108 @@
 			<div class="empty-state">
 				<h2>Nothing Here Yet</h2>
 				<p>Complete a backtest or post a trade to see it here.</p>
-				<a href="/backtesting?tab=strategy" class="btn-primary">Start Backtesting</a>
+				<a href="/backtesting" class="btn-primary">Start Backtesting</a>
 			</div>
 		{:else}
-			<div class="strategies-grid">
-				<!-- Strategy Cards -->
-				{#if activeTab === 'all' || activeTab === 'strategies'}
-					{#each strategies as strategy}
-						<div class="strategy-card" on:click={() => viewStrategy(strategy.id)}>
-							<div class="card-type-badge strategy-badge">STRATEGY</div>
-							<div class="card-header">
-								<div class="header-left">
-									<h3>{strategy.strategyName}</h3>
-									<span class="date">{formatDate(strategy.createdAt)}</span>
-								</div>
-								<div class="card-actions" on:click|stopPropagation>
-									<button
-										on:click={() => openPaperTradeModal(strategy)}
-										class="btn-paper-trade"
-										title="Paper Trade This Strategy"
-										disabled={isPaperTrading}
-									>
-										<svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-											<path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
-											<path d="M6.271 5.055a.5.5 0 0 1 .52.038l3.5 2.5a.5.5 0 0 1 0 .814l-3.5 2.5A.5.5 0 0 1 6 10.5v-5a.5.5 0 0 1 .271-.445z"/>
-										</svg>
-									</button>
-									<button
-										on:click={() => viewStrategy(strategy.id)}
-										class="btn-view"
-										title="View Details"
-									>
-										<svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-											<path d="M8 2.5c-3.5 0-6.5 2.5-8 5.5 1.5 3 4.5 5.5 8 5.5s6.5-2.5 8-5.5c-1.5-3-4.5-5.5-8-5.5zM8 11c-1.7 0-3-1.3-3-3s1.3-3 3-3 3 1.3 3 3-1.3 3-3 3zm0-5c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
-										</svg>
-									</button>
-									<button
-										on:click={() => openDeleteModal(strategy)}
-										class="btn-delete"
-										title="Delete"
-									>
-										<svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-											<path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
-											<path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
-										</svg>
-									</button>
-								</div>
+		<div class="posts-feed">
+			{#if activeTab === 'all' || activeTab === 'strategies'}
+				{#each strategies as strategy}
+					{@const isPositive = strategy.totalReturnPercent >= 0}
+					<!-- svelte-ignore a11y_click_events_have_key_events -->
+					<div class="post-card" on:click={() => goto(`/strategies/${strategy.id}`)}>
+						<div class="post-card-top">
+							<div class="post-card-header">
+								<div class="post-type strategy-type">STRATEGY</div>
+								<span class="post-date">{formatDate(strategy.createdAt)}</span>
 							</div>
-
-							<p class="market-question">{strategy.marketQuestion}</p>
-
-							<div class="return-badge" class:positive={strategy.totalReturnPercent > 0} class:negative={strategy.totalReturnPercent < 0}>
-								<span class="return-label">RETURN</span>
-								<span class="return-value">
-									{strategy.totalReturnPercent > 0 ? '+' : ''}{strategy.totalReturnPercent.toFixed(2)}%
-								</span>
-							</div>
-
-							{#if strategy.equityCurve && strategy.equityCurve.length > 0}
-								<div class="equity-curve-container">
-									<MiniEquityCurveChart
-										equityCurve={strategy.equityCurve}
-										initialCapital={strategy.initialCapital}
-										isPositive={strategy.totalReturnPercent > 0}
-									/>
-								</div>
+							<div class="post-card-title">{strategy.strategyName}</div>
+							{#if strategy.description}
+								<div class="post-card-desc">{strategy.description}</div>
 							{/if}
-
-							<div class="metrics">
-								<div class="metric">
-									<span class="metric-label">WIN RATE</span>
-									<span class="metric-value" class:positive={strategy.winRate > 50} class:negative={strategy.winRate < 50}>
-										{strategy.winRate.toFixed(1)}%
-									</span>
-								</div>
-								<div class="metric">
-									<span class="metric-label">TRADES</span>
-									<span class="metric-value">{strategy.totalTrades}</span>
-								</div>
-								<div class="metric">
-									<span class="metric-label">PROFIT FACTOR</span>
-									<span class="metric-value" class:positive={strategy.profitFactor && strategy.profitFactor > 1} class:negative={strategy.profitFactor && strategy.profitFactor < 1}>
-										{strategy.profitFactor ? strategy.profitFactor.toFixed(2) : 'N/A'}
-									</span>
-								</div>
-								<div class="metric">
-									<span class="metric-label">MAX DRAWDOWN</span>
-									<span class="metric-value negative">
-										{strategy.maxDrawdown ? strategy.maxDrawdown.toFixed(2) + '%' : 'N/A'}
-									</span>
-								</div>
-								<div class="metric">
-									<span class="metric-label">AVG WIN</span>
-									<span class="metric-value positive">
-										{formatCurrency(strategy.avgWin)}
-									</span>
-								</div>
-								<div class="metric">
-									<span class="metric-label">AVG LOSS</span>
-									<span class="metric-value negative">
-										{formatCurrency(strategy.avgLoss)}
-									</span>
-								</div>
+						</div>
+						<div class="post-card-metrics">
+							<div class="return-pill" class:positive={isPositive} class:negative={!isPositive}>
+								{isPositive ? '+' : ''}{strategy.totalReturnPercent.toFixed(2)}%
 							</div>
-
-							<div class="card-footer">
-								<span class="capital-flow">
+							<div class="metric-chips">
+								<span class="chip">
+									<span class="chip-label">Win</span>
+									<span class="chip-val" class:positive={strategy.winRate >= 50} class:negative={strategy.winRate < 50}>{strategy.winRate.toFixed(1)}%</span>
+								</span>
+								<span class="chip">
+									<span class="chip-label">Trades</span>
+									<span class="chip-val">{strategy.totalTrades}</span>
+								</span>
+								<span class="chip">
+									<span class="chip-label">PF</span>
+									<span class="chip-val">{strategy.profitFactor ? strategy.profitFactor.toFixed(2) : '—'}</span>
+								</span>
+								<span class="chip">
+									<span class="chip-label">Sharpe</span>
+									<span class="chip-val">{strategy.sharpeRatio ? strategy.sharpeRatio.toFixed(2) : '—'}</span>
+								</span>
+								<span class="chip">
+									<span class="chip-label">DD</span>
+									<span class="chip-val negative">{strategy.maxDrawdown ? strategy.maxDrawdown.toFixed(1) + '%' : '—'}</span>
+								</span>
+								<span class="chip capital-chip">
 									{formatCurrency(strategy.initialCapital)} → {formatCurrency(strategy.finalCapital)}
 								</span>
 							</div>
 						</div>
-					{/each}
-				{/if}
-
-				<!-- Trade Cards -->
-				{#if activeTab === 'all' || activeTab === 'trades'}
-					{#each postedTrades as trade}
-						<div class="strategy-card trade-card-item">
-							<div class="card-type-badge trade-badge">TRADE</div>
-							<div class="card-header">
-								<div class="header-left">
-									<h3>{trade.marketTitle}</h3>
-									<span class="date">{formatDate(trade.createdAt)}</span>
-								</div>
-								<div class="trade-position-badge" class:pos-yes={trade.positionType === 'Yes'} class:pos-no={trade.positionType === 'No'}>
-									{trade.positionType}
-								</div>
+						<div class="post-card-footer">
+							<div class="post-card-actions" on:click|stopPropagation>
+								<button class="btn-icon delete" title="Delete" on:click={() => openDeleteModal(strategy)}>
+									<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/><path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/></svg>
+								</button>
 							</div>
-
-							{#if trade.pnl != null}
-								<div class="return-badge" class:positive={trade.pnl >= 0} class:negative={trade.pnl < 0}>
-									<span class="return-label">PnL</span>
-									<span class="return-value">
-										{trade.pnl >= 0 ? '+' : ''}{formatCurrency(trade.pnl)}
-									</span>
-								</div>
-							{/if}
-
-							<div class="metrics trade-metrics">
-								<div class="metric">
-									<span class="metric-label">ENTRY</span>
-									<span class="metric-value">${trade.entryPrice.toFixed(4)}</span>
-								</div>
-								{#if trade.exitPrice != null}
-									<div class="metric">
-										<span class="metric-label">EXIT</span>
-										<span class="metric-value">${trade.exitPrice.toFixed(4)}</span>
-									</div>
-								{/if}
-								<div class="metric">
-									<span class="metric-label">STATUS</span>
-									<span class="metric-value" class:positive={trade.status === 'closed'}>
-										{trade.status}
-									</span>
-								</div>
-								<div class="metric">
-									<span class="metric-label">PLATFORM</span>
-									<span class="metric-value">{trade.platform}</span>
-								</div>
-								<div class="metric">
-									<span class="metric-label">SOURCE</span>
-									<span class="metric-value">{trade.source}</span>
-								</div>
-							</div>
-
-							{#if trade.analysis}
-								<div class="trade-analysis">
-									<span class="analysis-label">Analysis</span>
-									<p>{trade.analysis}</p>
-								</div>
-							{/if}
+							<span class="view-label">View details <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 6 15 12 9 18"/></svg></span>
 						</div>
-					{/each}
-				{/if}
-			</div>
+					</div>
+				{/each}
+			{/if}
+
+			{#if activeTab === 'all' || activeTab === 'trades'}
+				{#each postedTrades as trade}
+					<div class="post-card trade-card">
+						<div class="post-card-top">
+							<div class="post-card-header">
+								<div class="post-type trade-type">TRADE</div>
+								<span class="post-date">{formatDate(trade.createdAt)}</span>
+							</div>
+							<div class="post-card-title">{trade.marketTitle}</div>
+						</div>
+						<div class="post-card-metrics">
+							<span class="trade-side" class:pos-yes={trade.positionType === 'Yes'} class:pos-no={trade.positionType === 'No'}>{trade.positionType}</span>
+							<div class="metric-chips">
+								<span class="chip">
+									<span class="chip-label">Entry</span>
+									<span class="chip-val">${trade.entryPrice.toFixed(2)}</span>
+								</span>
+								{#if trade.exitPrice != null}
+									<span class="chip">
+										<span class="chip-label">Exit</span>
+										<span class="chip-val">${trade.exitPrice.toFixed(2)}</span>
+									</span>
+								{/if}
+								{#if trade.pnl != null}
+									<span class="chip">
+										<span class="chip-label">PnL</span>
+										<span class="chip-val" class:positive={trade.pnl >= 0} class:negative={trade.pnl < 0}>
+											{trade.pnl >= 0 ? '+' : ''}{formatCurrency(trade.pnl)}
+										</span>
+									</span>
+								{/if}
+								<span class="chip">
+									<span class="chip-label">Status</span>
+									<span class="chip-val" class:positive={trade.status === 'closed'}>{trade.status}</span>
+								</span>
+							</div>
+						</div>
+					</div>
+				{/each}
+			{/if}
+		</div>
 		{/if}
 	</div>
 </div>
@@ -1061,220 +1006,161 @@
 		color: #F97316;
 	}
 
-	.strategies-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-		gap: 24px;
-	}
-
-	.strategy-card {
-		background: #000000;
-		border: 1px solid #FFFFFF;
-		border-radius: 16px;
-		padding: 24px;
-		transition: all 0.2s;
-		cursor: pointer;
-		position: relative;
-	}
-
-	.strategy-card:hover {
-		border-color: #F97316;
-		background: #000000;
-	}
-
-	.card-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: flex-start;
-		margin-bottom: 16px;
-	}
-
-	.header-left {
-		flex: 1;
+	.posts-feed {
 		display: flex;
 		flex-direction: column;
-		gap: 6px;
+		gap: 10px;
 	}
 
-	.card-header h3 {
-		color: white;
-		font-size: 20px;
-		font-weight: 700;
-		margin: 0;
-		letter-spacing: -0.02em;
-	}
-
-	.card-actions {
+	.post-card {
+		background: #0a0a0a;
+		border: 1px solid #1a1a1a;
+		border-radius: 10px;
+		padding: 18px 22px;
+		cursor: pointer;
+		transition: all 0.2s;
 		display: flex;
+		flex-direction: column;
+		gap: 14px;
+	}
+	.post-card:hover { border-color: #f9731640; background: #0d0d0d; }
+	.trade-card { cursor: default; }
+	.trade-card:hover { border-color: #3b82f640; }
+
+	.post-card-top { display: flex; flex-direction: column; gap: 6px; }
+
+	.post-card-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.post-type {
+		font-size: 9px;
+		font-weight: 700;
+		letter-spacing: 1.5px;
+		padding: 3px 10px;
+		border-radius: 3px;
+		white-space: nowrap;
+	}
+	.strategy-type { background: rgba(249, 115, 22, 0.1); color: #f97316; border: 1px solid rgba(249, 115, 22, 0.25); }
+	.trade-type { background: rgba(59, 130, 246, 0.1); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.25); }
+
+	.post-date { color: #555; font-size: 11px; font-family: 'Share Tech Mono', monospace; }
+
+	.post-card-title {
+		color: #fff;
+		font-size: 16px;
+		font-weight: 700;
+		font-family: 'Share Tech Mono', monospace;
+		line-height: 1.3;
+	}
+
+	.post-card-desc {
+		color: #999;
+		font-size: 13px;
+		line-height: 1.4;
+		font-family: 'Share Tech Mono', monospace;
+	}
+
+	.post-card-metrics {
+		display: flex;
+		align-items: center;
+		gap: 16px;
+		font-family: 'Share Tech Mono', monospace;
+		padding: 12px 0;
+		border-top: 1px solid #1a1a1a;
+		border-bottom: 1px solid #1a1a1a;
+	}
+
+	.return-pill {
+		font-size: 15px;
+		font-weight: 700;
+		padding: 5px 14px;
+		border-radius: 6px;
+		white-space: nowrap;
+		flex-shrink: 0;
+	}
+	.return-pill.positive { background: rgba(38, 166, 91, 0.1); color: #26a65b; border: 1px solid rgba(38, 166, 91, 0.2); }
+	.return-pill.negative { background: rgba(239, 83, 80, 0.1); color: #ef5350; border: 1px solid rgba(239, 83, 80, 0.2); }
+
+	.metric-chips {
+		display: flex;
+		align-items: center;
+		gap: 16px;
+		font-size: 12px;
+		flex-wrap: wrap;
+	}
+
+	.chip {
+		display: flex;
+		align-items: center;
+		gap: 5px;
+	}
+	.chip-label { color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+	.chip-val { color: #fff; font-weight: 600; }
+	.chip-val.positive { color: #26a65b; }
+	.chip-val.negative { color: #ef5350; }
+	.capital-chip { color: #888; font-size: 11px; border-left: 1px solid #222; padding-left: 16px; }
+
+	.post-card-footer {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.post-card-actions {
+		display: flex;
+		align-items: center;
 		gap: 8px;
 	}
 
-	.btn-view,
-	.btn-delete {
-		background: transparent;
-		border: 1px solid #2a2f45;
-		color: #8b92ab;
-		padding: 6px;
-		border-radius: 6px;
-		cursor: pointer;
-		transition: all 0.2s;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-	}
-
-	.btn-paper-trade {
-		padding: 8px;
-		background: transparent;
-		border: 1px solid #00d084;
-		color: #00d084;
-		border-radius: 6px;
-		cursor: pointer;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		transition: all 0.2s;
-	}
-
-	.btn-paper-trade:hover:not(:disabled) {
-		background: rgba(0, 208, 132, 0.1);
-		border-color: #00e094;
-		color: #00e094;
-	}
-
-	.btn-paper-trade:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.btn-view:hover {
-		border-color: #F97316;
-		color: #F97316;
-	}
-
-	.btn-delete:hover {
-		border-color: #ef4444;
-		color: #ef4444;
-	}
-
-	.market-question {
-		color: #8b92ab;
-		font-size: 14px;
-		margin: 0 0 16px 0;
-		line-height: 1.6;
-		display: -webkit-box;
-		-webkit-line-clamp: 2;
-		-webkit-box-orient: vertical;
-		overflow: hidden;
-	}
-
-	.return-badge {
+	.view-label {
 		display: inline-flex;
 		align-items: center;
-		gap: 8px;
-		padding: 8px 16px;
-		border-radius: 8px;
-		margin-bottom: 16px;
-		border: 1px solid;
-	}
-
-	.return-badge.positive {
-		background: rgba(16, 185, 129, 0.1);
-		border-color: rgba(16, 185, 129, 0.3);
-	}
-
-	.return-badge.negative {
-		background: rgba(239, 68, 68, 0.1);
-		border-color: rgba(239, 68, 68, 0.3);
-	}
-
-	.return-label {
-		font-size: 10px;
-		font-weight: 700;
+		gap: 4px;
+		color: #555;
+		font-size: 11px;
+		font-family: 'Share Tech Mono', monospace;
 		letter-spacing: 0.5px;
-		color: #8b92ab;
-		text-transform: uppercase;
+		transition: color 0.2s;
 	}
+	.post-card:hover .view-label { color: #f97316; }
 
-	.return-value {
-		font-size: 18px;
-		font-weight: 800;
-		letter-spacing: -0.02em;
+	.trade-side {
+		font-size: 11px;
+		font-weight: 700;
+		padding: 3px 10px;
+		border-radius: 4px;
 	}
+	.trade-side.pos-yes { background: rgba(38, 166, 91, 0.1); color: #26a65b; border: 1px solid rgba(38, 166, 91, 0.2); }
+	.trade-side.pos-no { background: rgba(239, 83, 80, 0.1); color: #ef5350; border: 1px solid rgba(239, 83, 80, 0.2); }
 
-	.return-badge.positive .return-value {
-		color: #10b981;
-	}
-
-	.return-badge.negative .return-value {
-		color: #ef4444;
-	}
-
-	.equity-curve-container {
-		margin-bottom: 20px;
-		background: #000000;
-		border-radius: 10px;
-		padding: 16px;
-		border: 1px solid rgba(255, 255, 255, 0.2);
-	}
-
-	.metrics {
-		display: grid;
-		grid-template-columns: repeat(3, 1fr);
-		gap: 12px;
-		margin-bottom: 20px;
-	}
-
-	.metric {
+	.btn-icon {
+		background: transparent;
+		border: none;
+		color: #444;
+		cursor: pointer;
+		padding: 6px;
+		border-radius: 6px;
+		transition: all 0.15s;
 		display: flex;
-		flex-direction: column;
-		gap: 6px;
-		text-align: center;
-		padding: 12px;
-		background: #000000;
-		border-radius: 8px;
-		border: 1px solid rgba(255, 255, 255, 0.2);
+		align-items: center;
+	}
+	.btn-icon.delete:hover { color: #ef5350; background: rgba(239, 83, 80, 0.06); }
+
+	.chevron {
+		color: currentColor;
+		transition: color 0.2s;
 	}
 
-	.metric-label {
-		font-size: 10px;
-		color: #8B92AB;
-		text-transform: uppercase;
-		letter-spacing: 0.5px;
-		font-weight: 700;
+	@media (max-width: 900px) {
+		.post-card { padding: 14px 16px; }
+		.post-card-metrics { flex-wrap: wrap; gap: 10px; }
+		.metric-chips { gap: 10px; }
+		.capital-chip { border-left: none; padding-left: 0; }
 	}
 
-	.metric-value {
-		font-size: 18px;
-		color: #E8E8E8;
-		font-weight: 700;
-		letter-spacing: -0.02em;
-	}
-
-	.metric-value.positive {
-		color: #10b981;
-	}
-
-	.metric-value.negative {
-		color: #ef4444;
-	}
-
-	.card-footer {
-		padding-top: 16px;
-		border-top: 1px solid rgba(255, 255, 255, 0.1);
-		font-size: 13px;
-	}
-
-	.date {
-		color: #6b7280;
-		font-size: 12px;
-	}
-
-	.capital-flow {
-		color: #8b92ab;
-		font-weight: 600;
-		font-size: 14px;
-	}
 
 	/* Delete Modal Styles */
 	.modal-overlay {
@@ -1731,81 +1617,6 @@
 		color: white;
 	}
 
-	/* Type badges */
-	.card-type-badge {
-		display: inline-block;
-		padding: 4px 10px;
-		border-radius: 4px;
-		font-size: 10px;
-		font-weight: 800;
-		letter-spacing: 0.8px;
-		text-transform: uppercase;
-		margin-bottom: 12px;
-	}
-
-	.strategy-badge {
-		background: rgba(99, 102, 241, 0.15);
-		color: #818cf8;
-		border: 1px solid rgba(99, 102, 241, 0.3);
-	}
-
-	.trade-badge {
-		background: rgba(249, 115, 22, 0.15);
-		color: #F97316;
-		border: 1px solid rgba(249, 115, 22, 0.3);
-	}
-
-	/* Trade card specifics */
-	.trade-card-item {
-		cursor: default;
-	}
-
-	.trade-position-badge {
-		padding: 4px 12px;
-		border-radius: 6px;
-		font-size: 12px;
-		font-weight: 700;
-		text-transform: uppercase;
-	}
-
-	.pos-yes {
-		background: rgba(16, 185, 129, 0.15);
-		color: #10b981;
-		border: 1px solid rgba(16, 185, 129, 0.3);
-	}
-
-	.pos-no {
-		background: rgba(239, 68, 68, 0.15);
-		color: #ef4444;
-		border: 1px solid rgba(239, 68, 68, 0.3);
-	}
-
-	.trade-metrics {
-		grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-	}
-
-	.trade-analysis {
-		margin-top: 12px;
-		padding: 12px;
-		background: rgba(255, 255, 255, 0.03);
-		border: 1px solid rgba(255, 255, 255, 0.1);
-		border-radius: 8px;
-	}
-
-	.analysis-label {
-		font-size: 10px;
-		color: #8B92AB;
-		text-transform: uppercase;
-		letter-spacing: 0.5px;
-		font-weight: 700;
-	}
-
-	.trade-analysis p {
-		color: #ccc;
-		font-size: 13px;
-		margin: 6px 0 0 0;
-		line-height: 1.5;
-	}
 
 	@media (max-width: 768px) {
 		.header {
@@ -1814,12 +1625,11 @@
 			gap: 20px;
 		}
 
-		.strategies-grid {
-			grid-template-columns: 1fr;
-		}
-
 		.tabs {
 			flex-wrap: wrap;
 		}
+
+		.post-card { padding: 12px 14px; }
+		.post-card-metrics { flex-wrap: wrap; gap: 8px; }
 	}
 </style>

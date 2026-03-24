@@ -63,6 +63,7 @@ type SharedTrade = {
   multiMarket?: boolean;
   marketCount?: number;
   equityCurve?: number[];
+  equityCurveRaw?: { timestamp: string; equity: number }[];
   amount?: number;
   avatarUrl?: string;
   takeProfit?: number;
@@ -79,6 +80,25 @@ type SharedTrade = {
   positionSizingValue?: number;
   initialCapital?: number;
   finalCapital?: number;
+  description?: string;
+  strategyType?: string;
+  avgHoldTime?: number;
+  marketsAnalyzed?: number;
+  executionTime?: number;
+  strategyConfig?: {
+    strategyType?: string;
+    position?: string;
+    priceInf?: number;
+    priceSup?: number;
+    amount?: number;
+    threshold?: number;
+    stopLoss?: number;
+    takeProfit?: number;
+    trailingStop?: number;
+    maxHoldHours?: number;
+    cooldownHours?: number;
+    initialCash?: number;
+  };
 };
 
 // --- Asset options per market ---
@@ -214,36 +234,113 @@ function FilterDropdown({
 
 // --- Equity Curve ---
 
-function EquityCurve({ data, positive }: { data: number[]; positive: boolean }) {
-  if (!data || data.length < 2) return null;
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const range = max - min || 1;
-  const w = 280;
-  const h = 80;
-  const pad = 2;
+function EquityCurve({ rawData, positive }: { rawData?: { timestamp: string; equity: number }[]; positive: boolean }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<any>(null);
 
-  const points = data.map((v, i) => {
-    const x = pad + (i / (data.length - 1)) * (w - pad * 2);
-    const y = pad + (1 - (v - min) / range) * (h - pad * 2);
-    return `${x},${y}`;
-  });
+  useEffect(() => {
+    if (!containerRef.current || !rawData || rawData.length < 2) return;
 
-  const lineColor = positive ? "#f97316" : "#ef4444";
-  const fillPoints = `${pad},${h - pad} ${points.join(" ")} ${w - pad},${h - pad}`;
+    let cancelled = false;
 
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-14 rounded-lg border border-gray-800 bg-white/[0.02]" preserveAspectRatio="none">
-      <defs>
-        <linearGradient id={`grad-${positive}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={lineColor} stopOpacity="0.3" />
-          <stop offset="100%" stopColor={lineColor} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <polygon points={fillPoints} fill={`url(#grad-${positive})`} />
-      <polyline points={points.join(" ")} fill="none" stroke={lineColor} strokeWidth="2" strokeLinejoin="round" />
-    </svg>
-  );
+    import("lightweight-charts").then((lc) => {
+      if (cancelled || !containerRef.current) return;
+
+      // Build time series, deduplicating by day
+      const seen = new Set<string>();
+      const chartData: { time: string; value: number }[] = [];
+      for (const p of rawData) {
+        const d = p.timestamp.slice(0, 10); // YYYY-MM-DD
+        if (seen.has(d)) {
+          chartData[chartData.length - 1].value = p.equity;
+        } else {
+          seen.add(d);
+          chartData.push({ time: d, value: p.equity });
+        }
+      }
+      if (chartData.length < 2) return;
+
+      const chart = lc.createChart(containerRef.current!, {
+        width: containerRef.current!.clientWidth,
+        height: 120,
+        layout: {
+          background: { type: lc.ColorType.Solid, color: "transparent" },
+          textColor: "#666",
+          fontFamily: "'Share Tech Mono', monospace",
+          fontSize: 10,
+        },
+        grid: {
+          vertLines: { color: "rgba(255,255,255,0.03)" },
+          horzLines: { color: "rgba(255,255,255,0.03)" },
+        },
+        rightPriceScale: {
+          borderVisible: false,
+          scaleMargins: { top: 0.1, bottom: 0.05 },
+        },
+        timeScale: {
+          borderVisible: false,
+          timeVisible: false,
+        },
+        crosshair: {
+          horzLine: { visible: false, labelVisible: false },
+          vertLine: { visible: true, labelVisible: false, color: "rgba(249,115,22,0.3)", style: lc.LineStyle.Dashed },
+        },
+        handleScroll: { mouseWheel: false, pressedMouseMove: false },
+        handleScale: { mouseWheel: false, pinch: false, axisPressedMouseMove: false },
+      });
+
+      const lineColor = positive ? "#26a65b" : "#ef5350";
+      const series = chart.addSeries(lc.AreaSeries, {
+        lineColor,
+        topColor: positive ? "rgba(38,166,91,0.2)" : "rgba(239,83,80,0.2)",
+        bottomColor: "rgba(0,0,0,0)",
+        lineWidth: 2,
+        crosshairMarkerVisible: true,
+        crosshairMarkerRadius: 3,
+        crosshairMarkerBorderColor: "#f97316",
+        crosshairMarkerBackgroundColor: "#000",
+        priceFormat: { type: "price" as const, precision: 2, minMove: 0.01 },
+      });
+      series.setData(chartData);
+
+      // Dashed baseline at initial capital
+      const baseline = chart.addSeries(lc.LineSeries, {
+        color: "rgba(249,115,22,0.2)",
+        lineWidth: 1,
+        lineStyle: lc.LineStyle.Dashed,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+      baseline.setData(chartData.map((d) => ({ time: d.time, value: chartData[0].value })));
+
+      chart.timeScale().fitContent();
+      chartRef.current = chart;
+
+      // Resize observer
+      const ro = new ResizeObserver(() => {
+        if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth });
+      });
+      ro.observe(containerRef.current!);
+
+      return () => {
+        ro.disconnect();
+        chart.remove();
+      };
+    });
+
+    return () => {
+      cancelled = true;
+      if (chartRef.current) {
+        chartRef.current.remove();
+        chartRef.current = null;
+      }
+    };
+  }, [rawData, positive]);
+
+  if (!rawData || rawData.length < 2) return null;
+
+  return <div ref={containerRef} className="w-full" />;
 }
 
 // --- Trade Card ---
@@ -717,6 +814,13 @@ function TradeCard({ trade, connectedUser }: { trade: SharedTrade; connectedUser
                   )}
                 </div>
 
+                {/* Description / Comment */}
+                {trade.comment && (
+                  <div className="rounded-xl bg-white/[0.02] border border-gray-800 p-4 mb-4">
+                    <p className="text-gray-300 text-sm leading-relaxed italic">&ldquo;{trade.comment}&rdquo;</p>
+                  </div>
+                )}
+
                 {isPaper ? (
                   <>
                     {/* Paper Trade Details */}
@@ -764,59 +868,105 @@ function TradeCard({ trade, connectedUser }: { trade: SharedTrade; connectedUser
                   </>
                 ) : (
                   <>
-                    {/* Strategy Details */}
-                    {trade.equityCurve && (
-                      <div className="mb-4">
-                        <EquityCurve data={trade.equityCurve} positive={isPositive} />
+                    {/* ── Equity Curve ── */}
+                    {trade.equityCurveRaw && trade.equityCurveRaw.length >= 2 && (
+                      <div className="mb-5 rounded-xl border border-gray-800 bg-white/[0.02] p-3">
+                        <div className="flex items-center justify-between mb-2 px-1">
+                          <span className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Equity Curve</span>
+                          <span className={`text-xs font-bold ${isPositive ? "text-green-400" : "text-red-400"}`}>
+                            {isPositive ? "+" : ""}{trade.pnlPercent.toFixed(2)}%
+                          </span>
+                        </div>
+                        <EquityCurve rawData={trade.equityCurveRaw} positive={isPositive} />
                       </div>
                     )}
-                    <div className="grid grid-cols-4 gap-2 mb-3">
-                      {[
-                        { label: "Start", value: `$${(trade.initialCapital ?? trade.startBalance ?? 0).toLocaleString()}`, color: "text-white" },
-                        { label: "Final", value: `$${(trade.finalCapital ?? trade.endBalance ?? 0).toLocaleString()}`, color: isPositive ? "text-green-400" : "text-red-400" },
-                        { label: "Return", value: `${isPositive ? "+" : ""}${trade.pnlPercent.toFixed(1)}%`, color: isPositive ? "text-green-400" : "text-red-400" },
-                        { label: "P&L", value: `${isPositive ? "+" : ""}$${Math.abs(trade.pnl).toFixed(0)}`, color: isPositive ? "text-green-400" : "text-red-400" },
-                      ].map((s) => (
-                        <div key={s.label} className="rounded-lg bg-white/[0.03] border border-gray-800 px-2 py-2 text-center">
-                          <span className="text-gray-500 block text-[10px] uppercase">{s.label}</span>
-                          <span className={`font-bold text-sm ${s.color}`}>{s.value}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="grid grid-cols-4 gap-2 mb-3">
-                      {[
-                        { label: "Win Rate", value: `${trade.winRate ?? "—"}%`, color: (trade.winRate ?? 0) >= 50 ? "text-green-400" : "text-red-400" },
-                        { label: "Trades", value: String(trade.totalTrades ?? "—"), color: "text-white" },
-                        { label: "Max DD", value: `${trade.maxDrawdown ?? "—"}%`, color: "text-red-400" },
-                        { label: "Sharpe", value: String(trade.sharpeRatio ?? "—"), color: "text-white" },
-                      ].map((s) => (
-                        <div key={s.label} className="rounded-lg bg-white/[0.03] border border-gray-800 px-2 py-2 text-center">
-                          <span className="text-gray-500 block text-[10px] uppercase">{s.label}</span>
-                          <span className={`font-bold text-xs ${s.color}`}>{s.value}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="grid grid-cols-4 gap-2 mb-4">
-                      {[
-                        { label: "PF", value: String(trade.profitFactor ?? "—"), color: "text-white" },
-                        { label: "W/L", value: `${trade.winningTrades ?? "—"}/${trade.losingTrades ?? "—"}`, color: "text-white" },
-                        { label: "TP", value: trade.backtestTakeProfit != null ? `${trade.backtestTakeProfit}%` : "—", color: trade.backtestTakeProfit != null ? "text-green-400" : "text-gray-600" },
-                        { label: "SL", value: trade.backtestStopLoss != null ? `${trade.backtestStopLoss}%` : "—", color: trade.backtestStopLoss != null ? "text-red-400" : "text-gray-600" },
-                      ].map((s) => (
-                        <div key={s.label} className="rounded-lg bg-white/[0.03] border border-gray-800 px-2 py-2 text-center">
-                          <span className="text-gray-500 block text-[10px] uppercase">{s.label}</span>
-                          <span className={`font-bold text-xs ${s.color}`}>{s.value}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
 
-                {/* Analysis / Comment */}
-                {trade.comment && (
-                  <div className="rounded-xl bg-white/[0.02] border border-gray-800 p-4 mb-4">
-                    <p className="text-gray-300 text-sm leading-relaxed">{trade.comment}</p>
-                  </div>
+                    {/* ── Results Section ── */}
+                    <div className="mb-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className="w-1 h-4 rounded-full bg-orange-500" />
+                        <span className="text-xs uppercase tracking-wider text-gray-400 font-semibold">Results</span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-2 mb-2">
+                        {[
+                          { label: "Start", value: `$${(trade.initialCapital ?? trade.startBalance ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`, color: "text-white" },
+                          { label: "Final", value: `$${(trade.finalCapital ?? trade.endBalance ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`, color: isPositive ? "text-green-400" : "text-red-400" },
+                          { label: "Return", value: `${isPositive ? "+" : ""}${trade.pnlPercent.toFixed(2)}%`, color: isPositive ? "text-green-400" : "text-red-400" },
+                          { label: "Net P&L", value: `${isPositive ? "+" : "-"}$${Math.abs(trade.pnl).toFixed(2)}`, color: isPositive ? "text-green-400" : "text-red-400" },
+                        ].map((s) => (
+                          <div key={s.label} className="rounded-lg bg-white/[0.03] border border-gray-800 px-2 py-2.5 text-center">
+                            <span className="text-gray-500 block text-[10px] uppercase tracking-wide mb-0.5">{s.label}</span>
+                            <span className={`font-bold text-sm ${s.color}`}>{s.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-4 gap-2 mb-2">
+                        {[
+                          { label: "Win Rate", value: trade.winRate != null ? `${trade.winRate.toFixed(1)}%` : "—", color: (trade.winRate ?? 0) >= 50 ? "text-green-400" : "text-red-400" },
+                          { label: "Trades", value: String(trade.totalTrades ?? "—"), color: "text-white" },
+                          { label: "W / L", value: `${trade.winningTrades ?? "—"} / ${trade.losingTrades ?? "—"}`, color: "text-white" },
+                          { label: "Profit Factor", value: trade.profitFactor != null ? trade.profitFactor.toFixed(2) : "—", color: "text-white" },
+                        ].map((s) => (
+                          <div key={s.label} className="rounded-lg bg-white/[0.03] border border-gray-800 px-2 py-2.5 text-center">
+                            <span className="text-gray-500 block text-[10px] uppercase tracking-wide mb-0.5">{s.label}</span>
+                            <span className={`font-bold text-xs ${s.color}`}>{s.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-4 gap-2">
+                        {[
+                          { label: "Max DD", value: trade.maxDrawdown != null ? `${trade.maxDrawdown.toFixed(1)}%` : "—", color: "text-red-400" },
+                          { label: "Sharpe", value: trade.sharpeRatio != null ? trade.sharpeRatio.toFixed(2) : "—", color: "text-white" },
+                          { label: "Avg Hold", value: trade.avgHoldTime != null ? (trade.avgHoldTime >= 24 ? `${(trade.avgHoldTime / 24).toFixed(1)}d` : `${trade.avgHoldTime.toFixed(1)}h`) : "—", color: "text-white" },
+                          { label: "Markets", value: String(trade.marketsAnalyzed ?? "—"), color: "text-white" },
+                        ].map((s) => (
+                          <div key={s.label} className="rounded-lg bg-white/[0.03] border border-gray-800 px-2 py-2.5 text-center">
+                            <span className="text-gray-500 block text-[10px] uppercase tracking-wide mb-0.5">{s.label}</span>
+                            <span className={`font-bold text-xs ${s.color}`}>{s.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* ── Configuration Section ── */}
+                    {(() => {
+                      const sc = trade.strategyConfig;
+                      const hasConfig = sc || trade.entryType || trade.backtestTakeProfit != null || trade.backtestStopLoss != null || trade.positionSizingType;
+                      if (!hasConfig) return null;
+                      const configItems: { label: string; value: string; color?: string }[] = [];
+                      if (sc?.strategyType || trade.strategyType) configItems.push({ label: "Strategy", value: sc?.strategyType || trade.strategyType || "" });
+                      if (trade.entryType) configItems.push({ label: "Entry Type", value: trade.entryType });
+                      if (sc?.position) configItems.push({ label: "Side", value: sc.position });
+                      if (sc?.priceInf != null && sc?.priceSup != null) configItems.push({ label: "Price Range", value: `${sc.priceInf} — ${sc.priceSup}` });
+                      if (sc?.amount != null) configItems.push({ label: "Amount", value: `$${sc.amount}` });
+                      if (sc?.threshold != null) configItems.push({ label: "Threshold", value: String(sc.threshold) });
+                      if (trade.positionSizingType) configItems.push({ label: "Sizing", value: `${trade.positionSizingType}${trade.positionSizingValue != null ? ` (${trade.positionSizingValue}${trade.positionSizingType === "PERCENTAGE" ? "%" : ""})` : ""}` });
+                      if (trade.backtestTakeProfit != null && trade.backtestTakeProfit > 0) configItems.push({ label: "Take Profit", value: `${(trade.backtestTakeProfit * 100).toFixed(0)}%`, color: "text-green-400" });
+                      if (trade.backtestStopLoss != null && trade.backtestStopLoss > 0) configItems.push({ label: "Stop Loss", value: `${(trade.backtestStopLoss * 100).toFixed(0)}%`, color: "text-red-400" });
+                      if (sc?.trailingStop != null) configItems.push({ label: "Trailing Stop", value: `${(sc.trailingStop * 100).toFixed(0)}%` });
+                      if (sc?.maxHoldHours != null) configItems.push({ label: "Max Hold", value: `${sc.maxHoldHours}h` });
+                      if (sc?.cooldownHours != null) configItems.push({ label: "Cooldown", value: `${sc.cooldownHours}h` });
+                      if (configItems.length === 0) return null;
+                      return (
+                        <div className="mb-4">
+                          <div className="flex items-center gap-2 mb-3">
+                            <div className="w-1 h-4 rounded-full bg-purple-500" />
+                            <span className="text-xs uppercase tracking-wider text-gray-400 font-semibold">Configuration</span>
+                          </div>
+                          <div className="rounded-xl bg-white/[0.02] border border-gray-800 p-4">
+                            <div className="grid grid-cols-2 gap-x-6 gap-y-2.5">
+                              {configItems.map((item) => (
+                                <div key={item.label} className="flex items-center justify-between">
+                                  <span className="text-gray-500 text-xs">{item.label}</span>
+                                  <span className={`text-xs font-semibold ${item.color || "text-orange-400"}`}>{item.value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </>
                 )}
 
                 {/* Like + Comment Actions */}
@@ -987,7 +1137,7 @@ export default function CommunityPage() {
         // Fetch published strategies
         const { data: strategies, error: stratErr } = await supabase
           .from("backtest_strategies")
-          .select("id, user_id, strategy_name, total_return_percent, initial_capital, final_capital, win_rate, sharpe_ratio, max_drawdown, total_trades, winning_trades, losing_trades, profit_factor, equity_curve, is_published, likes_count, comments_count, created_at, entry_type, stop_loss, take_profit, position_sizing_type, position_sizing_value, platform, users(username, avatar_url)")
+          .select("id, user_id, strategy_name, strategy_type, description, total_return_percent, initial_capital, final_capital, win_rate, sharpe_ratio, max_drawdown, total_trades, winning_trades, losing_trades, profit_factor, equity_curve, is_published, likes_count, comments_count, created_at, entry_type, stop_loss, take_profit, position_sizing_type, position_sizing_value, platform, avg_hold_time, markets_analyzed, execution_time, backtest_data, users(username, avatar_url)")
           .eq("is_published", true)
           .order("created_at", { ascending: false })
           .limit(50);
@@ -1061,7 +1211,7 @@ export default function CommunityPage() {
             duration: "",
             strategy: s.strategy_name,
             timestamp: s.created_at,
-            comment: undefined,
+            comment: s.description || (s.backtest_data as any)?.description || undefined,
             likes: s.likes_count || 0,
             commentCount: s.comments_count || 0,
             winRate: Number(s.win_rate) || undefined,
@@ -1070,7 +1220,12 @@ export default function CommunityPage() {
             totalTrades: s.total_trades || undefined,
             startBalance: Number(s.initial_capital) || undefined,
             endBalance: Number(s.final_capital) || undefined,
-            equityCurve: s.equity_curve || undefined,
+            equityCurve: s.equity_curve
+              ? (s.equity_curve as any[]).map((p: any) => typeof p === "number" ? p : p?.equity ?? p?.value ?? 0)
+              : undefined,
+            equityCurveRaw: s.equity_curve
+              ? (s.equity_curve as any[]).filter((p: any) => p?.timestamp && p?.equity != null).map((p: any) => ({ timestamp: p.timestamp, equity: p.equity }))
+              : undefined,
             profitFactor: Number(s.profit_factor) || undefined,
             winningTrades: s.winning_trades || undefined,
             losingTrades: s.losing_trades || undefined,
@@ -1082,6 +1237,12 @@ export default function CommunityPage() {
             initialCapital: Number(s.initial_capital) || undefined,
             finalCapital: Number(s.final_capital) || undefined,
             platform: Array.isArray(s.platform) ? s.platform.join(", ") : s.platform || undefined,
+            description: s.description || (s.backtest_data as any)?.description || undefined,
+            strategyType: s.strategy_type || undefined,
+            avgHoldTime: s.avg_hold_time != null ? Number(s.avg_hold_time) : undefined,
+            marketsAnalyzed: s.markets_analyzed || undefined,
+            executionTime: s.execution_time || undefined,
+            strategyConfig: (s.backtest_data as any)?.strategyConfig || undefined,
           });
         }
 
@@ -1176,7 +1337,7 @@ export default function CommunityPage() {
         if (!haystack.includes(q)) return false;
       }
       return true;
-    });
+    }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }, [filters, search, allTrades]);
 
   // Filter profiles by search

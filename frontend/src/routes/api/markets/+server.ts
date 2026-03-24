@@ -57,13 +57,19 @@ export const GET: RequestHandler = async ({ url }) => {
 				if (ended === 'true' && !endsAt) continue;
 				if (ended === 'false' && hasEnded) continue;
 
-				// Determine outcome from prices (side closest to 1.0 won)
+				// Determine outcome: prefer winner_token_id, then resolved flag, then prices
 				const leftPrice = parseFloat(market.left_price || '0');
 				const rightPrice = parseFloat(market.right_price || '0');
 				let resolvedOutcome: string | null = null;
-				if (hasEnded) {
-					if (leftPrice >= 0.9) resolvedOutcome = market.left_outcome || 'Yes';
-					else if (rightPrice >= 0.9) resolvedOutcome = market.right_outcome || 'No';
+				if (market.winner_token_id && market.winner_token_id === market.left_token_id) {
+					resolvedOutcome = market.left_outcome || 'Yes';
+				} else if (market.winner_token_id && market.winner_token_id === market.right_token_id) {
+					resolvedOutcome = market.right_outcome || 'No';
+				} else if (hasEnded) {
+					if (leftPrice >= 0.85) resolvedOutcome = market.left_outcome || 'Yes';
+					else if (rightPrice >= 0.85) resolvedOutcome = market.right_outcome || 'No';
+					else if (leftPrice > rightPrice && leftPrice >= 0.7) resolvedOutcome = market.left_outcome || 'Yes';
+					else if (rightPrice > leftPrice && rightPrice >= 0.7) resolvedOutcome = market.right_outcome || 'No';
 				}
 
 				markets.push({
@@ -74,7 +80,7 @@ export const GET: RequestHandler = async ({ url }) => {
 					image: market.image || item.image,
 					active: market.active,
 					closed: hasEnded,
-					resolved: hasEnded,
+					resolved: resolvedOutcome != null,
 					resolvedOutcome,
 					volume: parseFloat(market.volume || '0'),
 					volume_24hr: parseFloat(market.volume24hr || '0'),

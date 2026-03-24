@@ -4,9 +4,7 @@
 	import Navbar from '$lib/components/Navbar.svelte';
 	import UsernameModal from '$lib/components/UsernameModal.svelte';
 	import { handleAuthCallback } from '$lib/auth/auth-store';
-	import { initWeb3Auth, isWeb3AuthConnected, connectWeb3Auth, createWeb3AuthWalletAdapter } from '$lib/auth/web3auth';
-	import { walletStore, setUsername, setWalletAdapter, updateWalletConnection } from '$lib/wallet/stores';
-	import { authStore } from '$lib/auth/auth-store';
+	import { walletStore, setUsername } from '$lib/wallet/stores';
 
 	let { children } = $props();
 
