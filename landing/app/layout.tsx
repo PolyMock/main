@@ -14,13 +14,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        <link rel="icon" href="/hashfoxlogo.png" type="image/png" sizes="any" />
-        <style>{`
-          link[rel="icon"] {
-            image-rendering: -webkit-optimize-contrast;
-            image-rendering: crisp-edges;
-          }
-        `}</style>
+        <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32" />
+        <link rel="icon" href="/favicon-192.png" type="image/png" sizes="192x192" />
+        <link rel="apple-touch-icon" href="/favicon-512.png" />
       </head>
       <body>{children}</body>
     </html>
