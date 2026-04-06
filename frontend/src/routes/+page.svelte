@@ -292,7 +292,7 @@
 	<!-- 2. Prices and Polydata bar (middle) -->
 	<div class="command-bar">
 		<!-- Polydata Link - Extreme Left -->
-		<a href="https://www.polydata.cc/" target="_blank" rel="noopener noreferrer" class="polydata-link">
+		<a href="https://www.polydata.org/" target="_blank" rel="noopener noreferrer" class="polydata-link">
 			<img src={polydataLogo} alt="Polydata" class="polydata-logo" />
 			<span class="polydata-text">Access to Polymarket Analytics</span>
 		</a>

@@ -8,6 +8,7 @@
 	import { sessionKeyManager } from '$lib/solana/session-keys';
 	import { PublicKey } from '@solana/web3.js';
 	import MarketChat from '$lib/components/MarketChat.svelte';
+	import OrderBook from '$lib/components/OrderBook.svelte';
 
 	let marketId: string;
 	let market: PolyMarket | null = null;
@@ -667,6 +668,13 @@
 				>
 					Chat
 				</button>
+				<button
+					class="tab"
+					class:active={selectedTab === 'OrderBook'}
+					on:click={() => selectedTab = 'OrderBook'}
+				>
+					Order Book
+				</button>
 			</div>
 		</div>
 
@@ -728,6 +736,13 @@
 					<div class="terms-text">
 						By trading, you agree to the <a href="#" class="terms-link">Terms of Use</a>.
 					</div>
+
+				{:else if selectedTab === 'OrderBook'}
+					<OrderBook
+						tokenIds={market.clobTokenIds ?? []}
+						yesLabel={JSON.parse(market.outcomes ?? '["Yes","No"]')[0] ?? 'Yes'}
+						noLabel={JSON.parse(market.outcomes ?? '["Yes","No"]')[1] ?? 'No'}
+					/>
 
 				{:else if selectedTab === 'Chat'}
 					<!-- Chat Content -->

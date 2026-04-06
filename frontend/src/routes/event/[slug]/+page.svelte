@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { fade, slide } from 'svelte/transition';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { polymarketClient, type PolyEvent, type PolyMarket } from '$lib/polymarket';
@@ -9,6 +10,8 @@
 	import { PublicKey } from '@solana/web3.js';
 	import MarketRules from '$lib/components/MarketRules.svelte';
 	import MarketComments from '$lib/components/MarketComments.svelte';
+	import OrderBook from '$lib/components/OrderBook.svelte';
+	import MarketPriceChart from '$lib/components/MarketPriceChart.svelte';
 	const polymockLogo = '/1.png';
 
 	let event: PolyEvent | null = null;
@@ -16,12 +19,14 @@
 	let error = false;
 	let selectedMarket: PolyMarket | null = null;
 	let selectedSide: 'Yes' | 'No' = 'Yes';
-	let tradeTab: 'Buy' | 'Sell' = 'Buy';
+	let tradeTab: 'Buy' | 'Sell' | 'OrderBook' = 'Buy';
 	let amount = 0; // For buy: USD amount, For sell: shares count
 	let showResolved = false;
 	let trading = false;
 	let walletState = $walletStore;
 	let showInfoView: 'markets' | 'info' = 'markets'; // Toggle between markets and rules/comments
+	let centerTab: 'orderbook' | 'chart' | 'info' = 'orderbook';
+	let showSLTP = false;
 
 	// Stop Loss / Take Profit
 	let stopLoss = 0;
@@ -406,363 +411,311 @@
 		modalDetails = null;
 	}
 
-	function matchPanelHeights() {
-		const tradingPanel = document.querySelector('.trading-panel');
-		const marketsPanel = document.querySelector('.markets-panel');
-
-		if (tradingPanel && marketsPanel) {
-			const tradingHeight = tradingPanel.offsetHeight;
-			(marketsPanel as HTMLElement).style.height = `${tradingHeight}px`;
-			(marketsPanel as HTMLElement).style.minHeight = `${tradingHeight}px`;
-			(marketsPanel as HTMLElement).style.maxHeight = `${tradingHeight}px`;
-			console.log('Matched heights:', tradingHeight);
-		}
-	}
-
 	onMount(() => {
 		fetchEvent();
-
-		// Match heights after content loads with multiple attempts
-		setTimeout(matchPanelHeights, 100);
-		setTimeout(matchPanelHeights, 500);
-		setTimeout(matchPanelHeights, 1000);
-
-		// Watch for changes in trading panel only
-		const observer = new MutationObserver(matchPanelHeights);
-		const tradingPanel = document.querySelector('.trading-panel');
-		if (tradingPanel) {
-			observer.observe(tradingPanel, { childList: true, subtree: true });
-		}
-
-		return () => observer.disconnect();
 	});
-
-	// React to state changes
-	$: if (selectedMarket || tradeTab || stopLoss || takeProfit) {
-		setTimeout(matchPanelHeights, 50);
-	}
 </script>
 
-<div class="event-page">
-	<div class="page-header">
-		<button class="back-button" on:click={goBack}>← Back to Markets</button>
-	</div>
+<div class="ev-page">
 
 	{#if loading}
-		<div class="loading-state">Loading event details...</div>
+		<div class="ev-loading">
+			<div class="ev-spinner"></div>
+			<span>Loading event…</span>
+		</div>
 	{:else if error || !event}
-		<div class="error-state">
+		<div class="ev-error">
 			<h2>Event not found</h2>
-			<p>The event you're looking for doesn't exist or has been removed.</p>
-			<button class="back-button-primary" on:click={goBack}>Go back to Markets</button>
+			<p>This event doesn't exist or has been removed.</p>
+			<button on:click={goBack}>← Back to Markets</button>
 		</div>
 	{:else}
-		<div class="event-container">
-			<!-- LEFT PANEL: Markets List -->
-			<div class="markets-panel">
-				<!-- Event Header -->
-				<div class="event-header">
-					<div class="event-header-left">
-						{#if event.image}
-							<img src={event.image} alt={event.title} class="event-icon" />
-						{/if}
-						<h1 class="event-title">{event.title}</h1>
-						<button
-							class="info-toggle-btn"
-							on:click={() => showInfoView = showInfoView === 'markets' ? 'info' : 'markets'}
-						>
-							{showInfoView === 'markets' ? 'Info' : 'Markets'}
-						</button>
-					</div>
-					<div class="event-header-right">
-						<img src={polymockLogo} alt="Polymock" class="polymarket-icon" />
-						<span class="polymarket-text">Polymock</span>
-					</div>
-				</div>
+		<!-- TOP HEADER BAR -->
+		<div class="ev-header">
+			<button class="ev-back" on:click={goBack}>←</button>
+			{#if event.image}
+				<img src={event.image} alt={event.title} class="ev-logo" />
+			{/if}
+			<span class="ev-title">{event.title}</span>
+			<div class="ev-header-meta">
+				<span class="ev-meta-chip">{activeMarkets.length} active</span>
+				{#if resolvedMarkets.length > 0}
+					<span class="ev-meta-chip resolved">{resolvedMarkets.length} resolved</span>
+				{/if}
+			</div>
+		</div>
 
-				<!-- Markets List (Scrollable) -->
-				{#if showInfoView === 'markets'}
-				<div class="markets-list">
-					{#each displayedMarkets as market}
-						<div
-							class="market-row"
-							class:selected={selectedMarket?.id === market.id}
-						>
-							<!-- Left: Icon + Name + Volume (Clickable) -->
-							<div class="market-info" on:click={() => selectMarket(market)} role="button" tabindex="0" on:keydown={(e) => e.key === 'Enter' && selectMarket(market)}>
-								{#if market.image}
-									<img src={market.image} alt={market.question} class="market-icon" />
-								{/if}
-								<div class="market-details">
-									<div class="market-name">{market.question || 'Unknown'}</div>
-									<div class="market-volume">
-										{market.volume_24hr
-											? `$${(market.volume_24hr / 1000000).toFixed(1)}M Vol.`
-											: (market.volume ? `$${(market.volume / 1000000).toFixed(1)}M Vol.` : '$0 Vol.')}
-									</div>
+		<!-- 3-COLUMN BODY -->
+		<div class="ev-body">
+
+			<!-- ── LEFT SIDEBAR: market list ── -->
+			<div class="ev-sidebar">
+				<div class="ev-sidebar-label">MARKETS</div>
+				{#each activeMarkets as market}
+					<button
+						class="ev-mrow"
+						class:active={selectedMarket?.id === market.id}
+						on:click={() => selectMarket(market)}
+					>
+						<div class="ev-mrow-bar">
+							<div class="ev-mrow-fill" style="height:{((market.yesPrice||0)*100).toFixed(0)}%"></div>
+						</div>
+						<div class="ev-mrow-info">
+							<span class="ev-mrow-name">{market.question || 'Unknown'}</span>
+							<span class="ev-mrow-pct yes-color">{((market.yesPrice||0)*100).toFixed(0)}%</span>
+						</div>
+					</button>
+				{/each}
+
+				{#if resolvedMarkets.length > 0}
+					<button class="ev-resolved-toggle" on:click={() => showResolved = !showResolved}>
+						{showResolved ? '▲' : '▼'} {resolvedMarkets.length} resolved
+					</button>
+					{#if showResolved}
+						{#each resolvedMarkets as market}
+							<button
+								class="ev-mrow resolved"
+								class:active={selectedMarket?.id === market.id}
+								on:click={() => selectMarket(market)}
+							>
+								<div class="ev-mrow-info">
+									<span class="ev-mrow-name">{market.question || 'Unknown'}</span>
+									<span class="resolved-chip">Resolved</span>
 								</div>
-							</div>
-
-							<!-- Center: Percentage or Resolved Badge (Clickable) -->
-							<div class="market-percentage" on:click={() => selectMarket(market)} role="button" tabindex="0" on:keydown={(e) => e.key === 'Enter' && selectMarket(market)}>
-								{#if isMarketResolved(market)}
-									<span class="resolved-badge">Resolved</span>
-								{:else}
-									{((market.yesPrice || 0) * 100).toFixed(0)}%
-								{/if}
-							</div>
-
-							<!-- Right: Buy Buttons -->
-							<div class="market-actions">
-								<button class="buy-btn yes-btn" on:click={() => { selectMarket(market); selectedSide = 'Yes'; }}>
-									Buy Yes {((market.yesPrice || 0) * 100).toFixed(1)}¢
-								</button>
-								<button class="buy-btn no-btn" on:click={() => { selectMarket(market); selectedSide = 'No'; }}>
-									Buy No {((market.noPrice || 0) * 100).toFixed(1)}¢
-								</button>
-							</div>
-						</div>
-					{/each}
-
-					<!-- View/Hide Resolved Markets Button -->
-					{#if resolvedMarkets.length > 0}
-						<div class="resolved-toggle-container">
-							<button class="resolved-toggle-btn" on:click={() => showResolved = !showResolved}>
-								{#if showResolved}
-									Hide Resolved ({resolvedMarkets.length})
-								{:else}
-									View Resolved ({resolvedMarkets.length})
-								{/if}
 							</button>
-						</div>
+						{/each}
 					{/if}
-				</div>
-
-				{:else if showInfoView === 'info'}
-				<div class="info-view">
-					<!-- Rules Section -->
-					{#if event}
-						<div class="info-section">
-							<MarketRules event={event} market={selectedMarket} />
-						</div>
-					{/if}
-
-					<!-- Comments Section -->
-					{#if event}
-						<div class="info-section">
-							<MarketComments marketId={event.id} />
-						</div>
-					{/if}
-				</div>
 				{/if}
 			</div>
 
-			<!-- RIGHT PANEL: Trading Interface -->
-			<div class="trading-panel">
+			<!-- ── CENTER: orderbook / info ── -->
+			<div class="ev-main">
 				{#if selectedMarket}
-					<!-- Selected Market Header -->
-					<div class="trading-header">
-						{#if selectedMarket.image}
-							<img src={selectedMarket.image} alt={selectedMarket.question} class="trading-market-icon" />
+					<!-- Market banner -->
+					<div class="ev-market-banner">
+						<div class="ev-market-title">{selectedMarket.question}</div>
+						<div class="ev-market-pills">
+							<button
+								class="ev-pill yes-pill"
+								class:pill-active={selectedSide === 'Yes'}
+								on:click={() => { selectedSide = 'Yes'; tradeTab = 'Buy'; }}
+							>
+								Yes <strong>{((selectedMarket.yesPrice||0)*100).toFixed(1)}¢</strong>
+							</button>
+							<button
+								class="ev-pill no-pill"
+								class:pill-active={selectedSide === 'No'}
+								on:click={() => { selectedSide = 'No'; tradeTab = 'Buy'; }}
+							>
+								No <strong>{((selectedMarket.noPrice||0)*100).toFixed(1)}¢</strong>
+							</button>
+							<span class="ev-stat">Vol. {selectedMarket.volume_24hr ? `$${(selectedMarket.volume_24hr/1000000).toFixed(1)}M` : selectedMarket.volume ? `$${(selectedMarket.volume/1000000).toFixed(1)}M` : '$0'}</span>
+							{#if selectedMarket.endDate}
+								<span class="ev-stat">Ends {new Date(selectedMarket.endDate).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>
+							{/if}
+						</div>
+					</div>
+
+					<!-- Center tabs -->
+					<div class="ev-center-tabs">
+						<button class="ev-ctab" class:ev-ctab-active={centerTab==='orderbook'} on:click={() => centerTab='orderbook'}>Order Book</button>
+						<button class="ev-ctab" class:ev-ctab-active={centerTab==='chart'} on:click={() => centerTab='chart'}>Chart</button>
+						<button class="ev-ctab" class:ev-ctab-active={centerTab==='info'} on:click={() => centerTab='info'}>Info & Rules</button>
+					</div>
+
+					<!-- Tab content -->
+					<div class="ev-center-content" class:ev-center-content-chart={centerTab==='chart'}>
+						{#if centerTab === 'orderbook'}
+							<OrderBook
+								tokenIds={selectedMarket.clobTokenIds ?? []}
+								yesLabel="Yes"
+								noLabel="No"
+							/>
+						{:else if centerTab === 'chart'}
+							{@const chartMarkets = activeMarkets
+								.filter(m => m.clobTokenIds?.[0])
+								.sort((a, b) => (b.yesPrice ?? 0) - (a.yesPrice ?? 0))
+								.slice(0, 5)
+								.map((m, i) => ({
+									tokenId: m.clobTokenIds![0],
+									label: m.question?.replace(/^Will /, '').slice(0, 30) ?? `Market ${i+1}`,
+								}))}
+							<MarketPriceChart markets={chartMarkets} />
+						{:else}
+							<div class="ev-info-wrap">
+								<MarketRules event={event} market={selectedMarket} />
+							</div>
 						{/if}
-						<h2 class="trading-market-name">{selectedMarket.question}</h2>
 					</div>
+				{:else}
+					<div class="ev-no-market">← Select a market</div>
+				{/if}
+			</div>
 
-					<!-- Buy/Sell Tabs -->
-					<div class="trade-tabs">
-						<button
-							class="trade-tab"
-							class:active={tradeTab === 'Buy'}
-							on:click={() => tradeTab = 'Buy'}
-						>
-							Buy
-						</button>
-						<button
-							class="trade-tab"
-							class:active={tradeTab === 'Sell'}
-							on:click={() => tradeTab = 'Sell'}
-						>
-							Sell
-						</button>
-					</div>
+			<!-- ── RIGHT: trading panel ── -->
+			<div class="ev-trade">
+				{#if selectedMarket}
+					<div class="ev-trade-inner">
 
-					<!-- Yes/No Selection -->
-					<div class="outcome-selection">
+					<!-- Yes / No toggle -->
+					<div class="ev-outcome-row">
 						<button
-							class="outcome-btn yes-outcome"
+							class="ev-outcome yes-outcome"
 							class:active={selectedSide === 'Yes'}
 							on:click={() => { selectedSide = 'Yes'; selectedPosition = null; amount = 0; }}
 						>
-							Yes {((selectedMarket.yesPrice || 0) * 100).toFixed(1)}¢
+							Yes<br><span class="ev-outcome-pct">{((selectedMarket.yesPrice||0)*100).toFixed(1)}¢</span>
 						</button>
 						<button
-							class="outcome-btn no-outcome"
+							class="ev-outcome no-outcome"
 							class:active={selectedSide === 'No'}
 							on:click={() => { selectedSide = 'No'; selectedPosition = null; amount = 0; }}
 						>
-							No {((selectedMarket.noPrice || 0) * 100).toFixed(1)}¢
+							No<br><span class="ev-outcome-pct">{((selectedMarket.noPrice||0)*100).toFixed(1)}¢</span>
 						</button>
 					</div>
 
-					<!-- Amount Input -->
-					<div class="amount-section">
-						<label class="amount-label">{tradeTab === 'Buy' ? 'Amount' : 'Shares'}</label>
-						<div class="balance-text">
-							{#if tradeTab === 'Buy'}
-								Balance ${walletState.usdcBalance.toFixed(2)}
-							{:else if selectedPosition}
-								{selectedPosition.remainingShares.toFixed(2)} shares available
-							{/if}
+					<!-- Buy / Sell tabs -->
+					<div class="ev-trade-tabs">
+						<button class="ev-ttab" class:ev-ttab-active={tradeTab==='Buy'} on:click={() => tradeTab='Buy'}>Buy</button>
+						<button class="ev-ttab" class:ev-ttab-active={tradeTab==='Sell'} on:click={() => tradeTab='Sell'}>Sell</button>
+					</div>
+
+					<!-- Amount input -->
+					<div class="ev-amount-block">
+						<div class="ev-amount-row">
+							<label class="ev-amount-label">{tradeTab === 'Buy' ? 'Amount (USD)' : 'Shares'}</label>
+							<span class="ev-balance">
+								{#if tradeTab === 'Buy'}
+									${walletState.usdcBalance.toFixed(2)}
+								{:else if selectedPosition}
+									{selectedPosition.remainingShares.toFixed(2)} avail.
+								{/if}
+							</span>
 						</div>
-						<div class="amount-input-wrapper">
-							{#if tradeTab === 'Buy'}
-								<span class="amount-currency">$</span>
-							{/if}
+						<div class="ev-input-wrap">
+							{#if tradeTab === 'Buy'}<span class="ev-currency">$</span>{/if}
 							<input
 								type="text"
 								inputmode="decimal"
 								value={amount || ''}
 								on:input={(e) => {
 									const val = e.target.value;
-									if (val === '' || val === '.') {
-										amount = 0;
-										return;
-									}
+									if (val === '' || val === '.') { amount = 0; return; }
 									const parsed = parseFloat(val);
-									if (!isNaN(parsed)) {
-										amount = parsed;
-									}
+									if (!isNaN(parsed)) amount = parsed;
 								}}
 								placeholder="0.00"
-								class="amount-input"
-								class:sell-mode={tradeTab === 'Sell'}
+								class="ev-input"
+								class:ev-input-sell={tradeTab === 'Sell'}
 							/>
-							{#if tradeTab === 'Sell'}
-								<span class="amount-suffix">shares</span>
-							{/if}
+							{#if tradeTab === 'Sell'}<span class="ev-suffix">shares</span>{/if}
 						</div>
-
-						<!-- Quick Amount Buttons -->
-						<div class="quick-amounts">
+						<div class="ev-quick">
 							{#if tradeTab === 'Buy'}
-								<button class="quick-btn" on:click={() => addAmount(1)}>+$1</button>
-								<button class="quick-btn" on:click={() => addAmount(20)}>+$20</button>
-								<button class="quick-btn" on:click={() => addAmount(100)}>+$100</button>
-								<button class="quick-btn" on:click={setMaxAmount}>Max</button>
+								<button class="ev-qbtn" on:click={() => addAmount(1)}>$1</button>
+								<button class="ev-qbtn" on:click={() => addAmount(10)}>$10</button>
+								<button class="ev-qbtn" on:click={() => addAmount(50)}>$50</button>
+								<button class="ev-qbtn" on:click={setMaxAmount}>Max</button>
 							{:else if selectedPosition}
-								<button class="quick-btn" on:click={() => {
-									amount = selectedPosition.remainingShares * 0.25;
-								}}>25%</button>
-								<button class="quick-btn" on:click={() => {
-									amount = selectedPosition.remainingShares * 0.5;
-								}}>50%</button>
-								<button class="quick-btn" on:click={() => {
-									amount = selectedPosition.remainingShares * 0.75;
-								}}>75%</button>
-								<button class="quick-btn" on:click={setMaxAmount}>Max</button>
+								<button class="ev-qbtn" on:click={() => { amount = selectedPosition.remainingShares * 0.25; }}>25%</button>
+								<button class="ev-qbtn" on:click={() => { amount = selectedPosition.remainingShares * 0.5; }}>50%</button>
+								<button class="ev-qbtn" on:click={() => { amount = selectedPosition.remainingShares * 0.75; }}>75%</button>
+								<button class="ev-qbtn" on:click={setMaxAmount}>Max</button>
 							{/if}
 						</div>
 					</div>
 
-					<!-- Advanced Settings (SL/TP) - Only for Buy Tab -->
+					<!-- SL/TP accordion (Buy only) -->
 					{#if tradeTab === 'Buy'}
-					<div class="advanced-section">
-						<div class="advanced-header">
-							<span class="advanced-title">Stop Loss / Take Profit</span>
-							<span class="advanced-subtitle">Automated exit conditions</span>
-						</div>
-
-						<div class="advanced-content">
-							<div class="sltp-grid">
-								<div class="sltp-input-group">
-									<label class="sltp-label">
-										<span class="sltp-label-text">Stop Loss</span>
-										<span class="sltp-label-badge sl-badge">SL</span>
-									</label>
-									<div class="sltp-input-wrapper">
-										<input
-											type="number"
-											bind:value={stopLoss}
-											class="sltp-input"
-											min="0"
-											max={selectedMarket.yesPrice || selectedMarket.noPrice}
-											step="0.01"
-											placeholder="45.5"
-										/>
-										<span class="sltp-currency">¢</span>
+					<div class="ev-sltp-wrap">
+						<button class="ev-sltp-toggle" on:click={() => showSLTP = !showSLTP}>
+							<span>Stop Loss / Take Profit</span>
+							<span class="ev-sltp-badges">
+								{#if stopLoss > 0}<span class="sl-badge">SL {stopLoss.toFixed(1)}¢</span>{/if}
+								{#if takeProfit > 0}<span class="tp-badge">TP {takeProfit.toFixed(1)}¢</span>{/if}
+								<span class="ev-sltp-arrow">{showSLTP ? '▲' : '▼'}</span>
+							</span>
+						</button>
+						{#if showSLTP}
+						<div class="ev-sltp-body" transition:slide={{ duration: 160 }}>
+							<div class="ev-sltp-grid">
+								<div class="ev-sltp-group">
+									<label><span class="sl-badge">SL</span> Stop Loss</label>
+									<div class="ev-sltp-input-wrap">
+										<input type="number" bind:value={stopLoss} min="0" step="0.01" placeholder="45.5" class="ev-sltp-input" />
+										<span>¢</span>
 									</div>
-									<span class="sltp-description">Exit if price drops to this level</span>
 								</div>
-
-								<div class="sltp-input-group">
-									<label class="sltp-label">
-										<span class="sltp-label-text">Take Profit</span>
-										<span class="sltp-label-badge tp-badge">TP</span>
-									</label>
-									<div class="sltp-input-wrapper">
-										<input
-											type="number"
-											bind:value={takeProfit}
-											class="sltp-input"
-											min={selectedMarket.yesPrice || selectedMarket.noPrice}
-											max="100"
-											step="0.01"
-											placeholder="85.5"
-										/>
-										<span class="sltp-currency">¢</span>
-									</div>
-									<span class="sltp-description">Exit if price rises to this level</span>
-								</div>
-							</div>
-
-							<div class="sltp-active-summary">
-								<div class="sltp-active-title">Active Conditions</div>
-								<div class="sltp-active-items">
-									<div class="sltp-active-item sl-item">
-										<span class="sltp-active-badge sl-badge">SL</span>
-										<span class="sltp-active-value">{stopLoss > 0 ? `${stopLoss.toFixed(2)}¢` : 'No'}</span>
-									</div>
-									<div class="sltp-active-item tp-item">
-										<span class="sltp-active-badge tp-badge">TP</span>
-										<span class="sltp-active-value">{takeProfit > 0 ? `${takeProfit.toFixed(2)}¢` : 'No'}</span>
+								<div class="ev-sltp-group">
+									<label><span class="tp-badge">TP</span> Take Profit</label>
+									<div class="ev-sltp-input-wrap">
+										<input type="number" bind:value={takeProfit} min="0" step="0.01" placeholder="85.5" class="ev-sltp-input" />
+										<span>¢</span>
 									</div>
 								</div>
 							</div>
 						</div>
+						{/if}
 					</div>
 					{/if}
 
-					<!-- Action Button -->
+					<!-- Sell positions list -->
+					{#if tradeTab === 'Sell'}
+						{#if loadingPositions}
+							<div class="ev-positions-loading">Loading positions…</div>
+						{:else if userPositions.length > 0}
+							<div class="ev-positions">
+								{#each userPositions as pos}
+									<button
+										class="ev-pos-row"
+										class:active={selectedPosition?.positionId === pos.positionId}
+										on:click={() => { selectedPosition = pos; amount = 0; }}
+									>
+										<span>{pos.predictionType}</span>
+										<span>{pos.remainingShares.toFixed(2)} shares @ {(pos.pricePerShare*100).toFixed(1)}¢</span>
+									</button>
+								{/each}
+							</div>
+						{:else if walletState.connected}
+							<div class="ev-no-pos">No {selectedSide} positions</div>
+						{/if}
+					{/if}
+
+					<!-- Trade summary -->
+					{#if amount > 0 && tradeTab === 'Buy'}
+						{@const price = selectedSide === 'Yes' ? (selectedMarket.yesPrice||0) : (selectedMarket.noPrice||0)}
+						{@const shares = price > 0 ? amount / price : 0}
+						<div class="ev-summary" transition:slide={{ duration: 180 }}>
+							<div class="ev-sum-row"><span>Avg price</span><span>{(price*100).toFixed(1)}¢</span></div>
+							<div class="ev-sum-row"><span>Shares</span><span>{shares.toFixed(2)}</span></div>
+							<div class="ev-sum-row highlight"><span>Potential win</span><span class="orange">${shares.toFixed(2)}</span></div>
+						</div>
+					{/if}
+
+					<!-- Action button -->
 					<button
-						class="action-button"
-						class:enabled={walletState.connected && amount > 0 && !trading && !isMarketResolved(selectedMarket) && (tradeTab === 'Buy' || (tradeTab === 'Sell' && selectedPosition && userPositions.length > 0))}
-						disabled={!walletState.connected || amount <= 0 || trading || isMarketResolved(selectedMarket) || (tradeTab === 'Sell' && (!selectedPosition || userPositions.length === 0))}
+						class="ev-action"
+						class:ev-action-enabled={walletState.connected && amount > 0 && !trading && !isMarketResolved(selectedMarket) && (tradeTab === 'Buy' || (tradeTab === 'Sell' && selectedPosition))}
+						disabled={!walletState.connected || amount <= 0 || trading || isMarketResolved(selectedMarket) || (tradeTab === 'Sell' && !selectedPosition)}
 						on:click={handleTrade}
 					>
-						{#if trading}
-							Processing...
-						{:else if isMarketResolved(selectedMarket)}
-							Market Resolved
-						{:else if !walletState.connected}
-							Connect Wallet
-						{:else if tradeTab === 'Sell' && (!selectedPosition || userPositions.length === 0)}
-							No {selectedSide} Position
-						{:else}
-							{tradeTab} {selectedSide}
+						{#if trading}Processing…
+						{:else if isMarketResolved(selectedMarket)}Market Resolved
+						{:else if !walletState.connected}Connect Wallet
+						{:else if tradeTab === 'Sell' && !selectedPosition}No {selectedSide} Position
+						{:else}{tradeTab} {selectedSide}
 						{/if}
 					</button>
 
-					<!-- Terms -->
-					<div class="terms-text">
-						By trading, you agree to the <a href="#" target="_blank">Terms of Use</a>.
-					</div>
+					</div><!-- ev-trade-inner -->
+
 				{:else}
-					<div class="no-selection">
-						<p>Select a market to start trading</p>
-					</div>
+					<div class="ev-no-market-trade">← Select a market to trade</div>
 				{/if}
 			</div>
-		</div>
+
+		</div><!-- end ev-body -->
 	{/if}
 </div>
 
@@ -852,1186 +805,468 @@
 
 <style>
 	:global(body) {
-		margin: 0;
-		padding: 0;
-		background: #000000;
-		color: #E8E8E8;
+		margin: 0; padding: 0;
+		background: #000;
+		color: #e8e8e8;
 		font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 	}
 
-	.event-page {
-		min-height: 100vh;
-		background: #000000;
-		padding: 12px;
-		overflow-x: hidden;
-		max-width: 100vw;
-		box-sizing: border-box;
+	/* ── PAGE SHELL ── */
+	.ev-page {
+		display: flex; flex-direction: column;
+		height: 100vh; overflow: hidden;
+		background: #000;
 	}
 
-	.page-header {
-		margin-bottom: 24px;
+	/* ── LOADING / ERROR ── */
+	.ev-loading, .ev-error {
+		display: flex; flex-direction: column;
+		align-items: center; justify-content: center;
+		height: 100vh; gap: 14px; color: #555;
+	}
+	.ev-spinner {
+		width: 26px; height: 26px;
+		border: 2px solid #1a1a1a; border-top-color: #F97316;
+		border-radius: 50%; animation: spin 0.75s linear infinite;
+	}
+	@keyframes spin { to { transform: rotate(360deg); } }
+	.ev-error h2 { color: #e8e8e8; margin: 0; font-size: 20px; }
+	.ev-error p  { color: #555; margin: 0; font-size: 14px; }
+	.ev-error button {
+		background: transparent; border: 1px solid #2a2a2a;
+		color: #888; padding: 9px 18px; border-radius: 8px;
+		cursor: pointer; font-size: 13px; transition: all 0.15s;
+	}
+	.ev-error button:hover { border-color: #F97316; color: #F97316; }
+
+	/* ── TOP HEADER ── */
+	.ev-header {
+		display: flex; align-items: center; gap: 10px;
+		padding: 0 14px; height: 50px; flex-shrink: 0;
+		border-bottom: 1px solid #111;
+		background: #000;
+	}
+	.ev-back {
+		background: transparent; border: 1px solid #1e1e1e;
+		color: #555; width: 30px; height: 30px; border-radius: 6px;
+		cursor: pointer; font-size: 15px; flex-shrink: 0;
+		display: flex; align-items: center; justify-content: center;
+		transition: all 0.15s;
+	}
+	.ev-back:hover { border-color: #F97316; color: #F97316; }
+	.ev-logo {
+		width: 26px; height: 26px; border-radius: 5px;
+		object-fit: cover; flex-shrink: 0;
+	}
+	.ev-title {
+		font-size: 14px; font-weight: 600; color: #d0d0d0;
+		flex: 1; min-width: 0;
+		overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+	}
+	.ev-header-meta { display: flex; gap: 6px; flex-shrink: 0; }
+	.ev-meta-chip {
+		font-size: 11px; padding: 3px 8px; border-radius: 20px;
+		background: rgba(16,185,129,0.1); color: #10b981;
+		border: 1px solid rgba(16,185,129,0.18); font-weight: 600;
+	}
+	.ev-meta-chip.resolved {
+		background: rgba(107,114,128,0.1); color: #6b7280;
+		border-color: rgba(107,114,128,0.2);
 	}
 
-	.back-button {
-		background: #000000;
-		border: 1px solid #404040;
-		color: #E8E8E8;
-		padding: 10px 20px;
-		border-radius: 8px;
-		cursor: pointer;
-		font-family: Inter, sans-serif;
-		font-size: 14px;
-		font-weight: 500;
-		transition: all 200ms ease-out;
-	}
-
-	.back-button:hover {
-		background: #1E2139;
-		border-color: #F97316;
-		color: #F97316;
-	}
-
-	.back-button-primary {
-		background: #F97316;
-		border: none;
-		color: #ffffff;
-		padding: 12px 24px;
-		border-radius: 8px;
-		cursor: pointer;
-		font-family: Inter, sans-serif;
-		font-size: 14px;
-		font-weight: 600;
-		transition: all 200ms ease-out;
-		margin-top: 16px;
-	}
-
-	.back-button-primary:hover {
-		background: #F97316;
-		transform: none;
-	}
-
-	.loading-state,
-	.error-state {
-		padding: 60px 20px;
-		text-align: center;
-		color: #666;
-		font-size: 14px;
-	}
-
-	.error-state {
-		color: #FF4757;
-	}
-
-	.error-state h2 {
-		color: #E8E8E8;
-		margin-bottom: 12px;
-	}
-
-	.error-state p {
-		color: #9BA3B4;
-		margin-bottom: 24px;
-	}
-
-	/* Main Container: Split Layout */
-	.event-container {
+	/* ── 3-COLUMN BODY ── */
+	.ev-body {
+		flex: 1; min-height: 0;
 		display: grid;
-		grid-template-columns: 1fr 350px;
-		gap: 12px;
-		max-width: 100%;
-		margin: 0;
-		width: 100%;
-		box-sizing: border-box;
-		align-items: start;
-	}
-
-	/* LEFT PANEL: Markets List */
-	.markets-panel {
-		background: #000000;
-		border: 1px solid #404040;
-		border-radius: 16px;
-		display: flex;
-		flex-direction: column;
-		overflow: hidden !important;
-	}
-
-	.event-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: 24px;
-		border-bottom: 1px solid #404040;
-		background: rgba(0, 0, 0, 0.5);
-		flex-shrink: 0;
-	}
-
-	.event-header-left {
-		display: flex;
-		align-items: center;
-		gap: 16px;
-		flex: 1;
-		min-width: 0;
-	}
-
-	.event-header-right {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		flex-shrink: 0;
-	}
-
-	.event-icon {
-		width: 48px;
-		height: 48px;
-		border-radius: 8px;
-		object-fit: cover;
-		flex-shrink: 0;
-	}
-
-	.event-title {
-		margin: 0;
-		font-size: 20px;
-		font-weight: 700;
-		color: #E8E8E8;
-		line-height: 1.3;
+		grid-template-columns: 210px 1fr 296px;
 		overflow: hidden;
-		text-overflow: ellipsis;
-		flex: 1;
 	}
 
-	.info-toggle-btn {
-		padding: 6px 16px;
-		background: transparent;
-		border: 1px solid #404040;
-		border-radius: 6px;
-		color: #999999;
-		font-size: 13px;
-		font-weight: 600;
-		cursor: pointer;
-		transition: all 200ms ease-out;
-		white-space: nowrap;
-		flex-shrink: 0;
+	/* ── LEFT SIDEBAR ── */
+	.ev-sidebar {
+		border-right: 1px solid #111;
+		overflow-y: auto; overflow-x: hidden;
+		display: flex; flex-direction: column;
+		scrollbar-width: thin; scrollbar-color: #1e1e1e transparent;
+		background: #000;
 	}
-
-	.info-toggle-btn:hover {
-		background: rgba(255, 255, 255, 0.05);
-		border-color: #F97316;
-		color: #F97316;
+	.ev-sidebar-label {
+		font-size: 9px; font-weight: 700; letter-spacing: 0.1em;
+		color: #333; padding: 14px 12px 6px;
+		text-transform: uppercase; flex-shrink: 0; user-select: none;
 	}
-
-	.polymarket-icon {
-		width: 48px;
-		height: 48px;
-		object-fit: contain;
+	.ev-mrow {
+		display: flex; align-items: center; gap: 8px;
+		padding: 9px 12px;
+		background: transparent; border: none; border-left: 2px solid transparent;
+		text-align: left; cursor: pointer; width: 100%;
+		transition: background 0.12s, border-color 0.12s;
 	}
-
-	.polymarket-text {
-		font-size: 16px;
-		color: #FFFFFF;
-		font-weight: 600;
-		font-family: 'Open Sauce', 'Inter', sans-serif;
-		letter-spacing: 0.3px;
-	}
-
-	.markets-list {
-		padding: 16px 24px;
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-		flex: 1 1 auto;
-		overflow-y: auto;
-		min-height: 0;
-	}
-
-	/* Info View */
-	.info-view {
-		flex: 1;
-		overflow-y: auto;
-		display: flex;
-		flex-direction: column;
-		gap: 0;
-	}
-
-	.info-section {
-		border-top: 1px solid #404040;
-	}
-
-	.market-row {
-		display: flex;
-		align-items: center;
-		padding: 12px 16px;
-		border-bottom: 1px solid #404040;
-		background: transparent;
-		border-left: 3px solid transparent;
-		transition: all 150ms ease-out;
-		width: 100%;
-		text-align: left;
-		font-family: Inter, sans-serif;
-		gap: 12px;
-	}
-
-	.market-row:hover {
-		background: rgba(255, 255, 255, 0.03);
-	}
-
-	.market-row.selected {
-		background: rgba(0, 208, 132, 0.05);
+	.ev-mrow:hover { background: rgba(255,255,255,0.025); }
+	.ev-mrow:hover .ev-mrow-name { color: #e0e0e0; }
+	.ev-mrow.active {
+		background: rgba(249,115,22,0.05);
 		border-left-color: #F97316;
 	}
-
-	.market-info {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		flex: 1;
-		min-width: 0;
-		cursor: pointer;
+	.ev-mrow.active .ev-mrow-name { color: #e8e8e8; }
+	.ev-mrow.resolved { opacity: 0.45; }
+	.ev-mrow-bar {
+		width: 3px; height: 32px; flex-shrink: 0;
+		background: #1a1a1a; border-radius: 2px;
+		display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden;
 	}
+	.ev-mrow-fill {
+		width: 100%; background: #10b981; border-radius: 2px;
+		transition: height 0.4s ease;
+	}
+	.ev-mrow-info {
+		flex: 1; min-width: 0;
+		display: flex; flex-direction: column; gap: 2px;
+	}
+	.ev-mrow-name {
+		font-size: 11.5px; color: #bbb; font-weight: 500;
+		overflow: hidden; text-overflow: ellipsis;
+		display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+		line-clamp: 2; line-height: 1.35; transition: color 0.12s;
+	}
+	.ev-mrow-pct { font-size: 12px; font-weight: 700; }
+	.yes-color { color: #10b981; }
+	.resolved-chip {
+		font-size: 9px; padding: 2px 5px; border-radius: 3px;
+		background: rgba(107,114,128,0.12); color: #6b7280;
+		border: 1px solid rgba(107,114,128,0.18); align-self: flex-start;
+		font-weight: 600; letter-spacing: 0.03em;
+	}
+	.ev-resolved-toggle {
+		background: transparent; border: none; border-top: 1px solid #0f0f0f;
+		color: #777; font-size: 11px; padding: 10px 12px;
+		cursor: pointer; text-align: left; width: 100%;
+		transition: color 0.12s;
+	}
+	.ev-resolved-toggle:hover { color: #bbb; }
 
-	.market-icon {
-		width: 40px;
-		height: 40px;
-		border-radius: 6px;
-		object-fit: cover;
+	/* ── CENTER MAIN ── */
+	.ev-main {
+		display: flex; flex-direction: column;
+		overflow: hidden; border-right: 1px solid #111;
+		background: #000;
+	}
+	.ev-market-banner {
 		flex-shrink: 0;
-		background: rgba(255, 255, 255, 0.05);
+		padding: 14px 18px 12px;
+		border-bottom: 1px solid #111;
+		background: #030303;
 	}
-
-	.market-details {
-		flex: 1;
-		min-width: 0;
+	.ev-market-title {
+		font-size: 15px; font-weight: 700; color: #e8e8e8;
+		line-height: 1.4; margin-bottom: 10px;
 	}
-
-	.market-name {
-		color: #E8E8E8;
-		font-size: 14px;
-		font-weight: 600;
-		margin-bottom: 4px;
-		white-space: nowrap;
+	.ev-market-pills {
+		display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+	}
+	.ev-pill {
+		padding: 5px 12px; border-radius: 20px; font-size: 12.5px; font-weight: 600;
+		cursor: pointer; border: 1px solid; transition: all 0.15s;
+		display: flex; align-items: center; gap: 5px; user-select: none;
+	}
+	.yes-pill { background: rgba(16,185,129,0.08); color: #10b981; border-color: rgba(16,185,129,0.2); }
+	.yes-pill:hover { background: rgba(16,185,129,0.15); border-color: rgba(16,185,129,0.4); }
+	.yes-pill.pill-active { background: rgba(16,185,129,0.18); border-color: #10b981; }
+	.no-pill { background: rgba(239,68,68,0.08); color: #ef4444; border-color: rgba(239,68,68,0.2); }
+	.no-pill:hover { background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.4); }
+	.no-pill.pill-active { background: rgba(239,68,68,0.18); border-color: #ef4444; }
+	.ev-stat { font-size: 11.5px; color: #999; }
+	.ev-center-tabs {
+		display: flex; flex-shrink: 0;
+		border-bottom: 1px solid #111;
+		padding: 0 18px; background: #000;
+	}
+	.ev-ctab {
+		background: transparent; border: none; border-bottom: 2px solid transparent;
+		color: #777; padding: 9px 14px; font-size: 12.5px; font-weight: 600;
+		cursor: pointer; transition: color 0.15s; margin-bottom: -1px;
+		letter-spacing: 0.01em;
+	}
+	.ev-ctab:hover { color: #bbb; }
+	.ev-ctab-active { color: #e8e8e8; border-bottom-color: #F97316; }
+	.ev-center-content {
+		flex: 1; overflow-y: auto; overflow-x: hidden;
+		padding: 16px 18px;
+		scrollbar-width: thin; scrollbar-color: #1a1a1a transparent;
+	}
+	.ev-center-content-chart {
+		display: flex; flex-direction: column;
+		padding: 12px 18px;
 		overflow: hidden;
-		text-overflow: ellipsis;
+	}
+	.ev-info-wrap { display: flex; flex-direction: column; gap: 20px; }
+	.ev-no-market {
+		display: flex; align-items: center; justify-content: center;
+		height: 100%; color: #555; font-size: 13px; letter-spacing: 0.02em;
 	}
 
-	.market-volume {
-		color: #9BA3B4;
-		font-size: 12px;
-		font-weight: 400;
+	/* ── RIGHT TRADING PANEL ── */
+	.ev-trade {
+		display: flex; flex-direction: column;
+		overflow: hidden; background: #000;
+	}
+	.ev-trade-inner {
+		flex: 1; overflow-y: auto; overflow-x: hidden;
+		display: flex; flex-direction: column; gap: 12px;
+		padding: 14px 12px 8px;
+		scrollbar-width: thin; scrollbar-color: #1a1a1a transparent;
+	}
+	.ev-no-market-trade {
+		display: flex; align-items: center; justify-content: center;
+		height: 100%; color: #555; font-size: 12px;
 	}
 
-	.market-percentage {
-		font-size: 28px;
-		font-weight: 700;
-		color: #E8E8E8;
-		font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
-		flex-shrink: 0;
-		min-width: 80px;
-		text-align: center;
-		cursor: pointer;
+	/* Yes / No outcome buttons */
+	.ev-outcome-row { display: flex; gap: 7px; }
+	.ev-outcome {
+		flex: 1; padding: 11px 8px; border-radius: 9px;
+		font-size: 12px; font-weight: 700;
+		cursor: pointer; border: 1.5px solid;
+		transition: all 0.15s; line-height: 1.3; text-align: center;
+		user-select: none;
 	}
-
-	.resolved-badge {
-		display: inline-block;
-		padding: 6px 12px;
-		background: rgba(155, 163, 180, 0.2);
-		border: 1px solid rgba(155, 163, 180, 0.4);
-		border-radius: 6px;
-		color: #9BA3B4;
-		font-size: 13px;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.5px;
-		font-family: Inter, sans-serif;
-	}
-
-	.market-actions {
-		display: flex;
-		gap: 8px;
-		flex-shrink: 0;
-	}
-
-	.buy-btn {
-		padding: 8px 12px;
-		border-radius: 6px;
-		font-family: Inter, sans-serif;
-		font-size: 12px;
-		font-weight: 600;
-		cursor: pointer;
-		transition: all 150ms ease-out;
-		white-space: nowrap;
-	}
-
-	.yes-btn {
-		background: rgba(0, 208, 132, 0.15);
-		color: #00D084;
-		border: 1px solid rgba(0, 208, 132, 0.3);
-	}
-
-	.yes-btn:hover {
-		background: rgba(0, 208, 132, 0.25);
-		border-color: #00D084;
-		color: #00D084;
-		transform: none;
-	}
-
-	.no-btn {
-		background: rgba(255, 71, 87, 0.15);
-		color: #FF4757;
-		border: 1px solid rgba(255, 71, 87, 0.3);
-	}
-
-	.no-btn:hover {
-		background: rgba(255, 71, 87, 0.25);
-		border-color: #FF4757;
-		color: #FF4757;
-		transform: none;
-	}
-
-	.resolved-toggle-container {
-		padding: 16px 24px;
-		border-top: 1px solid #404040;
-		background: rgba(0, 0, 0, 0.3);
-		display: flex;
-		justify-content: center;
-	}
-
-	.resolved-toggle-btn {
-		padding: 10px 24px;
-		background: #000000;
-		border: 1px solid #404040;
-		color: #FFFFFF;
-		font-family: Inter, sans-serif;
-		font-size: 13px;
-		font-weight: 600;
-		cursor: pointer;
-		border-radius: 6px;
-		transition: all 150ms ease-out;
-	}
-
-	.resolved-toggle-btn:hover {
-		background: #000000;
-		border-color: #F97316;
-		color: #F97316;
-	}
-
-	/* RIGHT PANEL: Trading Interface */
-	.trading-panel {
-		background: #000000;
-		border: 1px solid #404040;
-		border-radius: 16px;
-		padding: 20px;
-		display: flex;
-		flex-direction: column;
-		gap: 20px;
-	}
-
-	.trading-header {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		padding-bottom: 20px;
-		border-bottom: 1px solid #404040;
-	}
-
-	.trading-market-icon {
-		width: 40px;
-		height: 40px;
-		border-radius: 6px;
-		object-fit: cover;
-		background: rgba(255, 255, 255, 0.05);
-		flex-shrink: 0;
-	}
-
-	.trading-market-name {
-		margin: 0;
-		font-size: 16px;
-		font-weight: 600;
-		color: #E8E8E8;
-		line-height: 1.3;
-	}
-
-	.trade-tabs {
-		display: flex;
-		gap: 8px;
-		align-items: center;
-	}
-
-	.trade-tab {
-		padding: 10px 20px;
-		background: transparent;
-		border: none;
-		color: #9BA3B4;
-		font-family: Inter, sans-serif;
-		font-size: 14px;
-		font-weight: 600;
-		cursor: pointer;
-		border-bottom: 2px solid transparent;
-		transition: all 150ms ease-out;
-	}
-
-	.trade-tab.active {
-		color: #E8E8E8;
-		border-bottom-color: #F97316;
-	}
-
-	.outcome-selection {
-		display: flex;
-		gap: 12px;
-	}
-
-	.outcome-btn {
-		flex: 1;
-		padding: 16px;
-		border-radius: 8px;
-		font-family: Inter, sans-serif;
-		font-size: 16px;
-		font-weight: 700;
-		cursor: pointer;
-		transition: all 150ms ease-out;
-		border: 2px solid;
-	}
-
+	.ev-outcome-pct { font-size: 16px; font-weight: 800; display: block; margin-top: 2px; }
 	.yes-outcome {
-		background: rgba(0, 208, 132, 0.1);
-		color: #00D084;
-		border-color: rgba(0, 208, 132, 0.3);
+		background: rgba(16,185,129,0.06); color: #10b981;
+		border-color: rgba(16,185,129,0.18);
 	}
-
-	.yes-outcome:hover:not(.active) {
-		background: rgba(0, 208, 132, 0.2);
-		border-color: #00D084;
-		transform: none;
-	}
-
-	.yes-outcome.active {
-		background: rgba(0, 208, 132, 0.3);
-		color: #00D084;
-		border-color: #00D084;
-	}
-
+	.yes-outcome:hover { background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.35); }
+	.yes-outcome.active { background: rgba(16,185,129,0.18); border-color: #10b981; box-shadow: 0 0 0 1px rgba(16,185,129,0.15); }
 	.no-outcome {
-		background: rgba(255, 71, 87, 0.1);
-		color: #FF4757;
-		border-color: rgba(255, 71, 87, 0.3);
+		background: rgba(239,68,68,0.06); color: #ef4444;
+		border-color: rgba(239,68,68,0.18);
 	}
+	.no-outcome:hover { background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.35); }
+	.no-outcome.active { background: rgba(239,68,68,0.18); border-color: #ef4444; box-shadow: 0 0 0 1px rgba(239,68,68,0.15); }
 
-	.no-outcome:hover:not(.active) {
-		background: rgba(255, 71, 87, 0.2);
-		border-color: #FF4757;
-		transform: none;
+	/* Buy / Sell tabs */
+	.ev-trade-tabs {
+		display: flex; gap: 0;
+		border-bottom: 1px solid #111;
+		margin: 0 -12px; padding: 0 12px;
 	}
-
-	.no-outcome.active {
-		background: rgba(255, 71, 87, 0.3);
-		color: #FF4757;
-		border-color: #FF4757;
+	.ev-ttab {
+		flex: 1; background: transparent; border: none;
+		border-bottom: 2px solid transparent; margin-bottom: -1px;
+		color: #777; padding: 7px 0; font-size: 13px; font-weight: 600;
+		cursor: pointer; transition: color 0.15s; letter-spacing: 0.01em;
 	}
+	.ev-ttab:hover { color: #bbb; }
+	.ev-ttab-active { color: #e8e8e8; border-bottom-color: #F97316; }
 
-	.amount-section {
-		display: flex;
-		flex-direction: column;
-		gap: 12px;
+	/* Amount block */
+	.ev-amount-block { display: flex; flex-direction: column; gap: 7px; }
+	.ev-amount-row {
+		display: flex; justify-content: space-between; align-items: baseline;
 	}
-
-	.amount-label {
-		font-size: 14px;
-		font-weight: 600;
-		color: #E8E8E8;
+	.ev-amount-label { font-size: 11px; font-weight: 600; color: #aaa; text-transform: uppercase; letter-spacing: 0.05em; }
+	.ev-balance { font-size: 11px; color: #F97316; font-weight: 600; }
+	.ev-input-wrap {
+		position: relative; display: flex; align-items: center;
+		background: #080808; border: 1px solid #1e1e1e; border-radius: 8px;
+		transition: border-color 0.15s;
 	}
-
-	.balance-text {
-		font-size: 12px;
-		color: #9BA3B4;
-		margin-top: -8px;
+	.ev-input-wrap:focus-within { border-color: #F97316; }
+	.ev-currency {
+		position: absolute; left: 11px; font-size: 15px; font-weight: 700;
+		color: #888; pointer-events: none; user-select: none;
 	}
-
-	.amount-input-wrapper {
-		position: relative;
-		display: flex;
-		align-items: center;
-		gap: 8px;
+	.ev-suffix { padding: 0 11px; font-size: 12px; color: #888; flex-shrink: 0; }
+	.ev-input {
+		width: 100%; background: transparent; border: none;
+		color: #e8e8e8; padding: 11px 11px 11px 26px;
+		font-family: 'SF Mono', 'Fira Code', monospace;
+		font-size: 15px; font-weight: 700; outline: none; min-width: 0;
 	}
-
-	.amount-currency {
-		position: absolute;
-		left: 16px;
-		font-size: 32px;
-		font-weight: 700;
-		color: #9BA3B4;
-		pointer-events: none;
+	.ev-input.ev-input-sell { padding-left: 11px; }
+	.ev-input::placeholder { color: #444; }
+	.ev-quick { display: flex; gap: 5px; }
+	.ev-qbtn {
+		flex: 1; background: #080808; border: 1px solid #1e1e1e;
+		color: #aaa; font-size: 11px; font-weight: 600;
+		padding: 6px 2px; border-radius: 6px; cursor: pointer;
+		transition: all 0.12s; user-select: none;
 	}
+	.ev-qbtn:hover { border-color: #F97316; color: #F97316; background: rgba(249,115,22,0.05); }
 
-	.amount-suffix {
-		font-size: 16px;
-		font-weight: 600;
-		color: #9BA3B4;
-		white-space: nowrap;
+	/* SL/TP */
+	.ev-sltp-wrap { border: 1px solid #1a1a1a; border-radius: 8px; }
+	.ev-sltp-toggle {
+		width: 100%; background: #080808; border: none; border-radius: 8px;
+		color: #aaa; font-size: 11.5px; font-weight: 600;
+		padding: 9px 11px; cursor: pointer;
+		display: flex; justify-content: space-between; align-items: center;
+		transition: color 0.12s; letter-spacing: 0.01em;
 	}
-
-	.amount-input {
-		width: 100%;
-		background: #000000;
-		border: 1px solid #404040;
-		color: #E8E8E8;
-		padding: 20px;
-		padding-left: 48px;
-		font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
-		font-size: 32px;
-		font-weight: 700;
-		border-radius: 8px;
-		transition: border-color 200ms ease-out;
+	.ev-sltp-toggle:hover { color: #e8e8e8; }
+	.ev-sltp-badges { display: flex; align-items: center; gap: 5px; }
+	.sl-badge {
+		font-size: 9.5px; padding: 2px 5px; border-radius: 3px; font-weight: 700;
+		background: rgba(239,68,68,0.12); color: #ef4444;
+		border: 1px solid rgba(239,68,68,0.25);
 	}
-
-	.amount-input.sell-mode {
-		padding-left: 20px;
+	.tp-badge {
+		font-size: 9.5px; padding: 2px 5px; border-radius: 3px; font-weight: 700;
+		background: rgba(16,185,129,0.12); color: #10b981;
+		border: 1px solid rgba(16,185,129,0.25);
 	}
-
-	.amount-input:focus {
-		outline: none;
-		border-color: #F97316;
+	.ev-sltp-arrow { font-size: 9px; color: #888; margin-left: 2px; }
+	.ev-sltp-body {
+		padding: 10px 11px 12px;
+		border-top: 1px solid #111;
 	}
-
-	.amount-input::placeholder {
-		color: #666;
+	.ev-sltp-grid { display: flex; flex-direction: column; gap: 8px; }
+	.ev-sltp-group { display: flex; flex-direction: column; gap: 4px; }
+	.ev-sltp-group label {
+		font-size: 10.5px; color: #aaa; display: flex; align-items: center;
+		gap: 5px; font-weight: 600; letter-spacing: 0.02em;
 	}
-
-	.quick-amounts {
-		display: flex;
-		gap: 8px;
+	.ev-sltp-input-wrap {
+		display: flex; align-items: center;
+		background: #060606; border: 1px solid #1a1a1a; border-radius: 6px;
+		width: 100%; transition: border-color 0.15s;
 	}
-
-	.quick-btn {
-		flex: 1;
-		padding: 10px;
-		background: #000000;
-		border: 1px solid #404040;
-		color: #FFFFFF;
-		font-family: Inter, sans-serif;
-		font-size: 13px;
-		font-weight: 600;
-		cursor: pointer;
-		border-radius: 6px;
-		transition: all 150ms ease-out;
+	.ev-sltp-input-wrap:focus-within { border-color: #F97316; }
+	.ev-sltp-input-wrap span { padding: 0 10px; font-size: 11px; color: #888; flex-shrink: 0; }
+	.ev-sltp-input {
+		flex: 1; min-width: 0; background: transparent; border: none; color: #e8e8e8;
+		padding: 8px 0 8px 10px; font-size: 13px; font-weight: 600; outline: none;
+		-moz-appearance: textfield;
 	}
+	.ev-sltp-input::-webkit-outer-spin-button,
+	.ev-sltp-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
-	.quick-btn:hover {
-		background: #000000;
-		border-color: #F97316;
-		color: #F97316;
-		transform: none;
+	/* Sell positions */
+	.ev-positions { display: flex; flex-direction: column; gap: 4px; }
+	.ev-pos-row {
+		background: #080808; border: 1px solid #1a1a1a; border-radius: 6px;
+		padding: 8px 10px; font-size: 11.5px; color: #ccc; cursor: pointer;
+		display: flex; justify-content: space-between;
+		transition: all 0.12s; width: 100%; text-align: left;
 	}
+	.ev-pos-row:hover { border-color: #2a2a2a; color: #bbb; }
+	.ev-pos-row.active { border-color: #F97316; color: #e8e8e8; background: rgba(249,115,22,0.04); }
+	.ev-no-pos, .ev-positions-loading { font-size: 11.5px; color: #777; text-align: center; padding: 6px 0; }
 
-	.action-button {
-		width: 100%;
-		padding: 16px;
-		background: transparent;
-		border: 1px solid #404040;
-		color: #666;
-		font-family: Inter, sans-serif;
-		font-size: 16px;
-		font-weight: 700;
-		border-radius: 8px;
-		cursor: not-allowed;
-		margin-top: 8px;
-		transition: all 200ms ease-out;
+	/* Trade summary */
+	.ev-summary {
+		background: #060606; border: 1px solid #111; border-radius: 8px;
+		padding: 10px 11px;
 	}
-
-	.action-button.enabled {
-		background: transparent;
-		border: 1px solid #F97316;
-		color: #F97316;
-		cursor: pointer;
+	.ev-sum-row {
+		display: flex; justify-content: space-between; align-items: center;
+		font-size: 12px; color: #aaa; padding: 3px 0;
 	}
-
-	.action-button.enabled:hover {
-		background: transparent;
-		border-color: #F97316;
-		color: #F97316;
-		transform: none;
-	}
-
-	.action-button:disabled {
-		opacity: 0.6;
-	}
-
-	.terms-text {
-		font-size: 11px;
-		color: #9BA3B4;
-		text-align: center;
-		line-height: 1.4;
-	}
-
-	.terms-text a {
-		color: #F97316;
-		text-decoration: none;
-	}
-
-	.terms-text a:hover {
-		text-decoration: underline;
-	}
-
-	.no-selection {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		height: 100%;
-		color: #666;
-		font-size: 14px;
-	}
-
-	/* Responsive */
-	@media (max-width: 1200px) {
-		.event-container {
-			grid-template-columns: 1fr;
-		}
-
-		.trading-panel {
-			position: static;
-		}
-	}
-
-	::-webkit-scrollbar {
-		width: 8px;
-	}
-
-	::-webkit-scrollbar-track {
-		background: #000000;
-	}
-
-	::-webkit-scrollbar-thumb {
-		background: #404040;
-		border-radius: 4px;
-	}
-
-	::-webkit-scrollbar-thumb:hover {
-		background: #F97316;
-	}
-
-	/* Modal Styles */
-	/* Polymock Modal System */
-	.pm-overlay {
-		position: fixed;
-		top: 0;
-		left: 0;
-		width: 100%;
-		height: 100%;
-		background: rgba(0, 0, 0, 0.75);
-		backdrop-filter: blur(6px);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 1001;
-		animation: pmFadeIn 0.2s ease-out;
-	}
-
-	@keyframes pmFadeIn {
-		from { opacity: 0; }
-		to { opacity: 1; }
-	}
-
-	.pm-modal {
-		background: #0a0a0a;
-		border: 1px solid #2a2a2a;
-		border-radius: 20px;
-		padding: 36px 32px;
-		max-width: 420px;
-		width: 90vw;
-		text-align: center;
-		animation: pmSlideUp 0.3s ease-out;
-	}
-
-	@keyframes pmSlideUp {
-		from { opacity: 0; transform: translateY(20px); }
-		to { opacity: 1; transform: translateY(0); }
-	}
-
-	.pm-dot {
-		width: 14px;
-		height: 14px;
-		border-radius: 50%;
-		margin: 0 auto 20px auto;
-	}
-
-	.pm-dot.pending {
-		background: #F97316;
-		box-shadow: 0 0 16px rgba(249, 115, 22, 0.4);
-		animation: pmPulse 2s ease-in-out infinite;
-	}
-
-	.pm-dot.success {
-		background: #10b981;
-		box-shadow: 0 0 16px rgba(16, 185, 129, 0.5);
-		animation: pmPulse 2s ease-in-out infinite;
-	}
-
-	.pm-dot.error {
-		background: #ef4444;
-		box-shadow: 0 0 16px rgba(239, 68, 68, 0.5);
-		animation: pmPulse 2s ease-in-out infinite;
-	}
-
-	@keyframes pmPulse {
-		0%, 100% { opacity: 1; }
-		50% { opacity: 0.4; }
-	}
-
-	.pm-title {
-		color: #ffffff;
-		font-size: 22px;
-		font-weight: 700;
-		margin: 0 0 12px 0;
-		letter-spacing: -0.5px;
-	}
-
-	.pm-title.success-title { color: #10b981; }
-	.pm-title.error-title { color: #ef4444; }
-
-	.pm-desc {
-		color: #8b92ab;
-		font-size: 14px;
-		line-height: 1.6;
-		margin: 0 0 24px 0;
-	}
-
-	.pm-details {
-		background: rgba(255, 255, 255, 0.03);
-		border: 1px solid #1a1a1a;
-		border-radius: 12px;
-		padding: 16px;
-		margin-bottom: 24px;
-		text-align: left;
-	}
-
-	.pm-row {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 6px 0;
-	}
-
-	.pm-row + .pm-row {
-		border-top: 1px solid #1a1a1a;
-		margin-top: 6px;
-		padding-top: 12px;
-	}
-
-	.pm-row.highlight {
-		padding: 10px;
-		margin: 6px -8px 0;
-		background: rgba(249, 115, 22, 0.08);
-		border: 1px solid rgba(249, 115, 22, 0.25);
-		border-radius: 8px;
-	}
-
-	.pm-label {
-		color: #666;
-		font-size: 13px;
-	}
-
-	.pm-value {
+	.ev-sum-row.highlight {
+		border-top: 1px solid #111; margin-top: 4px; padding-top: 7px;
 		color: #ccc;
-		font-size: 13px;
-		font-weight: 600;
 	}
+	.orange { color: #F97316; font-weight: 700; }
 
+	/* Sticky action button */
+	.ev-action {
+		width: 100%; padding: 12px;
+		background: transparent; border: 1px solid #2a2a2a;
+		color: #666; font-size: 14px; font-weight: 700; border-radius: 9px;
+		cursor: not-allowed; transition: all 0.15s; letter-spacing: 0.02em;
+		user-select: none;
+	}
+	.ev-action.ev-action-enabled {
+		border-color: #F97316; color: #F97316; cursor: pointer;
+	}
+	.ev-action.ev-action-enabled:hover {
+		background: rgba(249,115,22,0.08); box-shadow: 0 0 16px rgba(249,115,22,0.1);
+	}
+	.ev-action:disabled { opacity: 0.4; }
+
+	/* ── MODALS ── */
+	.pm-overlay {
+		position: fixed; inset: 0;
+		background: rgba(0,0,0,0.8); backdrop-filter: blur(8px);
+		display: flex; align-items: center; justify-content: center;
+		z-index: 1001; animation: pmFadeIn 0.2s ease-out;
+	}
+	@keyframes pmFadeIn { from { opacity: 0; } to { opacity: 1; } }
+	.pm-modal {
+		background: #0a0a0a; border: 1px solid #222; border-radius: 18px;
+		padding: 32px 28px; max-width: 400px; width: 90vw;
+		text-align: center; animation: pmSlideUp 0.25s ease-out;
+	}
+	@keyframes pmSlideUp {
+		from { opacity: 0; transform: translateY(16px); }
+		to   { opacity: 1; transform: translateY(0); }
+	}
+	.pm-dot { width: 12px; height: 12px; border-radius: 50%; margin: 0 auto 18px; }
+	.pm-dot.pending { background: #F97316; box-shadow: 0 0 14px rgba(249,115,22,0.4); animation: pmPulse 2s ease-in-out infinite; }
+	@keyframes pmPulse { 0%,100% { opacity:1; } 50% { opacity:0.35; } }
+	.pm-title { color: #fff; font-size: 20px; font-weight: 700; margin: 0 0 10px; }
+	.pm-desc  { color: #aaa; font-size: 13px; line-height: 1.6; margin: 0 0 20px; }
+	.pm-details {
+		background: rgba(255,255,255,0.02); border: 1px solid #161616;
+		border-radius: 10px; padding: 14px; margin-bottom: 20px; text-align: left;
+	}
+	.pm-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; }
+	.pm-row + .pm-row { border-top: 1px solid #161616; margin-top: 5px; padding-top: 10px; }
+	.pm-row.highlight { padding: 8px; margin: 5px -6px 0; background: rgba(249,115,22,0.07); border: 1px solid rgba(249,115,22,0.2); border-radius: 7px; }
+	.pm-label { color: #999; font-size: 12.5px; }
+	.pm-value { color: #e8e8e8; font-size: 12.5px; font-weight: 600; }
 	.pm-value.highlight-value { color: #F97316; }
 	.pm-value.sl-value { color: #ef4444; }
 	.pm-value.tp-value { color: #10b981; }
-
-	.pm-actions {
-		display: flex;
-		gap: 12px;
-	}
-
+	.pm-actions { display: flex; gap: 10px; margin-top: 4px; }
 	.pm-btn {
-		flex: 1;
-		padding: 14px;
-		border: none;
-		border-radius: 12px;
-		font-size: 15px;
-		font-weight: 700;
-		cursor: pointer;
-		transition: all 0.2s;
-		letter-spacing: -0.3px;
+		flex: 1; padding: 12px; border: none; border-radius: 10px;
+		font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.15s;
 	}
+	.pm-btn.primary { background: #F97316; color: #000; }
+	.pm-btn.primary:hover:not(:disabled) { background: #ea580c; }
+	.pm-btn.primary:disabled { opacity: 0.6; cursor: not-allowed; }
+	.pm-btn.secondary { background: transparent; color: #aaa; border: 1px solid #2a2a2a; }
+	.pm-btn.secondary:hover { border-color: #444; color: #e8e8e8; }
 
-	.pm-btn.primary {
-		background: #F97316;
-		color: #000;
-		width: 100%;
-	}
-
-	.pm-btn.primary:hover:not(:disabled) {
-		background: #ea580c;
-	}
-
-	.pm-btn.primary:disabled {
-		opacity: 0.7;
-		cursor: not-allowed;
-	}
-
-	.pm-btn.secondary {
-		background: transparent;
-		color: #8b92ab;
-		border: 1px solid #2a2a2a;
-	}
-
-	.pm-btn.secondary:hover {
-		border-color: #444;
-		color: #ccc;
-	}
-
-	.pm-btn.success-btn {
-		background: transparent;
-		color: #10b981;
-		border: 1px solid #10b981;
-	}
-
-	.pm-btn.success-btn:hover {
-		background: rgba(16, 185, 129, 0.1);
-	}
-
-	.pm-btn.error-btn {
-		background: transparent;
-		color: #ef4444;
-		border: 1px solid #ef4444;
-	}
-
-	.pm-btn.error-btn:hover {
-		background: rgba(239, 68, 68, 0.1);
-	}
-
-	/* Advanced Settings (SL/TP) Styles */
-	.advanced-section {
-		display: flex;
-		flex-direction: column;
-		gap: 12px;
-	}
-
-	.advanced-header {
-		display: flex;
-		flex-direction: column;
-		gap: 2px;
-		padding-bottom: 8px;
-		border-bottom: 1px solid #2A2F45;
-	}
-
-	.advanced-title {
-		font-size: 13px;
-		font-weight: 600;
-		color: #E8E8E8;
-		letter-spacing: 0.01em;
-	}
-
-	.advanced-subtitle {
-		font-size: 11px;
-		color: #666666;
-		font-weight: 400;
-	}
-
-	.advanced-content {
-		display: flex;
-		flex-direction: column;
-		gap: 16px;
-	}
-
-	.sltp-grid {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 12px;
-	}
-
-	.sltp-input-group {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-	}
-
-	.sltp-label {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-	}
-
-	.sltp-label-text {
-		font-size: 12px;
-		font-weight: 600;
-		color: #A0A0A0;
-		text-transform: uppercase;
-		letter-spacing: 0.5px;
-	}
-
-	.sltp-label-badge {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		padding: 2px 6px;
-		border-radius: 3px;
-		font-size: 9px;
-		font-weight: 700;
-		letter-spacing: 0.5px;
-	}
-
-	.sl-badge {
-		background: rgba(255, 71, 87, 0.15);
-		color: #FF4757;
-		border: 1px solid rgba(255, 71, 87, 0.3);
-	}
-
-	.tp-badge {
-		background: rgba(0, 208, 132, 0.15);
-		color: #00D084;
-		border: 1px solid rgba(0, 208, 132, 0.3);
-	}
-
-	.sltp-input-wrapper {
-		position: relative;
-		display: flex;
-		align-items: center;
-	}
-
-	.sltp-input {
-		width: 100%;
-		background: #0A0E1A;
-		border: 1px solid #2A2F45;
-		border-radius: 4px;
-		padding: 8px 28px 8px 10px;
-		font-size: 15px;
-		font-weight: 600;
-		color: #E8E8E8;
-		font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
-		transition: all 200ms ease-out;
-	}
-
-	.sltp-input:focus {
-		outline: none;
-		border-color: #F97316;
-		background: #0F1421;
-	}
-
-	.sltp-input::placeholder {
-		color: #3A4055;
-		font-weight: 400;
-	}
-
-	.sltp-currency {
-		position: absolute;
-		right: 10px;
-		font-size: 12px;
-		font-weight: 600;
-		color: #666666;
-		pointer-events: none;
-	}
-
-	.sltp-description {
-		font-size: 10px;
-		color: #666666;
-		line-height: 1.3;
-	}
-
-	.sltp-active-summary {
-		display: flex;
-		flex-direction: column;
-		gap: 10px;
-		padding: 12px;
-		background: rgba(249, 115, 22, 0.05);
-		border: 1px solid rgba(249, 115, 22, 0.2);
-		border-radius: 4px;
-		margin-top: 4px;
-	}
-
-	.sltp-active-title {
-		font-size: 11px;
-		font-weight: 600;
-		color: #A0A0A0;
-		text-transform: uppercase;
-		letter-spacing: 0.5px;
-	}
-
-	.sltp-active-items {
-		display: flex;
-		gap: 12px;
-	}
-
-	.sltp-active-item {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		padding: 6px 10px;
-		background: rgba(0, 0, 0, 0.3);
-		border-radius: 4px;
-	}
-
-	.sltp-active-badge {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		padding: 2px 5px;
-		border-radius: 3px;
-		font-size: 9px;
-		font-weight: 700;
-		letter-spacing: 0.5px;
-	}
-
-	.sltp-active-value {
-		font-size: 14px;
-		font-weight: 700;
-		font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
-	}
-
-	.sl-item .sltp-active-value {
-		color: #FF4757;
-	}
-
-	.tp-item .sltp-active-value {
-		color: #00D084;
-	}
-
-	/* Modal SL/TP Styles */
-	.summary-divider {
-		height: 1px;
-		background: #2A2F45;
-		margin: 8px 0;
-	}
-
-	.summary-section-title {
-		font-size: 11px;
-		font-weight: 600;
-		color: #A0A0A0;
-		text-transform: uppercase;
-		letter-spacing: 0.5px;
-		margin-bottom: 8px;
-	}
-
-	.sltp-row {
-		background: rgba(249, 115, 22, 0.05);
-		border-left: 3px solid transparent;
-	}
-
-	.sl-row {
-		border-left-color: #FF4757;
-	}
-
-	.tp-row {
-		border-left-color: #00D084;
-	}
-
-	.sltp-row .summary-value {
-		font-weight: 700;
-	}
-
-	.sl-row .summary-value {
-		color: #FF4757;
-	}
-
-	.tp-row .summary-value {
-		color: #00D084;
-	}
-
-	/* Toast Notification */
+	/* ── TOAST ── */
 	.toast {
-		position: fixed;
-		top: 16px;
-		right: 16px;
-		z-index: 10000;
-		width: 320px;
-		background: #1a1a1a;
-		border: 1px solid #333;
-		border-radius: 4px;
-		padding: 12px 14px;
-		animation: toast-in 0.25s ease-out forwards;
+		position: fixed; top: 14px; right: 14px; z-index: 10000;
+		width: 300px; background: #111; border: 1px solid #222;
+		border-radius: 6px; padding: 11px 13px;
+		animation: toast-in 0.22s ease-out forwards;
+		box-shadow: 0 8px 32px rgba(0,0,0,0.5);
 	}
-
-	.toast.success {
-		border-left: 3px solid #00D084;
-	}
-
-	.toast.error {
-		border-left: 3px solid #FF4757;
-	}
-
-	.toast-header {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		margin-bottom: 6px;
-	}
-
-	.toast-icon {
-		font-size: 14px;
-		font-weight: 700;
-		line-height: 1;
-	}
-
-	.toast.success .toast-icon {
-		color: #00D084;
-	}
-
-	.toast.error .toast-icon {
-		color: #FF4757;
-	}
-
-	.toast-title {
-		font-size: 13px;
-		font-weight: 700;
-		letter-spacing: 0.03em;
-	}
-
-	.toast.success .toast-title {
-		color: #00D084;
-	}
-
-	.toast.error .toast-title {
-		color: #FF4757;
-	}
-
-	.toast-close {
-		margin-left: auto;
-		background: none;
-		border: none;
-		color: #666;
-		font-size: 18px;
-		line-height: 1;
-		cursor: pointer;
-		padding: 0 2px;
-	}
-
-	.toast-close:hover {
-		color: #fff;
-	}
-
-	.toast-msg {
-		font-size: 12px;
-		font-weight: 400;
-		color: #ccc;
-		line-height: 1.4;
-		margin: 0;
-		padding-left: 22px;
-	}
-
+	.toast.success { border-left: 3px solid #10b981; }
+	.toast.error   { border-left: 3px solid #ef4444; }
+	.toast-header  { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+	.toast-icon    { font-size: 13px; font-weight: 700; }
+	.toast.success .toast-icon  { color: #10b981; }
+	.toast.error   .toast-icon  { color: #ef4444; }
+	.toast-title   { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; }
+	.toast.success .toast-title { color: #10b981; }
+	.toast.error   .toast-title { color: #ef4444; }
+	.toast-close   { margin-left: auto; background: none; border: none; color: #777; font-size: 17px; cursor: pointer; padding: 0; line-height: 1; }
+	.toast-close:hover { color: #e8e8e8; }
+	.toast-msg     { font-size: 11.5px; color: #ccc; line-height: 1.4; margin: 0; padding-left: 20px; }
 	@keyframes toast-in {
-		from {
-			opacity: 0;
-			transform: translateX(20px);
-		}
-		to {
-			opacity: 1;
-			transform: translateX(0);
-		}
+		from { opacity: 0; transform: translateX(16px); }
+		to   { opacity: 1; transform: translateX(0); }
 	}
 
-	:global(.light-mode) .toast {
-		background: #fff;
-		border-color: #e0e0e0;
-	}
+	/* ── SCROLLBARS ── */
+	::-webkit-scrollbar { width: 3px; }
+	::-webkit-scrollbar-track { background: transparent; }
+	::-webkit-scrollbar-thumb { background: #1e1e1e; border-radius: 2px; }
+	::-webkit-scrollbar-thumb:hover { background: #333; }
 
-	:global(.light-mode) .toast-close {
-		color: #999;
+	/* ── RESPONSIVE ── */
+	@media (max-width: 960px) {
+		.ev-body { grid-template-columns: 190px 1fr; }
+		.ev-trade { display: none; }
 	}
-
-	:global(.light-mode) .toast-close:hover {
-		color: #333;
-	}
-
-	:global(.light-mode) .toast-msg {
-		color: #555;
+	@media (max-width: 640px) {
+		.ev-body { grid-template-columns: 1fr; }
+		.ev-sidebar { display: none; }
 	}
 </style>
