@@ -577,6 +577,7 @@
 							<th>Entry Price</th>
 							<th>Current Price</th>
 							<th>Closed Price</th>
+							<th>Closed At</th>
 							<th>SL</th>
 							<th>TP</th>
 							<th>P&L</th>
@@ -615,6 +616,13 @@
 									{/if}
 								</td>
 								<td>
+									{#if position.status === 'Closed' && position.closedAt}
+										<span class="date-cell">{position.closedAt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+									{:else}
+										<span class="text-muted">—</span>
+									{/if}
+								</td>
+								<td>
 									{#if position.stopLoss}
 										<span class="sltp-badge sl-badge">{position.stopLoss.toFixed(1)}¢</span>
 									{:else}
@@ -639,7 +647,12 @@
 								</td>
 								<td>
 									{#if position.status === 'Active'}
-										<button class="action-btn" on:click={() => sellPosition(position.id, position.currentPrice, position)}>Sell</button>
+										<div class="action-cell">
+											<button class="action-btn" on:click={() => sellPosition(position.id, position.currentPrice, position)}>Sell</button>
+											{#if isPositionPosted(position)}
+												<span class="posted-label">Posted</span>
+											{/if}
+										</div>
 									{:else if isPositionPosted(position)}
 										<span class="posted-label">Posted</span>
 									{:else}
@@ -1383,6 +1396,18 @@
 		background: #F97316;
 		color: #fff;
 		border-color: #F97316;
+	}
+
+	.date-cell {
+		font-size: 12px;
+		color: #9ca3af;
+		white-space: nowrap;
+	}
+
+	.action-cell {
+		display: flex;
+		align-items: center;
+		gap: 8px;
 	}
 
 	.posted-label {

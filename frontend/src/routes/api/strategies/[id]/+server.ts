@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { getUserFromSession } from '$lib/server/auth';
-import { supabase } from '$lib/supabase';
+import { supabaseAdmin as supabase } from '$lib/server/supabase';
 import type { RequestHandler } from './$types';
 
 /**

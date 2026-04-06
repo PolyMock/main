@@ -148,7 +148,8 @@ export class SessionKeyManager {
 	 */
 	async createSession(
 		wallet: any,
-		expiryMinutes: number = 60 * 24
+		expiryMinutes: number = 60 * 24,
+		topUpSol: number = 0.05
 	): Promise<{ sessionTokenPDA: PublicKey; sessionKeypair: Keypair }> {
 		if (!wallet || !wallet.publicKey) {
 			throw new Error('Wallet not connected');
@@ -172,8 +173,8 @@ export class SessionKeyManager {
 			Math.floor(Date.now() / 1000) + expiryMinutes * 60
 		);
 
-		// Top up the session signer with 0.05 SOL for tx fees + position account rent
-		const topUpLamports = new BN(50_000_000); // 0.05 SOL
+		// Top up the session signer with the chosen SOL amount for tx fees
+		const topUpLamports = new BN(Math.round(topUpSol * 1_000_000_000));
 
 		// Build instruction
 		const ix = buildCreateSessionInstruction(

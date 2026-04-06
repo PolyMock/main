@@ -34,6 +34,7 @@
 	let showSessionPrompt = false;
 	let showSessionActiveNotice = false;
 	let sessionLoading = false;
+	let sessionSolAmount = 0.05;
 	let showSessionDropdown = false;
 	let sessionBadgeElement: HTMLElement;
 	let showInitPopup = false;
@@ -87,7 +88,7 @@
 		if (!walletState.connected || !walletState.adapter) return;
 		sessionLoading = true;
 		try {
-			await sessionKeyManager.createSession(walletState.adapter);
+			await sessionKeyManager.createSession(walletState.adapter, 60 * 24, sessionSolAmount);
 			sessionActive = true;
 			checkSessionStatus();
 			showSessionPrompt = false;
@@ -392,7 +393,9 @@
 
 <div class="navbar">
 	<a href="/" class="logo">
-		<img src={hashfoxLogo} alt="HashFox Labs Logo" class="logo-img" />
+		<div class="logo-img-wrap">
+			<img src={hashfoxLogo} alt="HashFox Labs Logo" class="logo-img" />
+		</div>
 		<div class="logo-text">
 			<span class="logo-title">POLYMOCK</span>
 			<span class="logo-subtitle">by Hash<span class="fox-text">Fox</span> Labs</span>
@@ -647,34 +650,66 @@
 	</div>
 {/if}
 
-<!-- Session delegation prompt (mandatory — no skip) -->
+<!-- Session delegation prompt -->
 {#if showSessionPrompt}
 	<div class="session-overlay" on:keydown={(e) => e.key === 'Escape' && e.preventDefault()} role="dialog" tabindex="0">
 		<div class="session-modal" on:click|stopPropagation on:keydown|stopPropagation role="dialog" tabindex="-1">
 			<div class="session-status-dot pending"></div>
 			<h3 class="session-title">Enable One-Click Trading</h3>
 			<p class="session-desc">
-				Sign once to delegate trading to a temporary session key. All trades will execute instantly without wallet popups.
+				A <strong>session key</strong> is a temporary wallet funded with a small amount of SOL that signs trades on your behalf — so you never see a wallet popup mid-trade. It lives for 24 hours and can be revoked anytime. Your main wallet stays in full control.
 			</p>
+
+			<div class="session-sol-input-block">
+				<label class="session-sol-label" for="sessionSol">
+					SOL to fund session
+					<span class="session-sol-hint">Min 0.01 · Recommended 0.05–0.2</span>
+				</label>
+				<div class="session-sol-row">
+					<input
+						id="sessionSol"
+						type="number"
+						min="0.01"
+						max="2"
+						step="0.01"
+						bind:value={sessionSolAmount}
+						class="session-sol-field"
+					/>
+					<span class="session-sol-unit">SOL</span>
+				</div>
+				<p class="session-trade-estimate">
+					≈ <strong>{Math.floor(sessionSolAmount / 0.002)}</strong> trades at average network fees (~0.002 SOL/trade)
+				</p>
+			</div>
+
 			<div class="session-details">
 				<div class="session-detail-row">
 					<span class="detail-label">Duration</span>
 					<span class="detail-value">24 hours</span>
 				</div>
 				<div class="session-detail-row">
-					<span class="detail-label">Session fee</span>
-					<span class="detail-value">0.05 SOL</span>
+					<span class="detail-label">Funded amount</span>
+					<span class="detail-value">{sessionSolAmount.toFixed(3)} SOL</span>
 				</div>
 				<div class="session-detail-row">
 					<span class="detail-label">Revocable</span>
 					<span class="detail-value">Anytime</span>
 				</div>
+				<div class="session-detail-row">
+					<span class="detail-label">Unused SOL</span>
+					<span class="detail-value">Returned on revoke</span>
+				</div>
 			</div>
-			<button class="session-primary-btn enable-btn" on:click={enableSession} disabled={sessionLoading}>
+
+			<button
+				class="session-primary-btn enable-btn"
+				on:click={enableSession}
+				disabled={sessionLoading || sessionSolAmount < 0.01}
+			>
 				{#if sessionLoading}
 					Signing...
 				{:else}
-					Enable One-Click Trading
+					Fund & Enable Session
 				{/if}
 			</button>
 		</div>
@@ -711,11 +746,21 @@
 		gap: 8px;
 	}
 
+	.logo-img-wrap {
+		width: 44px;
+		height: 44px;
+		overflow: hidden;
+		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
 	.logo-img {
-		width: 56px;
-		height: 56px;
+		width: 130px;
+		height: 130px;
 		object-fit: contain;
-		margin: -8px 0;
+		flex-shrink: 0;
 	}
 
 	.logo:hover {
@@ -1049,6 +1094,69 @@
 
 	.session-title.active-title {
 		color: #10b981;
+	}
+
+	.session-sol-input-block {
+		margin: 16px 0;
+		background: rgba(249, 115, 22, 0.05);
+		border: 1px solid rgba(249, 115, 22, 0.2);
+		border-radius: 10px;
+		padding: 14px 16px;
+	}
+
+	.session-sol-label {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		font-size: 13px;
+		font-weight: 600;
+		color: #e8e8e8;
+		margin-bottom: 8px;
+	}
+
+	.session-sol-hint {
+		font-size: 11px;
+		font-weight: 400;
+		color: #666;
+	}
+
+	.session-sol-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.session-sol-field {
+		flex: 1;
+		background: #0a0a0a;
+		border: 1px solid #333;
+		border-radius: 8px;
+		padding: 8px 12px;
+		color: #fff;
+		font-size: 16px;
+		font-weight: 600;
+		outline: none;
+		transition: border-color 0.2s;
+	}
+
+	.session-sol-field:focus {
+		border-color: #F97316;
+	}
+
+	.session-sol-unit {
+		font-size: 14px;
+		font-weight: 600;
+		color: #F97316;
+	}
+
+	.session-trade-estimate {
+		margin: 8px 0 0;
+		font-size: 12px;
+		color: #8b92ab;
+	}
+
+	.session-trade-estimate strong {
+		color: #F97316;
 	}
 
 	.session-desc {
@@ -1665,9 +1773,14 @@
 			padding: 12px 16px;
 		}
 
-		.logo-img {
+		.logo-img-wrap {
 			width: 32px;
 			height: 32px;
+		}
+
+		.logo-img {
+			width: 95px;
+			height: 95px;
 		}
 
 		.logo-title {

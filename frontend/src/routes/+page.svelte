@@ -111,38 +111,19 @@
 	async function fetchNews() {
 		newsLoading = true;
 		try {
-			const response = await fetch('/api/news?lang=EN');
-
-			if (!response.ok) {
-				const errorData = await response.json().catch(() => null);
-				console.error('Failed to fetch news:', {
-					status: response.status,
-					statusText: response.statusText,
-					error: errorData
-				});
-				throw new Error(errorData?.details || `HTTP ${response.status}: ${response.statusText}`);
-			}
-
+			const response = await fetch('/api/newsdata?category=top&language=en');
+			if (!response.ok) throw new Error(`HTTP ${response.status}`);
 			const data = await response.json();
-
-			// Check if there's an error in the response
-			if (data.error) {
-				console.error('News API returned error:', data);
-				throw new Error(data.details || data.error);
-			}
-
-			if (data.Data && data.Data.length > 0) {
-				news = data.Data.slice(0, 10);
-			} else {
-				console.warn('No news data received from API');
-				news = [];
-			}
+			if (data.error) throw new Error(data.error);
+			// Map newsdata.io format to the shape the template uses
+			news = (data.results || []).slice(0, 20).map((a: any) => ({
+				title: a.title,
+				url: a.link,
+				source: a.source_id,
+				published_on: a.pubDate ? Math.floor(new Date(a.pubDate).getTime() / 1000) : Math.floor(Date.now() / 1000),
+			}));
 		} catch (error) {
 			console.error('Error fetching news:', error);
-			console.error('Full error details:', {
-				message: error instanceof Error ? error.message : 'Unknown error',
-				stack: error instanceof Error ? error.stack : undefined
-			});
 			news = [];
 		} finally {
 			newsLoading = false;
@@ -372,7 +353,7 @@
 		<!-- News Panel -->
 		<div class="panel news-panel">
 			<div class="panel-header">
-				<span>TOP NEWS - CRYPTO</span>
+				<span>LATEST NEWS</span>
 				{#if !newsLoading && news.length > 7}
 					<button class="news-toggle" on:click={() => showAllNews = !showAllNews}>
 						{showAllNews ? '▲ COLLAPSE' : '▼ SHOW ALL'}
@@ -381,7 +362,7 @@
 			</div>
 			<div class="news-list">
 				{#if newsLoading}
-					<div class="loading-state">Loading news from CryptoCompare API...</div>
+					<div class="loading-state">Loading news...</div>
 				{:else if news.length === 0}
 					<div class="error-state">Failed to load news. Check console for details.</div>
 				{:else}

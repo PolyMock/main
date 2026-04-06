@@ -1259,7 +1259,6 @@ export default function CommunityPage() {
   // Build user profiles from ALL users + their trades
   useEffect(() => {
     async function buildProfiles() {
-      // Fetch all users
       const { data: users } = await supabase
         .from("users")
         .select("id, username, wallet_address, avatar_url, banner_url")
@@ -1267,16 +1266,12 @@ export default function CommunityPage() {
 
       if (!users || users.length === 0) return;
 
-      // Map trades by username
       const tradeMap = new Map<string, SharedTrade[]>();
       for (const t of dbTrades) {
         if (!t.isFromDb) continue;
         const existing = tradeMap.get(t.username);
-        if (existing) {
-          existing.push(t);
-        } else {
-          tradeMap.set(t.username, [t]);
-        }
+        if (existing) existing.push(t);
+        else tradeMap.set(t.username, [t]);
       }
 
       const profileList: UserProfile[] = [];
@@ -1289,7 +1284,6 @@ export default function CommunityPage() {
         const totalPnl = pnls.length > 0 ? pnls.reduce((a, b) => a + b, 0) / pnls.length : 0;
         const wins = trades.filter((t) => t.pnl > 0).length;
         const winRate = trades.length > 0 ? (wins / trades.length) * 100 : 0;
-
         profileList.push({
           id: u.id,
           username: u.username,
@@ -1307,6 +1301,7 @@ export default function CommunityPage() {
     }
     buildProfiles();
   }, [dbTrades]);
+
 
   // Merge real + mock data (real first)
   const allTrades = useMemo(() => [...dbTrades, ...mockTrades], [dbTrades]);

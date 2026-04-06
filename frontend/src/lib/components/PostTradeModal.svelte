@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { supabase } from '$lib/supabase';
 	import { walletStore } from '$lib/wallet/stores';
 	import { get } from 'svelte/store';
 
@@ -37,52 +36,26 @@
 
 		posting = true;
 
-		const { data: user } = await supabase
-			.from('users')
-			.select('id')
-			.eq('wallet_address', wallet)
-			.maybeSingle();
-
-		if (!user) {
-			error = 'User not found. Set up your username first.';
-			posting = false;
-			return;
-		}
-
-		const { data: existing } = await supabase
-			.from('trades')
-			.select('id')
-			.eq('user_id', user.id)
-			.eq('market_id', trade.marketId)
-			.eq('position_type', trade.positionType)
-			.eq('entry_price', trade.entryPrice)
-			.maybeSingle();
-
-		if (existing) {
-			error = 'This trade has already been posted.';
-			posting = false;
-			return;
-		}
-
-		const { error: insertErr } = await supabase.from('trades').insert({
-			user_id: user.id,
-			source: 'polymock',
-			position_type: trade.positionType,
-			entry_price: trade.entryPrice,
-			exit_price: trade.exitPrice || null,
-			amount: trade.amount,
-			pnl: trade.pnl || null,
-			market_id: trade.marketId,
-			market_title: trade.marketName,
-			platform: 'polymarket',
-			status: trade.status === 'closed' ? 'closed' : 'open',
-			analysis: analysis.trim() || null,
-			is_published: true,
-			opened_at: new Date().toISOString()
+		const res = await fetch('/api/trades', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				positionType: trade.positionType,
+				entryPrice: trade.entryPrice,
+				exitPrice: trade.exitPrice,
+				amount: trade.amount,
+				pnl: trade.pnl,
+				marketId: trade.marketId,
+				marketName: trade.marketName,
+				status: trade.status,
+				analysis: analysis.trim() || null,
+			}),
 		});
 
-		if (insertErr) {
-			error = insertErr.message;
+		const result = await res.json();
+
+		if (!res.ok) {
+			error = result.error || 'Failed to post trade.';
 			posting = false;
 			return;
 		}
