@@ -54,7 +54,7 @@ polymock/
 │   │   └── src/lib.rs       # On-chain program
 │   └── Anchor.toml
 │
-└── landing/                 # Next.js landing page
+└── landing/                 # Next.js marketing site (static export, Cloudflare Pages)
     └── package.json
 ```
 
@@ -66,7 +66,7 @@ polymock/
 | Backtest Engine | Rust, Axum, Polars | Fly.io | `polymock-backtest.fly.dev` |
 | Bot Service | Node.js, TypeScript | Fly.io | `polymock-bot.fly.dev` |
 | Smart Contracts | Rust, Anchor | Solana MagicBlock | Program ID below |
-| Landing Page | Next.js, React | Vercel | — |
+| Landing Page | Next.js, React | Cloudflare Pages | — |
 
 **Program ID:** `6a5sw2ZVXkAqPF5F8jSvBFVWZSBenaMGnRjnhPoVD31Z`
 

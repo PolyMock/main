@@ -1,18 +1,16 @@
-import Header from "@/components/Header";
-import Footer from "@/components/Footer";
+import type { Metadata } from "next";
+import CommunityChrome from "@/components/landing/CommunityChrome";
 import ProfilePageWrapper from "@/components/community/ProfilePageWrapper";
 
-export const metadata = {
+export const metadata: Metadata = {
   title: "Profile - HashFox Labs",
   description: "User profile on HashFox Labs community.",
 };
 
-export default function ProfilePage() {
+export default function ProfileRoute() {
   return (
-    <main className="bg-black min-h-screen">
-      <Header />
+    <CommunityChrome>
       <ProfilePageWrapper />
-      <Footer />
-    </main>
+    </CommunityChrome>
   );
 }
