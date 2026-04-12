@@ -1,5 +1,8 @@
 import * as THREE from "three";
+import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+
+const DRACO_DECODER = "https://www.gstatic.com/draco/versioned/decoders/1.5.6/";
 
 export function initFoxScene(): void {
 const el = document.getElementById("fox-canvas");
@@ -48,7 +51,10 @@ let prevMouse = { x: 0, y: 0 };
 let rotVel = { x: 0, y: 0 };
 
 const loader = new GLTFLoader();
-loader.load('/fox.glb', (gltf) => {
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath(DRACO_DECODER);
+loader.setDRACOLoader(dracoLoader);
+loader.load("/fox.glb", (gltf) => {
     fox = gltf.scene;
 
     const box = new THREE.Box3().setFromObject(fox);

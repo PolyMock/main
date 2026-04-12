@@ -1,5 +1,8 @@
 import * as THREE from "three";
+import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+
+const DRACO_DECODER = "https://www.gstatic.com/draco/versioned/decoders/1.5.6/";
 
 export function initGearScene(): void {
 const gearEl = document.getElementById("gear-canvas");
@@ -54,7 +57,11 @@ let prevMouse = { x: 0, y: 0 };
 let rotVel = { x: 0, y: 0 };
 
 const loader = new GLTFLoader();
-loader.load('/gear.glb',
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath(DRACO_DECODER);
+loader.setDRACOLoader(dracoLoader);
+loader.load(
+    "/gear.glb",
     (gltf) => {
         gear = gltf.scene;
 
