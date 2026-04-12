@@ -225,86 +225,63 @@ export default function LandingPage() {
       <div id="content">
         <section id="faq-section" className="content-section">
           <div className="section-inner">
-            <div
-              className="section-header reveal"
-              style={{ textAlign: "center", marginBottom: "4rem" }}
-            >
-              <h2
-                style={{
-                  fontSize: "clamp(2rem,5vw,3rem)",
-                  fontWeight: 700,
-                  color: "#f97316",
-                  marginBottom: "1rem",
-                }}
-              >
-                Frequently Asked Questions
-              </h2>
-              <p style={{ fontSize: "1.125rem", color: "#ffffff" }}>
-                Everything you need to know about us
-              </p>
+            <div className="section-header reveal faq-section-header">
+              <h2 className="faq-heading">Frequently Asked Questions</h2>
+              <p className="faq-subtitle">Everything you need to know about us</p>
             </div>
             <div className="faq-list">
               <details>
                 <summary>What is HashFox Labs?</summary>
                 <div className="faq-answer">
-                  HashFox Labs is a product studio focused on building trading and DeFi products. We
-                  develop our own platforms like Polymock and Blockberg, build custom products for
-                  clients across various ecosystems, and regularly ship projects at hackathons.
-                </div>
-              </details>
-              <details>
-                <summary>What is Polymock?</summary>
-                <div className="faq-answer">
-                  Polymock is our paper trading and backtesting platform for prediction markets. It
-                  uses historical data from Polymarket to let you test your market intuition and
-                  trading strategies in a zero-risk environment.
-                </div>
-              </details>
-              <details>
-                <summary>What is Blockberg?</summary>
-                <div className="faq-answer">
-                  Blockberg is our paper trading and backtesting platform for crypto markets. Trade
-                  live crypto data with zero risk and backtest your strategies on historical market
-                  data across various crypto assets.
+                  HashFox Labs started as a product studio: we built trading and DeFi software for
+                  clients and side experiments. Today most of our effort goes into our own trading
+                  sandbox—paper trading and backtesting across prediction markets, crypto, forex, and
+                  stocks, with execution anchored on Solana. We still take on select client work and
+                  occasionally ship standalone tools or hackathon builds, but that sandbox is the core
+                  of what we do now.
                 </div>
               </details>
               <details>
                 <summary>Is it free to use?</summary>
                 <div className="faq-answer">
-                  Yes! Our core backtesting and paper trading features are free to use. You can also
-                  unlock premium features and participate in prizepool competitions to earn rewards
-                  while testing your skills against other traders.
+                  Core paper trading and onboarding are free. The backtest engine will use credits for
+                  heavy or high-volume runs. Optional prizepools: we take 3% of the pool; the rest goes
+                  to players. Premium add-ons may appear later—you can still explore plenty for free.
                 </div>
               </details>
               <details>
                 <summary>Do I need to connect a wallet?</summary>
                 <div className="faq-answer">
-                  A Solana wallet is required for on-chain paper trading, as your virtual balance is
-                  stored in PDA accounts on Solana. However, no wallet is needed for backtesting —
-                  you can test strategies on historical data without connecting anything.
+                  On-chain paper trading needs a Solana address: use a browser wallet (e.g. Phantom,
+                  Solflare) or quick login with an embedded wallet. Balances stay in on-chain PDAs
+                  either way. Backtesting on historical data needs no wallet or sign-in.
                 </div>
               </details>
               <details>
                 <summary>What data sources do you use?</summary>
                 <div className="faq-answer">
-                  We use Dome API and Polymarket API for prediction markets data, Pyth Network and
-                  TradingView for crypto assets, and Twelve Data for forex, stocks, and commodities.
+                  Prediction markets: Synthesis for live data; backtests use our historical datasets.
+                  Crypto: Pyth and TradingView. Forex, stocks, commodities: Twelve Data.
                 </div>
               </details>
               <details>
                 <summary>Can I test my own trading strategies?</summary>
                 <div className="faq-answer">
-                  Yes! You can currently define custom strategies with entry/exit rules and risk
-                  management parameters. We&apos;re also working on v3, where you&apos;ll simply
-                  describe your strategy in a prompt and our engine will handle the rest.
+                  Yes. Today you build strategies as rules: when to enter and exit, how size positions,
+                  and basic risk settings (stops, limits, exposure). You run them against historical data
+                  in the backtester or forward-test in paper trading, then iterate. We&apos;re building
+                  v3 so you can describe what you want in natural language—our engine will translate
+                  that into executable logic— but rule-based authoring remains the foundation.
                 </div>
               </details>
               <details>
                 <summary>What is the main goal?</summary>
                 <div className="faq-answer">
-                  Our vision is to build a unified sandbox platform where you can backtest and
-                  paper-trade any market — crypto, prediction markets, forex, stocks — all in one
-                  place before going live. One platform, one balance, every market.
+                  Our vision is a single sandbox where you can backtest and paper trade crypto,
+                  prediction markets, forex, and stocks in one place, with one balance across every
+                  market, before you risk real capital. When you are ready, we plan to offer a live
+                  trading platform so you can deploy the same ideas with real money after you have
+                  proven them in the sandbox.
                 </div>
               </details>
             </div>

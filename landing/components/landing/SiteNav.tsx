@@ -24,7 +24,7 @@ export default function SiteNav() {
           <span>HashFox Labs</span>
         </Link>
         <nav className="nav-links">
-          <a href={isHome ? "#how-section" : "/#how-section"}>Custom</a>
+          <a href={isHome ? "#how-section" : "/#how-section"}>How it works</a>
           <a href={isHome ? "#faq-section" : "/#faq-section"}>FAQ</a>
           <a
             href="#"
