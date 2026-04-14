@@ -344,7 +344,7 @@ export class PolymarketClient {
   /**
    * Searches for events across all categories
    */
-  async searchAllEvents(limit: number = 200): Promise<PolyEvent[]> {
+  async searchAllEvents(limit: number = 500): Promise<PolyEvent[]> {
     try {
       const fetchConfigs = [
         { active: true, closed: false },
@@ -388,6 +388,69 @@ export class PolymarketClient {
       console.error('Error searching all events:', error);
       return [];
     }
+  }
+
+  /**
+   * Resolve an event by slug: main feed slice, merged active/closed buckets (same as search),
+   * then paginated scans for direct links / low-volume events.
+   */
+  async findEventBySlug(slug: string): Promise<PolyEvent | null> {
+    if (!slug) return null;
+
+    let batch = await this.fetchEvents(100, false, 0);
+    let hit = batch.find(e => e.slug === slug);
+    if (hit) return hit;
+
+    batch = await this.searchAllEvents(500);
+    hit = batch.find(e => e.slug === slug);
+    if (hit) return hit;
+
+    return await this.scanEventsForSlugPaginated(slug);
+  }
+
+  /** Extra pages after searchAllEvents(500) — offset 500+ per active/closed bucket. */
+  private async scanEventsForSlugPaginated(slug: string): Promise<PolyEvent | null> {
+    const pageSize = 200;
+    const extraPages = 12;
+    const configs = [
+      { active: true, closed: false },
+      { active: false, closed: true },
+      { active: true, closed: true }
+    ];
+
+    for (const config of configs) {
+      for (let page = 0; page < extraPages; page++) {
+        const offset = 500 + page * pageSize;
+        try {
+          const response = await axios.get(`${this.baseURL}/events`, {
+            params: {
+              limit: pageSize,
+              offset,
+              active: config.active,
+              closed: config.closed
+            }
+          });
+
+          const rows = response.data;
+          if (!Array.isArray(rows) || rows.length === 0) break;
+
+          for (const ev of rows as PolyEvent[]) {
+            if (ev.slug === slug) {
+              if (ev.markets) {
+                ev.markets.forEach(market => this.processMarketTokens(market));
+              }
+              return ev;
+            }
+          }
+
+          if (rows.length < pageSize) break;
+        } catch {
+          break;
+        }
+      }
+    }
+
+    return null;
   }
 
   /**

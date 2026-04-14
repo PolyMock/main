@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { HermesClient } from '@pythnetwork/hermes-client';
 	import { polymarketClient, type PolyMarket, type PolyEvent } from '$lib/polymarket';
+	import { stashEventForRoute } from '$lib/navigation/event-bootstrap';
 	import NewsTicker from '$lib/components/NewsTicker.svelte';
 	import polydataLogo from '$lib/assets/polydata.svg';
 
@@ -64,8 +65,7 @@
 		try {
 			// Use the new searchAllEvents method to get comprehensive results
 			// This searches across active, closed, and all events
-			// @ts-ignore - searchAllEvents exists but TypeScript may not have picked it up yet
-			const allEvents = await polymarketClient.searchAllEvents(200);
+			const allEvents = await polymarketClient.searchAllEvents();
 
 			// Filter the results based on search query
 			const query_lower = query.toLowerCase();
@@ -235,7 +235,7 @@
 	}
 
 	function selectEvent(event: PolyEvent) {
-		// Navigate to event detail page
+		stashEventForRoute(event);
 		goto(`/event/${event.slug}`);
 	}
 

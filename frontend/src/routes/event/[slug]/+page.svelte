@@ -4,6 +4,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { polymarketClient, type PolyEvent, type PolyMarket } from '$lib/polymarket';
+	import { takeStashedEventForSlug } from '$lib/navigation/event-bootstrap';
 	import { walletStore, refreshUserBalance } from '$lib/wallet/stores';
 	import { polymarketService } from '$lib/solana/polymarket-service';
 	import { sessionKeyManager } from '$lib/solana/session-keys';
@@ -91,9 +92,18 @@
 		loading = true;
 		error = false;
 		try {
-			// Fetch all events WITHOUT prices first (fast)
-			const events = await polymarketClient.fetchEvents(100, false);
-			event = events.find(e => e.slug === slug) || null;
+			const routeSlug = slug?.trim() ?? '';
+			if (!routeSlug) {
+				error = true;
+				return;
+			}
+
+			const stashed = takeStashedEventForSlug(routeSlug);
+			if (stashed && stashed.slug === routeSlug) {
+				event = stashed;
+			} else {
+				event = await polymarketClient.findEventBySlug(routeSlug);
+			}
 
 			if (!event) {
 				error = true;
