@@ -26,7 +26,7 @@
 	let trading = false;
 	let walletState = $walletStore;
 	let showInfoView: 'markets' | 'info' = 'markets'; // Toggle between markets and rules/comments
-	let centerTab: 'orderbook' | 'chart' | 'info' = 'orderbook';
+	let centerTab: 'orderbook' | 'chart' | 'info' = 'chart';
 	let showSLTP = false;
 
 	// Stop Loss / Take Profit
